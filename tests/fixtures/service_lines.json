@@ -1,0 +1,218 @@
+[
+ {
+  "line": "more: query 5c1e7a90",
+  "body": {
+   "fetch": [
+    "5c1e7a90"
+   ]
+  }
+ },
+ {
+  "line": "more: query 5c1e7a90 depth=all",
+  "body": {
+   "fetch": [
+    "5c1e7a90"
+   ],
+   "depth": "all"
+  }
+ },
+ {
+  "line": "more: query 5c1e7a90@2",
+  "body": {
+   "fetch": [
+    {
+     "ref": "5c1e7a90",
+     "revision": 2
+    }
+   ]
+  }
+ },
+ {
+  "line": "more: query 'Weekly sync'",
+  "body": {
+   "fetch": [
+    "Weekly sync"
+   ]
+  }
+ },
+ {
+  "line": "more: query 'It'\\''s done'",
+  "body": {
+   "fetch": [
+    "It's done"
+   ]
+  }
+ },
+ {
+  "line": "more: query '=sum'",
+  "body": {
+   "fetch": [
+    "=sum"
+   ]
+  }
+ },
+ {
+  "line": "more: query 5c1e7a90 max_bytes=65536 workspace_id=wsp_1a2b3c4d",
+  "body": {
+   "fetch": [
+    "5c1e7a90"
+   ],
+   "max_bytes": 65536,
+   "workspace_id": "wsp_1a2b3c4d"
+  }
+ },
+ {
+  "line": "more: query status=open,in_progress limit=5 cursor=AXicDYy7DoMwDAD_xXOo",
+  "body": {
+   "fields": {
+    "status": [
+     "open",
+     "in_progress"
+    ]
+   },
+   "limit": 5,
+   "cursor": "AXicDYy7DoMwDAD_xXOo"
+  }
+ },
+ {
+  "line": "more: query changed_days=30",
+  "body": {
+   "fields": {
+    "changed_days": "30"
+   }
+  }
+ },
+ {
+  "line": "more: query proposal=proposed,deferred",
+  "body": {
+   "fields": {
+    "proposal": [
+     "proposed",
+     "deferred"
+    ]
+   }
+  }
+ },
+ {
+  "line": "more: query kind=context state=active",
+  "body": {
+   "fields": {
+    "kind": "context",
+    "state": "active"
+   }
+  }
+ },
+ {
+  "line": "more: query linked=2f9b3c4e",
+  "body": {
+   "fields": {
+    "linked": "2f9b3c4e"
+   }
+  }
+ },
+ {
+  "line": "more: query 'text=a, b'",
+  "body": {
+   "fields": {
+    "text": "a, b"
+   }
+  }
+ },
+ {
+  "line": "more: query 'text=costs $5 `now` * ? [x] !; | & # ~'",
+  "body": {
+   "fields": {
+    "text": "costs $5 `now` * ? [x] !; | & # ~"
+   }
+  }
+ },
+ {
+  "line": "more: query 'text=naïve café — ünïcode'",
+  "body": {
+   "fields": {
+    "text": "naïve café — ünïcode"
+   }
+  }
+ },
+ {
+  "line": "more: query 'about=hook drain'",
+  "body": {
+   "about": "hook drain"
+  }
+ },
+ {
+  "line": "more: query 'about=what'\\''s \"quoted\" \\ here'",
+  "body": {
+   "about": "what's \"quoted\" \\ here"
+  }
+ },
+ {
+  "line": "more: query receipt=w-3f9a2c41d0",
+  "body": {
+   "receipt": "w-3f9a2c41d0"
+  }
+ },
+ {
+  "line": "more: query status=open sort=-changed limit=50",
+  "body": {
+   "fields": {
+    "status": "open"
+   },
+   "sort": "-changed",
+   "limit": 50
+  }
+ },
+ {
+  "line": "more: status 'task=fix the webhook retry bug' max_bytes=65536",
+  "body": {
+   "task": "fix the webhook retry bug",
+   "max_bytes": 65536
+  }
+ },
+ {
+  "line": "more: status max_bytes=8192",
+  "body": {
+   "max_bytes": 8192
+  }
+ },
+ {
+  "line": "decide with: review c4a1e902@1 ACTION --reason REASON",
+  "refused": true
+ },
+ {
+  "line": "confirm one: write link b38e6f05@1 contributes_to 2f9b3c4e@7",
+  "write": {
+   "expect": {
+    "b38e6f05": 1,
+    "2f9b3c4e": 7
+   },
+   "operations": [
+    {
+     "op": "link.create",
+     "data": {
+      "type": "contributes_to",
+      "from": "b38e6f05",
+      "to": "2f9b3c4e"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "line": "attach with: write new 'report 1.pdf' --upload upload_7e8f9a0b1c2d4e5f8a9b0c1d2e3f4a5b",
+  "write": {
+   "operations": [
+    {
+     "op": "item.create",
+     "ref": "new",
+     "data": {
+      "title": "report 1.pdf",
+      "uploads": [
+       "upload_7e8f9a0b1c2d4e5f8a9b0c1d2e3f4a5b"
+      ]
+     }
+    }
+   ]
+  }
+ }
+]

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wirk"
+version = "0.3.0"
+description = "The wirk command: status, query, write and review for people and agents in a WIRK wirkspace"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.27,<1"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pyyaml>=6"]
+
+[project.urls]
+Homepage = "https://wirk.life"
+
+[project.scripts]
+wirk = "wirk_cli.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wirk_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

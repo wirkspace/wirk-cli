@@ -1,0 +1,134 @@
+"""Help is short and runnable; the wording, privacy and v2-only rules hold for every text the clients carry."""
+
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from wirk_cli import cli
+
+ROOT = Path(__file__).parent.parent
+COMMANDS = ["status", "query", "write", "review", "show", "upload", "download", "login", "admin"]
+
+
+def help_of(capsys, *argv):
+    assert cli.main([*argv, "--help"]) == 0
+    return capsys.readouterr().out
+
+
+def test_main_help_is_the_whole_entry_point(capsys):
+    text = help_of(capsys)
+    lines = text.rstrip("\n").split("\n")
+    assert len(lines) <= 25 and "Start with: wirk status" in text
+    assert lines[2].startswith("WIRK keeps people and agents aligned")
+
+
+@pytest.mark.parametrize("command", COMMANDS)
+def test_each_command_help_is_short(capsys, command):
+    text = help_of(capsys, command)
+    assert len(text.rstrip("\n").split("\n")) <= (35 if command in ("write", "admin") else 25)
+    assert "accept|reject|defer" not in text
+
+
+def examples(text):
+    """The runnable part of each help line: `wirk …`, or the first column of an indented example line."""
+    found = re.findall(r"^(?!usage:).*?(wirk [^\n]+?)(?:\s{2,}|$)", text, re.M)
+    found += ["wirk " + re.split(r"\s{2,}", line.strip())[0] for line in text.split("\n")
+              if line.startswith("  ") and not line.startswith("   ") and not line.strip().startswith(("-", "{", "["))]
+    return [line for line in found if "…" not in line and "|" not in line]
+
+
+@pytest.mark.parametrize("shell", ["/bin/sh", "zsh"])
+def test_help_examples_through_sh_and_zsh(capsys, shell):
+    for line in examples(help_of(capsys)):
+        result = subprocess.run([shell, "-c", "printf '%s\\0' " + line[5:]], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0 and ["wirk", *result.stdout.split("\0")[:-1]] == shlex.split(line), line
+
+
+def test_retired_commands_name_their_replacement(capsys):
+    assert cli.main(["read", "5c1e7a90"]) == 2
+    assert "wirk query" in capsys.readouterr().err
+
+
+def test_help_is_fast():
+    times = []
+    for _ in range(5):
+        start = time.perf_counter()
+        subprocess.run([sys.executable, "-c", "import sys; from wirk_cli import cli; cli.main(['--help']); "
+                        "assert 'httpx' not in sys.modules"], check=True, capture_output=True)
+        times.append(time.perf_counter() - start)
+    assert sorted(times)[2] < 0.5  # a cold interpreter included; the CLI's own share is measured in the record
+
+
+WORDING = [r"\bworkspace\b(?!_id|-id)", r"\bwork item", r"kind=wirk", r"· wirk ·", r"\bsteward", r"\bnote\b(?= kind)"]
+
+
+def agent_text(capsys):
+    yield help_of(capsys)
+    for command in COMMANDS:
+        if command != "admin":
+            yield help_of(capsys, command)
+    yield (ROOT / "README.md").read_text()
+
+
+def test_wording(capsys):
+    for text in agent_text(capsys):
+        for pattern in WORDING:
+            assert not re.search(pattern, text), (pattern, text[:200])
+
+
+# Written in pieces so this file never matches its own patterns.
+PRIVATE = ["/Us" "ers/", r"/home/[a-z]", r"\b(?:wsp|item|change|proposal|link|acc)_[0-9a-f]{32}\b", "Co-Auth" "ored-By",
+           "Cla" "ude(?! Code)", "Anthr" "opic", r"\bOpus\b", r"\bSonnet\b", r"\bFable\b", r"\bGPT-?\d",
+           r"[A-Za-z0-9._%+-]+@(?![A-Za-z0-9.-]*(?:example\.|wirk\.life|users\.noreply\.github\.com))[A-Za-z0-9.-]+\.[a-z]{2,}"]
+
+
+def history(root: Path) -> str:
+    """Each commit's author and message; the files themselves are scanned one by one."""
+    return subprocess.run(["git", "-C", str(root), "log", "--all", "--format=%an %ae%n%B"],
+                          capture_output=True, text=True, check=True).stdout
+
+
+def tracked_text():
+    names = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+    for name in names:
+        path = ROOT / name
+        if path.is_file() and name != "LICENSE":
+            yield name, path.read_text(errors="replace")
+    if os.environ.get("WIRK_PRIVACY_HISTORY") == "1":  # set at publication and on the public repository
+        yield "history", history(ROOT)
+
+
+def test_privacy_scan():
+    for name, text in tracked_text():
+        for pattern in PRIVATE:
+            assert not re.search(pattern, text), (name, pattern, re.search(pattern, text).group(0))
+
+
+def test_no_v1():
+    for path in (ROOT / "src").rglob("*.py"):
+        assert "/v1/" not in path.read_text(), path
+
+
+def test_the_email_guard_lets_github_noreply_authors_through():
+    """Published commits are authored with a GitHub noreply address; the history scan must accept it and nothing else."""
+    email = PRIVATE[-1]
+    assert not re.search(email, "A Person <12345+someone@users.noreply.github.com>")
+    assert re.search(email, "A Person <someone@" "corp.test>")  # in pieces, so the scan of this file passes
+
+
+def test_the_history_scan_reads_authors_and_messages(tmp_path):
+    """The files are scanned above; the history adds who wrote each commit and what it says, not diffs full of decorators."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "t.py").write_text("@pytest.fixture\ndef home():\n    pass\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "t.py"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=A Person", "-c", "user.email=1+someone@users.noreply.github.com",
+                    "commit", "-q", "-m", "Add a test"], check=True)
+    text = history(tmp_path)
+    assert "Add a test" in text and "@pytest.fixture" not in text
+    assert not [pattern for pattern in PRIVATE if re.search(pattern, text)]
