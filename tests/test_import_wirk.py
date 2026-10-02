@@ -233,3 +233,17 @@ def test_parts_go_one_to_a_write_and_stale_parts_are_archived(fake):
     result = outcomes(make(fake).run([issue(1, comments=big[:2])]))
     assert result[("acme/api#1", "comments-2")] == "archived"
     assert sum(1 for item in fake.mine("doc").values() if item["archived"]) == 1
+
+
+def test_an_issue_whose_work_item_is_archived_or_ambiguous_gets_no_new_discussion(fake):
+    make(fake).run([issue(1), issue(2)])
+    items = {item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]: i for i, item in fake.mine().items()}
+    fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {items["3000000001"]: 1},
+                "operations": [{"op": "item.archive", "id": items["3000000001"]}]})
+    twin = fake.items[items["3000000002"]]["revisions"][-1]
+    fake.write({"request_id": "t-1", "operations": [{"op": "item.create", "data": {"title": "Twin", "body": twin["body"], "work": {}}}]})
+    before = len(fake.writes())
+    result = outcomes(make(fake).run([issue(1, comments=[said("Hi.")]), issue(2, comments=[said("Hi.")])]))
+    assert result == {("acme/api#1", "issue"): "skipped", ("acme/api#1", "comments"): "skipped",
+                      ("acme/api#2", "issue"): "ambiguous", ("acme/api#2", "comments"): "ambiguous"}
+    assert len(fake.writes()) == before
