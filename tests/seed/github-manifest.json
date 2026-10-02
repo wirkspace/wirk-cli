@@ -36,7 +36,7 @@
    },
    {
     "name": "shared",
-    "description": "The same name as a label in a private seed"
+    "description": "A public label"
    }
   ],
   "A": [
@@ -45,14 +45,18 @@
     "description": "Private label {sentinel}"
    },
    {
-    "name": "shared",
-    "description": "Private twin of a public label {sentinel}"
+    "name": "shared {sentinel}",
+    "description": "The same name as a label in the other private seed {sentinel}"
    }
   ],
   "B": [
    {
     "name": "infra {sentinel}",
     "description": "Private label {sentinel}"
+   },
+   {
+    "name": "shared {sentinel}",
+    "description": "The same name as a label in the other private seed {sentinel}"
    }
   ]
  },
@@ -769,7 +773,7 @@
    "title": "Private mention of a public issue {sentinel}",
    "body": "See wirkspace/import-seed-public#{n:P36} for context. {sentinel}",
    "labels": [
-    "shared"
+    "shared {sentinel}"
    ],
    "expect": {
     "status": "open",
@@ -866,7 +870,10 @@
     "public": {
      "absent_item": true
     }
-   }
+   },
+   "labels": [
+    "shared {sentinel}"
+   ]
   }
  ],
  "bulk": {

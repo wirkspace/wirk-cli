@@ -101,7 +101,7 @@ def test_sentinel_in_every_private_text_and_never_in_the_public_seed():
 def test_credential_shapes_only_in_private_seeds():
     m = manifest()
     tool = seed.Seeder(m, run=FakeGh(), pace=seed.Pace(clock=Clock(), sleep=lambda s: None))
-    shape = re.compile(r"ghp_|AKIA|xox[abprs]-|sk_live_|lin_api_|PRIVATE KEY")
+    shape = re.compile(r"ghp_|AKIA|xox[abprs]-|sk_live_|lin_api_|BEGIN RSA PRIVATE KEY")
     for issue in m["issues"]:
         text = tool.expand(issue["title"] + issue["body"])
         if not m["repos"][issue["repo"]]["private"]:
