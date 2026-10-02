@@ -66,6 +66,7 @@ def test_the_dry_run_writes_the_setup_the_token_and_the_map_and_nothing_else(wor
     assert json.loads((folder / "github-map.json").read_text())["field_limit"] == 50
     assert "skipped, not public: acme/api (812 issues)" in out and "wirk import github acme acme/api --dry-run" in out
     assert "would create: 2" in out and f"wirk admin --request {folder / 'github-setup.json'}" in out
+    assert "files: attachments stored 0 · left as links 0 · images on other hosts left as links 0" in out
     assert token.read_text().strip() not in out + err
 
 
