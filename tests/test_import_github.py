@@ -66,7 +66,9 @@ class FakeGh:
             found = next((r for r in self.repos if r["nameWithOwner"] == name), None)
             return 0, json.dumps({"data": {"rateLimit": limit, "repository": found}}), ""
         if "node(id" in query:
-            return 0, json.dumps({"data": {"rateLimit": limit, "node": self.extra[(variables["id"], variables["after"])]}}), ""
+            key = (variables["id"], variables.get("after", "html"))
+            found = self.extra[key] if key in self.extra or key[1] != "html" else {"bodyHTML": ""}
+            return 0, json.dumps({"data": {"rateLimit": limit, "node": found}}), ""
         raise AssertionError(query[:80])
 
 
