@@ -69,7 +69,7 @@ class Run:
             except BlockingIOError:
                 raise Stop(f"another wirk import {self.source} is running on this machine; wait for it to finish") from None
             service, registered = self.connect()
-            mapped = self.read_map()
+            self.mapped = mapped = self.read_map()
             adapter = self.module.GitHub()
             adapter.check()
             census, records = adapter.read(self.selection)
@@ -87,7 +87,7 @@ class Run:
                     f"{name} ({count})" for name, count in importer.index.blocked.items()),
                     "run the import as that principal, or import into another wirkspace (workspace_id=)")
             outcomes = importer.run(records)
-            setup = self.write_setup(importer, plan, mapped, records, registered) if self.dry_run else None
+            setup = self.write_setup(importer, plan, records, registered) if self.dry_run else None
             self.report(census, importer, outcomes, you, setup)
             return 1 if any(o.outcome == "error" for o in outcomes) else 0
 
@@ -137,7 +137,7 @@ class Run:
         return mapped
 
     def check_statuses(self, importer) -> None:
-        wanted = {**DEFAULT_STATUSES, **self.read_map().get("status", {})}
+        wanted = {**DEFAULT_STATUSES, **self.mapped.get("status", {})}
         missing = sorted(set(wanted.values()) - set(importer.vocab.get("status", [])))
         if missing:
             raise Stop(f"this wirkspace's status has no {', '.join(missing)}; its options are "
@@ -150,8 +150,8 @@ class Run:
 
     # ---------------------------------------------------------------- what the dry run leaves for the person
 
-    def write_setup(self, importer, plan: dict, mapped: dict, records: list, registered: bool) -> Path | None:
-        limit = mapped.get("field_limit", 50)
+    def write_setup(self, importer, plan: dict, records: list, registered: bool) -> Path | None:
+        limit = self.mapped.get("field_limit", 50)
         fields = [{"op": "field.create", "field": {
             "key": field.key, "name": field.name, "applies_to": "item", "selection": field.selection, "required": False,
             "options": [{"key": key, "name": name, "order": order} for order, (name, key) in enumerate(field.options.items(), 1)]}}
@@ -180,7 +180,7 @@ class Run:
     def report(self, census, importer, outcomes: list, you: dict, setup: Path | None) -> None:
         counts = Counter(o.outcome for o in outcomes)
         attention = [o for o in outcomes if o.outcome in ATTENTION or (o.message and o.outcome in ("created", "updated"))]
-        limit = self.read_map().get("field_limit", 50)
+        limit = self.mapped.get("field_limit", 50)
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
         summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run, "selected": census.selected,
                    "skipped_not_public": census.skipped, "issues": census.issues, "comments": census.comments,
