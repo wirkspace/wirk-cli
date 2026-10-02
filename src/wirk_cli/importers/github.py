@@ -280,85 +280,84 @@ class GitHub:
 
     def record(self, repo: dict, node: dict) -> render.Record:
         scope = repo["nameWithOwner"]
-        events = node["timelineItems"]["nodes"]
-        closing = next((e for e in reversed(events) if e["__typename"] == "ClosedEvent"), None)
+        closing = next((e for e in reversed(node["timelineItems"]["nodes"]) if e["__typename"] == "ClosedEvent"), None)
         state = "open" if node["state"] == "OPEN" else STATES.get((node["state"], node["stateReason"]), "completed")
         closer = person((closing or {}).get("actor")) if closing else None
         reason = REASONS.get(node["stateReason"] or "COMPLETED", "completed")
         closed = f"closed as {reason} by {closer} at {node['closedAt']}" if node["state"] == "CLOSED" else None
         opened = " · ".join([f"Opened by {person(node['author'])} {node['createdAt']}", *(["edited"] if node["lastEditedAt"] else []),
                              *([f"closed by {closer} {node['closedAt']} as {reason}"] if closed else [])])
-        relations = []
-        if closing and closing.get("closer") and closing["closer"].get("repository"):
-            found = closing["closer"]
-            if found["__typename"] == "PullRequest":
-                relations.append(("closed_by", self.reference(found, "pull request, merged" if found.get("merged") else "pull request")))
-            else:
-                repo_name = found["repository"]["nameWithOwner"]
-                relations.append(("closed_by", render.Ref(f"{repo_name}@{found['abbreviatedOid']}", repo_name,
-                                                          found["repository"]["visibility"] == "PUBLIC", None, "commit")))
-        if node["parent"]:
-            relations.append(("parent", self.reference(node["parent"])))
-        relations += [("sub_issue", self.reference(n)) for n in node["subIssues"]["nodes"]]
-        relations += [("blocked_by", self.reference(n)) for n in node["blockedBy"]["nodes"]]
-        relations += [("blocking", self.reference(n)) for n in node["blocking"]["nodes"]]
-        if node["duplicateOf"]:
-            relations.append(("duplicate_of", self.reference(node["duplicateOf"])))
-        relations += [("related", self.reference(n)) for n in node["relatesTo"]["nodes"]]
+        fields, facts, due = self.fields_and_facts(repo, node)
+        comments = [render.Comment(person(c["author"]), c["createdAt"], bool(c["lastEditedAt"]), c["body"] or "",
+                                   reactions(c["reactionGroups"]), (c["minimizedReason"] or "hidden").lower() if c["isMinimized"] else None,
+                                   c["lastEditedAt"] or c["createdAt"]) for c in node["comments"]["nodes"]]
+        raw = {key: value for key, value in node.items() if key not in ("comments", "updatedAt", "id")}
+        return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"], scope,
+                             node["updatedAt"], node["title"], node["body"] or "", state, closed, [opened], facts,
+                             [(a["login"], f"@{a['login']}") for a in node["assignees"]["nodes"]], fields, due,
+                             self.relations(node, closing), comments, [], {"repository": scope, "issue": raw},
+                             node["comments"]["nodes"])
+
+    def relations(self, node: dict, closing: dict | None) -> list:
+        """Every reference, in the order the header shows them; the reference rule is the renderer's."""
+        found = []
+        closer = (closing or {}).get("closer") or {}
+        if closer.get("__typename") == "PullRequest":
+            found.append(("closed_by", self.reference(closer, "pull request, merged" if closer.get("merged") else "pull request")))
+        elif closer.get("__typename") == "Commit":
+            repo = closer["repository"]
+            found.append(("closed_by", render.Ref(f"{repo['nameWithOwner']}@{closer['abbreviatedOid']}", repo["nameWithOwner"],
+                                                  repo["visibility"] == "PUBLIC", None, "commit")))
+        found += [("parent", self.reference(node["parent"]))] if node["parent"] else []
+        found += [(kind, self.reference(n)) for kind, connection in (("sub_issue", "subIssues"), ("blocked_by", "blockedBy"),
+                                                                       ("blocking", "blocking")) for n in node[connection]["nodes"]]
+        found += [("duplicate_of", self.reference(node["duplicateOf"]))] if node["duplicateOf"] else []
+        found += [("related", self.reference(n)) for n in node["relatesTo"]["nodes"]]
         seen = set()
-        for event in events:
-            source = event.get("source") if event["__typename"] == "CrossReferencedEvent" else None
-            if source and source.get("repository"):
-                found = self.reference(source, "pull request" if source["__typename"] == "PullRequest" else "issue")
-                if found.key not in seen:
-                    seen.add(found.key)
-                    relations.append(("mentioned", found))
+        for event in node["timelineItems"]["nodes"]:
+            source = event.get("source") or {}
+            if event["__typename"] == "CrossReferencedEvent" and source.get("repository"):
+                mention = self.reference(source, "pull request" if source["__typename"] == "PullRequest" else "issue")
+                if mention.key not in seen:
+                    seen.add(mention.key)
+                    found.append(("mentioned", mention))
             if event["__typename"] == "TransferredEvent" and event.get("fromRepository"):
                 origin = event["fromRepository"]
-                relations.append(("transferred_from", render.Ref(origin["nameWithOwner"], origin["nameWithOwner"],
-                                                                 origin["visibility"] == "PUBLIC")))
-        fields, values, due = {"Repository": [scope]}, [], None
+                found.append(("transferred_from", render.Ref(origin["nameWithOwner"], origin["nameWithOwner"],
+                                                             origin["visibility"] == "PUBLIC")))
+        return found
+
+    def fields_and_facts(self, repo: dict, node: dict) -> tuple[dict, list, str | None]:
+        """The field values by name, the header's facts, and the due day from the Target date issue field."""
+        fields, values, due = {"Repository": [repo["nameWithOwner"]]}, [], None
         labels = sorted((label["name"] for label in node["labels"]["nodes"]), key=str.casefold)
-        if labels:
-            fields["Label"] = labels
-        if node["milestone"]:
-            fields["Milestone"] = [node["milestone"]["title"]]
-        if node["issueType"]:
-            fields["Issue type"] = [node["issueType"]["name"]]
+        milestone, kind = node["milestone"], (node["issueType"] or {}).get("name")
+        for name, values_of in (("Label", labels), ("Milestone", [milestone["title"]] if milestone else []),
+                                ("Issue type", [kind] if kind else [])):
+            if values_of:
+                fields[name] = values_of
         for value in sorted(node["issueFieldValues"]["nodes"], key=lambda v: (v.get("field") or {}).get("name", "")):
             name = (value.get("field") or {}).get("name")
             if not name:
                 continue
             if value["__typename"] == "IssueFieldSingleSelectValue":
                 fields[name] = [value["name"]]
-                values.append(f"{name} {value['name']}")
             elif value["__typename"] == "IssueFieldMultiSelectValue":
                 fields[name] = [option["name"] for option in value["options"]]
-                values.append(f"{name} {', '.join(fields[name])}")
-            else:
-                values.append(f"{name} {value['value']}")
-                if name == "Target date":
-                    due = day(value["value"])
-        milestone = node["milestone"]
-        kinds = " · ".join([*([f"Type: {node['issueType']['name']}"] if node["issueType"] else []),
-                            *([f"Milestone: {milestone['title']} ("
-                               + ", ".join([*([f"due {day(milestone['dueOn'])}"] if milestone["dueOn"] else []),
-                                            milestone["state"].lower()]) + ")"] if milestone else [])])
-        facts = [kinds, *([f"Labels: {', '.join(labels)}"] if labels else []),
+            elif name == "Target date":
+                due = day(value["value"])
+            values.append(f"{name} {', '.join(fields[name]) if name in fields else value['value']}")
+        when = ", ".join([*([f"due {day(milestone['dueOn'])}"] if milestone and milestone["dueOn"] else []),
+                          *([milestone["state"].lower()] if milestone else [])])
+        lock = (node["activeLockReason"] or "locked").lower().replace("_", " ").replace("off topic", "off-topic")
+        facts = [" · ".join([*([f"Type: {kind}"] if kind else []), *([f"Milestone: {milestone['title']} ({when})"] if milestone else [])]),
+                 *([f"Labels: {', '.join(labels)}"] if labels else []),
                  *([f"Issue fields: {' · '.join(values)}"] if values else []),
-                 *([f"Locked on GitHub: {(node['activeLockReason'] or 'locked').lower().replace('_', ' ').replace('off topic', 'off-topic')}"]
-                   if node["locked"] else []),
+                 *([f"Locked on GitHub: {lock}"] if node["locked"] else []),
                  *(["Pinned on GitHub"] if node["isPinned"] else []),
                  *([f"Reactions: {reactions(node['reactionGroups'])}"] if reactions(node["reactionGroups"]) else []),
                  *(["Repository archived on GitHub"] if repo.get("isArchived") else [])]
-        comments = [render.Comment(person(c["author"]), c["createdAt"], bool(c["lastEditedAt"]), c["body"] or "",
-                                   reactions(c["reactionGroups"]), (c["minimizedReason"] or "hidden").lower() if c["isMinimized"] else None,
-                                   c["lastEditedAt"] or c["createdAt"]) for c in node["comments"]["nodes"]]
-        raw = {key: value for key, value in node.items() if key not in ("comments", "updatedAt", "id")}
-        return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"], scope,
-                             node["updatedAt"], node["title"], node["body"] or "", state, closed, [opened], [f for f in facts if f],
-                             [(a["login"], f"@{a['login']}") for a in node["assignees"]["nodes"]], fields, due, relations, comments,
-                             [], {"repository": scope, "issue": raw}, node["comments"]["nodes"])
+        return fields, [fact for fact in facts if fact], due
 
     # ---------------------------------------------------------------- what the importer needs besides records
 
