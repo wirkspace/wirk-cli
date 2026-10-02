@@ -257,6 +257,10 @@ class Importer:
             return [Outcome(record.key, "issue", "blocked", f"imported by {blocked}")]
         plans = self.plans(record)
         decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest)) for plan in plans]
+        _, action, held, message = decided[0]
+        if action == "ambiguous" or (action == "skipped" and held.archived):  # the discussion follows its work item
+            return [Outcome(record.key, plan.kind, action, message, found.item if found else None)
+                    for plan, _, found, _ in decided]
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
                     for plan, action, held, message in decided if action not in ("create", "update")]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ("create", "update")]
