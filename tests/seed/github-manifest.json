@@ -151,7 +151,7 @@
    "expect": {
     "status": "cancelled",
     "header": [
-     "closed as not planned"
+     "as not planned"
     ]
    }
   },
