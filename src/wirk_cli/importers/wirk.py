@@ -267,14 +267,15 @@ class Importer:
         if self.dry_run:
             return outcomes + [Outcome(record.key, plan.kind, f"would {action}", item=held.item if held else None)
                                for plan, action, held in acting] + self.stale(record, len(plans) - 1)
-        work = next((held.item for plan, action, held, _ in decided if plan.kind == "issue" and held), None)
-        first = [(plan, action, held) for plan, action, held in acting if plan.kind in ("issue", "comments")]
-        if first:
-            outcomes += self.send(record, first, work)
+        # the work item and the discussion's first part go in one write; later parts one to a write (§3.5)
+        together = [entry for entry in acting if entry[0].kind in ("issue", "comments")]
+        work = held.item if held else None
+        if together:
+            outcomes += self.send(record, together, work)
             work = work or next((o.item for o in outcomes if o.kind == "issue" and o.item), None)
-        for plan, action, held in acting:
-            if plan.kind not in ("issue", "comments"):
-                outcomes += self.send(record, [(plan, action, held)], work)
+        for entry in acting:
+            if entry not in together:
+                outcomes += self.send(record, [entry], work)
         return outcomes + self.stale(record, len(plans) - 1)
 
     def operations(self, record, acting, work):
