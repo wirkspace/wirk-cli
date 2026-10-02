@@ -213,6 +213,7 @@ def test_issue_pages_and_long_nested_connections_are_followed():
     extra = {("I_1", "c100"): {"comments": page([comment(n) for n in range(100, 105)])}}
     _, census, records = read(FakeGh([repo("acme/web", issues=59)], {"acme/web": issues}, extra=extra))
     assert len(records) == 59 and len(records[0].comments) == 105 and census.issues == 59
+    assert census.points == 5  # the repositories, three issue pages and the comments' second page, a point each
 
 
 def test_a_page_that_times_out_is_retried_smaller():
