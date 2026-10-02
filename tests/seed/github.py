@@ -24,6 +24,7 @@ LIMITED = re.compile(r"secondary rate limit|abuse detection|HTTP 429", re.I)
 ISSUES = """query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   issues(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { id number body state locked isPinned
     issueType { name } parent { id } blockedBy(first: 20) { nodes { id } } timelineItems(itemTypes: [CLOSED_EVENT]) { totalCount }
+    issueFieldValues(first: 20) { totalCount }
     reactionGroups { content viewerHasReacted }
     comments(first: 100) { nodes { id body isMinimized lastEditedAt author { login } reactionGroups { content viewerHasReacted } } } } }
   pullRequests(first: 50) { nodes { number body state headRefName } } } }"""
@@ -185,7 +186,8 @@ class Seeder:
         for issue in named:
             self.state(issue)
         self.bot_comment()
-        print(json.dumps({"issues": len(self.issues), "pulls": len(self.pulls), "observed": self.noted}, indent=1))
+        print(json.dumps({"issues": len(self.issues), "pulls": len(self.pulls), "content_requests": len(self.pace.sent),
+                          "observed": self.noted}, indent=1))
 
     def repository(self, key: str, repo: dict):
         if self.rest_or_none("GET", f"repos/{self.names[key]}") is None:
@@ -257,7 +259,7 @@ class Seeder:
             kind = self.issue_type(issue["type"])
             self.graphql("mutation($i: ID!, $t: ID!) { updateIssueIssueType(input: {issueId: $i, issueTypeId: $t}) { clientMutationId } }",
                          {"i": found["id"], "t": kind}, write=True)
-        if issue.get("fields") and not found.get("fields_done"):
+        if issue.get("fields") and not (found.get("issueFieldValues") or {}).get("totalCount"):
             self.set_fields(found, issue["fields"])
         if issue.get("parent") and not found.get("parent"):
             self.graphql("mutation($p: ID!, $c: ID!) { addSubIssue(input: {issueId: $p, subIssueId: $c}) { clientMutationId } }",
