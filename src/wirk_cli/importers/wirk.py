@@ -184,8 +184,8 @@ class Importer:
         return self
 
     def run(self, records: list, complete: bool = True) -> list:
-        if not hasattr(self, "index"):
-            self.start()
+        self.start()
+        self.keys = {record.ident: record.key for record in records}
         for record in records:
             self.outcomes += self.one(record)
         if complete:
@@ -379,9 +379,10 @@ class Importer:
         return None
 
     def key_of(self, item: str) -> str:
+        """An item's source key when it is one of this run's issues, else its short ID."""
         for (kind, ident), held in self.index.held.items():
-            if kind == "issue" and any(h.item == item for h in held):
-                return f"{self.ctx.source.lower()} issue {ident}"
+            if kind == "issue" and ident in self.keys and any(h.item == item for h in held):
+                return self.keys[ident]
         return item[5:13] if item.startswith("item_") else item
 
     # ---------------------------------------------------------------- parts and items no longer needed
