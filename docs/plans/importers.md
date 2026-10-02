@@ -1,6 +1,6 @@
 # Plan: `wirk import`, one command that brings a team's tracker into WIRK
 
-Revision 2, 2 October 2026. Plan only: nothing here is built. Branch `importers` of `wirkspace/wirk-cli`.
+Revision 3, 2 October 2026: revision 2, approved by the root with six conditions, folded in below (§ What revision 3 changes). The build follows it. Branch `importers` of `wirkspace/wirk-cli`.
 
 — importer-implementer
 
@@ -12,6 +12,17 @@ Revision 2, 2 October 2026. Plan only: nothing here is built. Branch `importers`
 - wirk-core `main` at `05770e3`, which the build verifies against: `admin.py` (setup operations, who may apply them, `last_membership`), `domain.py` (decision 66's role rule, completion), `links.py`, `transfer.py`, `render.py` (card lines), `jev.py` (duplicate judgment); and `docs/plans/schema-additions.md` on `schema-build` `4e204ba`.
 - The connector pattern: wirk-integrations `main` at `75c77a4`, `granola/` (README, PLAN, `render.py`, `imports.py`) and `common/`.
 - Decisions 26, 28, 57, 61, 66, 68 and 74 in the docs repository.
+
+## What revision 3 changes
+
+The root approved revision 2 (`e1ae997`) with six conditions:
+
+1. **Attachments enter the hash by name, not bytes.** The name carries the hashed source ID, so a re-run decides `current` without downloading anything; attachments are downloaded only when their item is created or updated (§3.3, §3.7).
+2. **No link to an item archived in WIRK.** Core leaves `related_to` links to archived items out of `links_out`, so a planned link to one would be re-added on every run; the relation stays text (§3.6).
+3. **Mentioned and subscribed events stay out of the issue archive.** A comment that mentions someone adds those events to the issue's timeline, and A8 says a comment alone never revises the work item (§3.2, §4.1).
+4. **The seed tool stays within GitHub's 500 content requests an hour**, with backoff. The public seed repository's Actions workflow runs only on `workflow_dispatch`, with `issues: write` as its only permission (§4.6).
+5. **Credential shapes go only in the private seeds**, with invalid checksums, so GitHub's secret scanning raises no alert on a public repository (§4.6).
+6. **A sentinel for A14.** One unique string is planted in every private seed issue title and body, pull request title, commit message and label, and A14 scans everything WIRK holds for it (§4.6, §7).
 
 ## What revision 2 changes
 
@@ -173,7 +184,7 @@ Jira issue 10234, version 20260930T140211Z, hash 3f2a9c41d07e
 - **Source and kind.** The work item is `issue`. Its discussion doc is `comments`, with later parts `comments-2`, `comments-3`. Adapters add their own kinds: Linear `project`, `milestone`, `initiative`, `document`, `update`; Jira `project`, `board`; GitHub `project`, `draft`.
 - **ID** is the immutable source ID: GitHub's `fullDatabaseId` (issue IDs passed 2^31, so the 32-bit `databaseId` no longer fits), Linear's UUID, Jira's numeric ID. Keys such as `owner/repo#123` and `ENG-123` change when an issue moves; the ID does not.
 - **Version** is the source's own update time to the second, in UTC, in ISO 8601's basic form. For a discussion doc it is the newest comment change. It records which source version the item was last written from; when nothing the importer writes has changed, the item is not rewritten and the version stays. The compact form keeps Linear's longest lines, an `initiative` and a tenth discussion part, at 99 and 100 characters, within the card's 100.
-- **Hash** is 12 hex characters of the SHA-256 of canonical JSON holding everything the importer writes for the object except the first line: title, the rest of the body, fields, the work part, and the sorted SHA-256 of every file. Rendering is deterministic: no run time, and every list in a fixed order. The hash answers the one question a re-run asks: would the importer now write something different? Source update times do not reliably cover relations, label renames or other issues' states shown in the header (GitHub note §4.1, Linear note §5.2).
+- **Hash** is 12 hex characters of the SHA-256 of canonical JSON holding everything the importer writes for the object except the first line: title, the rest of the body, fields, the work part, and the files: each archive by the SHA-256 of its bytes (made locally), each attachment by its name, which carries the hash of its source ID. Nothing is downloaded to decide whether an item is current. Rendering is deterministic: no run time, and every list in a fixed order. The hash answers the one question a re-run asks: would the importer now write something different? Source update times do not reliably cover relations, label renames or other issues' states shown in the header (GitHub note §4.1, Linear note §5.2).
 - **The match** is exact, case included: `^(GitHub|Linear|Jira) ([a-z]+(?:-[0-9]+)?) ([A-Za-z0-9_-]+), version ([0-9]{8}T[0-9]{6}Z), hash ([0-9a-f]{12})$`. The line holds no Markdown that core's card line strips. The dry run checks every line's length and refuses an object whose line would not fit.
 
 **The key line**, second, makes the old key exact to search. The work item and its discussion doc word it differently, so the exact search finds one item, not two:
@@ -240,6 +251,7 @@ Links come in a second pass, after every issue's own write, so both ends exist.
 | duplicate of, related | `related_to` | — |
 
 - **Text always.** Both headers keep the source's exact relation, and a fallback says why: `Blocked by: [Acme/api#120] (kept as related: completed here)`. A relation whose other end is outside the selection stays text when its scope may be shown, and a count when it is withheld (§3.9). A later run that includes that end makes the link.
+- **No link to an item archived in WIRK.** Core hides `related_to` links to archived items from `links_out`, so such a link would look missing and be re-added on every run. A relation whose other end is archived in WIRK stays text.
 - **One plan per pair.** The same relation arrives from both ends (`blockedBy` on one issue, `blocking` on the other; a parent and its sub-issue lists). The plan dedupes by link type and ends, `related_to` as an unordered pair, so a link is made once.
 - **Cycles** are found by a local graph check in ID order, so the same source gives the same links on every machine. Core still refuses a cycle the local check cannot see (one closed by a link a person made): a `link_cycle` refusal makes that link `related_to`, reported, and the rest of the write is resent.
 - **Reading links.** Each work item with planned or existing relations is fetched on its own (one ref, `depth=full`, `max_bytes=65536`, following the continuation until the item is complete), so a long body never crowds its links out of a shared budget. The makers of the importer-candidate links are read by fetching the link IDs, 32 a request.
@@ -252,6 +264,7 @@ Links come in a second pass, after every issue's own write, so both ends exist.
 - **Names.** An attachment's WIRK file name is `<source>-attachment-<12 hex>-<original name>`, the hex being the SHA-256 of the attachment's source ID (GitHub's asset ID, Linear's upload path, Jira's attachment ID). A re-run finds the same file by name whatever its bytes, and the name carries no URL or signature. The archives are `github-issue-<ID>.json` and `github-comments-<ID>.json`.
 - **Attach** in the issue's own write: the issue archive and body attachments on the work item, the comments archive and comment attachments on the discussion doc's first part. On an update, a file whose bytes changed is swapped with `replace_files`, found by its name. A file the source no longer references stays and is reported; the importer detaches nothing.
 - **Downloads** happen during the run through the adapter, since source links expire.
+  - **Only when needed:** an attachment is downloaded only when its item is created or updated and the item does not already hold a file of that name.
   - **Size cap:** at most 100 MiB a file, read in blocks, and refused beyond that.
   - **Redirects:** followed only over https, only to the adapter's allowlist, and never with a credential:
     - GitHub: `github.com`, `objects.githubusercontent.com`, `private-user-images.githubusercontent.com`, `user-images.githubusercontent.com`;
@@ -364,7 +377,7 @@ tests/verify/   the independent REST reader (§7, A5); test code
 - **Issues** through GraphQL `Repository.issues`, 25 a page, ordered by creation, with the first page of each nested connection:
   - labels and assignees;
   - comments (100), with reactions, hidden state and edit time;
-  - timeline items (100) except comments, through one fragment per event type, so unknown types still arrive with their type name and are counted;
+  - timeline items (100) except comments and the mentioned, subscribed and unsubscribed events that comments cause, through one fragment per event type, so unknown types still arrive with their type name and are counted;
   - parent, sub-issues, `blockedBy`, `blocking` and `duplicateOf`;
   - `closedByPullRequestsReferences`, issue type, milestone, issue field values, lock and pin state;
   - project items and their field values, when the scope allows.
@@ -511,13 +524,14 @@ Authorized by the root: scratch repositories in the `wirkspace` organization, fi
   - `wirkspace/import-seed-private-a` and `wirkspace/import-seed-private-b`, private: cross-repository sub-issues, blockers, references and transfers;
   - `wirkspace/import-seed-public`, public: unauthenticated attachments, the blind trial, and the target of references from the private two (the A14 test).
 
-  Content is synthetic only: invented text, fake credential shapes that cannot be live keys, an instruction-shaped sentence.
+  Content is synthetic only: invented text and an instruction-shaped sentence. Fake credential shapes, with invalid checksums, appear only in the private seeds, so secret scanning raises nothing on the public one.
+- **The sentinel.** One unique string, kept in the manifest, is in every private seed issue title and body, pull request title, commit message and label. A14 scans everything WIRK holds for it.
 - **Organization objects.** The seed uses only what the organization already has: the issue types Task, Bug and Feature, and the default issue fields Priority, Effort, Start date and Target date. It creates no organization-level type or field, because those would change every repository's pickers; text, number and multi-select field values stay fixture-only. One organization project is created only with the person's `project` scope (§8).
 - **The manifest**, `tests/seed/github-manifest.json`: every seeded object with a stable seed ID (`seed:G-012`), its class (clean, convention, lost) and its expected WIRK result: kind, title, status, fields, owner, header lines that must be present, links and fallbacks, files with SHA-256, and what must be absent (withheld references). It is written from this plan's mapping, never from the importer's code.
 - **The seed tool**, `tests/seed/github.py`, test code the importer never calls.
   - **Where it writes.** It writes through `gh api` only to repositories whose names start `wirkspace/import-seed-`, and refuses anything else before its first call.
   - **Idempotent.** Each issue, comment and pull request carries its seed ID, so a re-run creates only what is missing.
-  - **Pacing.** At most one content-creating request a second, under GitHub's 80 a minute.
+  - **Pacing.** At most one content-creating request a second and 480 in any hour, under GitHub's 80 a minute and 500 an hour, with backoff on a secondary-limit refusal. The seeds are sized to fit one hour.
   - **It never deletes anything.** Deleting an issue is irreversible and the person's step (§8).
   - **Scripted changes.** It applies the changes of A8 (a title, a comment, a label, a close, a new blocker, a removed sub-issue, a repository rename, a transfer) for the re-run, when asked.
 - **What it seeds, beyond the rows marked S in §4.5:**
@@ -526,7 +540,7 @@ Authorized by the root: scratch repositories in the `wirkspace` organization, fi
   - 130 comments on one issue;
   - a discussion over the part budget, written in a script that triples when escaped;
   - pull requests interleaved with issues: one merged with `Fixes #1`, one into a non-default branch, one from the other private repository closing a public issue;
-  - a bot comment, posted by a GitHub Actions workflow in the public repository on GitHub's own runners;
+  - a bot comment, posted by a GitHub Actions workflow in the public repository on GitHub's own runners, triggered only by `workflow_dispatch` and holding only the `issues: write` permission;
   - labels with descriptions, emoji and the same name in two repositories, one renamed after use;
   - milestones open, closed and without a due date;
   - locks of each reason and three pinned issues;
@@ -685,7 +699,7 @@ Each is observed by a test or a run, not inferred. GitHub first, on the seeds an
     - A re-run adds a missing link and removes only the importer's own stale ones, after a complete read. A person's link is never touched.
 13. **A13 Duplicates.** Against a scratch service with a scripted judgment, a refused create is resent with `allow_duplicate_of` and reported.
 14. **A14 Privacy.**
-    - **Nothing from a withheld scope:** no name, number, key or title from a scope neither selected nor public appears anywhere in WIRK: titles, bodies, reasons, file names, descriptions, archives. This is checked by scanning everything the import wrote for the private seed repositories' names and keys, after importing the public seed alone, both in the contract test and in the blind trial.
+    - **Nothing from a withheld scope:** no name, number, key or title from a scope neither selected nor public appears anywhere in WIRK: titles, bodies, reasons, file names, descriptions, archives. This is checked by scanning everything the import wrote for the private seed repositories' names and keys and for the sentinel planted in every private seed title, body, pull request title, commit message and label, after importing the public seed alone, both in the contract test and in the blind trial.
     - No email address from any user record or commit is in any request to WIRK (sentinel test).
     - Every credential shape is redacted and counted.
     - No imported title or body contains `[github `, and no comment heading can be forged.
