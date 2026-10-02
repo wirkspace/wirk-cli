@@ -315,7 +315,7 @@ class FakeWirk:
             self.uploads[upload_id] = {"id": "file_" + secrets.token_hex(16), "filename": declared["filename"],
                                        "sha256": declared["sha256"], "bytes": declared["bytes"],
                                        "description": declared.get("description"), "metadata": declared.get("metadata")}
-            return envelope({"upload": {"id": upload_id, **self.uploads[upload_id]}})
+            return envelope({"upload": {**self.uploads[upload_id], "id": upload_id}})
         return refusal("invalid_input", "files takes upload or confirm here")
 
     # ---------------------------------------------------------------- reading the result

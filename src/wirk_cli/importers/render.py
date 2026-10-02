@@ -289,7 +289,67 @@ def sealed(rendered: Rendered, source: str, ident: str, version: str, digest_: s
     return line1(source, rendered.kind, ident, version, digest_) + "\n" + rendered.body.split("\n", 1)[1]
 
 
-# ---------------------------------------------------------------- fields (not built yet)
+# ---------------------------------------------------------------- fields and file names
 
-def plan_fields(records, selections, limit, source):
-    raise NotImplementedError
+# Keys the CLI, the request or the filters read as their own: a field may never take one (§3.8).
+RESERVED = {"kind", "state", "proposal", "owner", "linked", "folder", "changed_days", "text", "archived", "status", "about",
+            "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id", "task", "format", "fetch", "fields",
+            "level"}
+
+
+@dataclass(frozen=True)
+class FieldPlan:
+    key: str
+    name: str
+    selection: str  # one or many
+    options: dict  # option name -> key, in use
+    descriptions: dict  # option name -> description
+
+
+@dataclass(frozen=True)
+class Attachment:
+    name: str  # the WIRK file name: source, hashed source ID, original name
+    url: str
+    comment: bool  # referenced in a comment rather than the body
+
+
+def slug(name: str) -> str:
+    """Lowercase ASCII letters, digits and underscores, starting with a letter; a name with no ASCII left is x_ and 6 hex."""
+    key = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")
+    if not key:
+        return "x_" + hashlib.sha256(name.encode()).hexdigest()[:6]
+    return key if key[0].isalpha() else "x_" + key
+
+
+def field_key(name: str, source: str) -> str:
+    key = slug(name)
+    return f"{source.lower()}_{key}" if key in RESERVED else key
+
+
+def plan_fields(records: list, selections: dict, limit: int, source: str) -> dict:
+    """Every field the source may fill, with the options in use; `small` ones become fields (§3.8)."""
+    used = {name: {} for name in selections}
+    for record in records:
+        for name, values in record.fields.items():
+            if name in used:
+                used[name].update(dict.fromkeys(values, ""))
+    plans = {}
+    for name, values in used.items():
+        options, taken = {}, set()
+        for value in sorted(values, key=str.casefold):
+            key, number = slug(value), 2
+            while key in taken:
+                key, number = f"{slug(value)}_{number}", number + 1
+            taken.add(key)
+            options[value] = key
+        plans[name] = FieldPlan(field_key(name, source), name, selections[name], options, {})
+    return plans
+
+
+def small(plan: FieldPlan, limit: int) -> bool:
+    return 0 < len(plan.options) <= limit
+
+
+def attachment_name(source: str, source_id: str, original: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", original).strip("-.") or "file"
+    return f"{source.lower()}-attachment-{hashlib.sha256(source_id.encode()).hexdigest()[:12]}-{safe}"[:255]

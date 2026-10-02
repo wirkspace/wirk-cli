@@ -423,16 +423,10 @@
    ],
    "expect": {
     "status": "open",
-    "links": [
-     [
-      "related_to",
-      "P18"
-     ]
-    ],
+    "observed": "GitHub refuses a dependency that would close a cycle, so P19 has no blocker",
     "header": [
-     "(kept as related: it would close a cycle)"
-    ],
-    "if_github_allows": true
+     "Blocking: [{key:P18}]"
+    ]
    }
   },
   {
