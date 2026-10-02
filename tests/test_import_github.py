@@ -87,7 +87,8 @@ def test_no_login_stops_with_the_fix():
 
 
 def test_an_owner_means_its_public_repositories_and_names_the_rest():
-    fake = FakeGh([repo("acme/web"), repo("acme/api", "PRIVATE", issues=812), repo("acme/off", enabled=False)], {})
+    fake = FakeGh([repo("acme/web"), repo("acme/api", "PRIVATE", issues=812), repo("acme/off", enabled=False),
+                   repo("acme/empty", "PRIVATE", issues=0)], {})
     adapter, census, records = read(fake)
     assert census.selected == ["acme/web"]
     assert census.skipped == [("acme/api", 812)]
