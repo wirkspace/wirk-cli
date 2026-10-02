@@ -210,6 +210,8 @@ class Run:
         planned = getattr(importer, "planned", set())
         lines.append(f"links: {len(planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
                      f"{importer.counts['linked']} written this run")
+        lines.append(f"files: {importer.counts['attachments']} attachments stored · {importer.counts['left as links']} left as links · "
+                     f"{census.external_images} images on other hosts left as links")
         text = importer.counts
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
                      f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld")
