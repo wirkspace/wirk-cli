@@ -81,12 +81,12 @@ class Run:
                                      overwrite=bool(self.options.get("--overwrite")), progress=self.progress)
             you = importer.start(me=self.principal)
             self.check_statuses(importer)
-            if self.dry_run and importer.index.blocked:
-                self.report(census, importer, [], you, setup=None)
-                raise Stop("items here were made by another importer for this source: " + ", ".join(
-                    f"{name} ({count})" for name, count in importer.index.blocked.items()),
-                    "run the import as that principal, or import into another wirkspace (workspace_id=)")
             outcomes = importer.run(records)
+            if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
+                self.report(census, importer, outcomes, you, setup=None)
+                raise Stop("another importer for this source already holds some of these issues: " + ", ".join(
+                    f"{name} made {count}" for name, count in importer.index.blocked.items()),
+                    "run the import as that principal, or import into another wirkspace (workspace_id=)")
             setup = self.write_setup(importer, plan, records, registered) if self.dry_run else None
             self.report(census, importer, outcomes, you, setup)
             return 1 if any(o.outcome == "error" for o in outcomes) else 0
@@ -179,7 +179,7 @@ class Run:
 
     def report(self, census, importer, outcomes: list, you: dict, setup: Path | None) -> None:
         counts = Counter(o.outcome for o in outcomes)
-        attention = [o for o in outcomes if o.outcome in ATTENTION or (o.message and o.outcome in ("created", "updated"))]
+        attention = [o for o in outcomes if o.outcome in ATTENTION or o.message]
         limit = self.mapped.get("field_limit", 50)
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
         summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run, "selected": census.selected,

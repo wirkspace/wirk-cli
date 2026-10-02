@@ -377,8 +377,10 @@ class Importer:
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
                     for plan, action, held, message in decided if action not in ("create", "update")]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ("create", "update")]
-        if self.dry_run:
-            return outcomes + [Outcome(record.key, plan.kind, f"would {action}", item=held.item if held else None)
+        if self.dry_run:  # what --overwrite would replace says who changed it
+            return outcomes + [Outcome(record.key, plan.kind, f"would {action}", "" if not held or held.by == self.me else
+                                       f"changed in WIRK since import (r{held.r} by {held.by}); --overwrite replaces it",
+                                       held.item if held else None)
                                for plan, action, held in acting] + self.stale(record, len(plans) - 1)
         # the work item and the discussion's first part go in one write; later parts one to a write (§3.5)
         together = [entry for entry in acting if entry[0].kind in ("issue", "comments")]
