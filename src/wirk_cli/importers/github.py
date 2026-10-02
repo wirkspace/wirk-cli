@@ -211,7 +211,7 @@ class GitHub:
                 if answer is None:
                     raise Stop(f"GitHub has no user or organization {owner} that this login can see")
                 for repo in answer["repositories"]["nodes"]:
-                    if repo["hasIssuesEnabled"]:
+                    if repo["hasIssuesEnabled"] and (repo["visibility"] == "PUBLIC" or repo["issues"]["totalCount"]):
                         if repo["visibility"] == "PUBLIC":
                             found[repo["nameWithOwner"]] = repo
                         else:
