@@ -119,7 +119,8 @@ def test_an_edit_in_wirk_wins_until_overwrite(fake):
     fake.as_whom = None
     result = make(fake).run([issue(1, body="Changed at the source.")])
     assert result[0].outcome == "skipped" and "changed in WIRK since import (r2 by bob)" in result[0].message
-    assert make(fake, dry_run=True, overwrite=True).run([issue(1, body="Changed at the source.")])[0].outcome == "would update"
+    listed = make(fake, dry_run=True, overwrite=True).run([issue(1, body="Changed at the source.")])[0]
+    assert listed.outcome == "would update" and "changed in WIRK since import (r2 by bob)" in listed.message
     result = make(fake, overwrite=True).run([issue(1, body="Changed at the source.")])
     assert result[0].outcome == "updated" and fake.writes()[-1]["expect"] == {item: 2}
 

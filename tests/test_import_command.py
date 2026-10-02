@@ -99,6 +99,7 @@ def test_another_importers_items_stop_the_dry_run(world):
     fake.as_whom = None
     code, out, err = world["run"]("github", "acme", "--dry-run")
     assert code == 2 and "bob-github-import" in out + err
+    assert "blocked: 1" in out and "would create: 1" in out  # the plan is printed before the stop
     assert not (world["home"] / "import" / "github-setup.json").exists()
 
 
