@@ -428,6 +428,8 @@ class Importer:
         for attachment in plan.attachments:
             if attachment.name not in having:
                 data = self.download(attachment)
+                self.counts["attachments"] += data is not None
+                self.counts["left as links"] += data is None
                 if data is not None:
                     attach.append(self.wirk.upload(data, attachment.name, f"{self.ctx.source} attachment in {record.key}",
                                                    {"role": "original", "origin": {"uri": attachment.url,

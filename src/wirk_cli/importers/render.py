@@ -311,6 +311,7 @@ class Attachment:
     name: str  # the WIRK file name: source, hashed source ID, original name
     url: str
     comment: bool  # referenced in a comment rather than the body
+    holder: str = ""  # the source's ID for the text that references it, for a signed link
 
 
 def slug(name: str) -> str:

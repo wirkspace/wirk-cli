@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import time
+from urllib.parse import urlsplit
 
 from . import render
 
@@ -23,6 +24,17 @@ EMOJI = {"THUMBS_UP": "👍", "THUMBS_DOWN": "👎", "LAUGH": "😄", "HOORAY": 
 LIMITED = re.compile(r"secondary rate limit|abuse detection|HTTP 429", re.I)
 TIMEOUT = re.compile(r"timeout|HTTP 50[234]|Something went wrong", re.I)
 PAGE = 25
+CAP = 100 * 1024 * 1024  # bytes a download may hold (§3.7)
+# Where GitHub serves attachment bytes; a redirect anywhere else is not followed, and no credential is ever sent.
+FILE_HOSTS = {"github.com", "objects.githubusercontent.com", "private-user-images.githubusercontent.com",
+              "user-images.githubusercontent.com"}
+ATTACHMENT = (r"https://github\.com/(?:user-attachments/(?:assets|files)/[\w.-]+(?:/[^\s)\]\"'<>]+)?"
+              r"|[\w.-]+/[\w.-]+/(?:assets|files)/\d+/[^\s)\]\"'<>]+)|https://user-images\.githubusercontent\.com/[^\s)\]\"'<>]+")
+LINKED = re.compile(rf"(!?)\[([^\]]*)\]\(({ATTACHMENT})\)")
+BARE = re.compile(ATTACHMENT)
+IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
+HTML = "query($id: ID!) { node(id: $id) { ... on Issue { bodyHTML } ... on IssueComment { bodyHTML } } }"
+SIGNED = re.compile(r"https://private-user-images\.githubusercontent\.com/[^\"'\s<>]+")
 
 # ---------------------------------------------------------------- the queries
 
@@ -64,7 +76,7 @@ EVENTS = {
 PROJECT_EVENTS = {"AddedToProjectEvent", "AddedToProjectV2Event", "ConvertedFromDraftEvent", "ConvertedNoteToIssueEvent",
                   "MovedColumnsInProjectEvent", "ProjectV2ItemStatusChangedEvent", "RemovedFromProjectEvent",
                   "RemovedFromProjectV2Event"}
-COMMENT = ("nodes { fullDatabaseId author { __typename login } body createdAt lastEditedAt isMinimized minimizedReason "
+COMMENT = ("nodes { id fullDatabaseId author { __typename login } body createdAt lastEditedAt isMinimized minimizedReason "
            "reactionGroups { content reactors { totalCount } } }")
 
 
@@ -125,6 +137,7 @@ class Census:
     pulls: int = 0
     issues: int = 0
     comments: int = 0
+    external_images: int = 0
     notes: list = field(default_factory=list)
 
 
@@ -156,8 +169,8 @@ def reactions(groups: list) -> str:
 class GitHub:
     source, noun, labels = SOURCE, NOUN, LABELS
 
-    def __init__(self, run=None, sleep=None):
-        self.run, self.sleep, self.scopes, self.projects = run or gh, sleep or time.sleep, set(), False
+    def __init__(self, run=None, sleep=None, http=None):
+        self.run, self.sleep, self.scopes, self.projects, self.http = run or gh, sleep or time.sleep, set(), False, http
 
     # ---------------------------------------------------------------- talking to GitHub
 
@@ -240,6 +253,8 @@ class GitHub:
             for node in self.issues(repo):
                 records.append(self.record(repo, node))
                 census.comments += len(records[-1].comments)
+                census.external_images += sum(1 for text in [node["body"] or ""] + [c["body"] or "" for c in node["comments"]["nodes"]]
+                                              for url in IMAGE.findall(text) if not BARE.fullmatch(url))
         census.issues = len(records)
         return census, records
 
@@ -295,7 +310,7 @@ class GitHub:
         return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"], scope,
                              node["updatedAt"], node["title"], node["body"] or "", state, closed, [opened], facts,
                              [(a["login"], f"@{a['login']}") for a in node["assignees"]["nodes"]], fields, due,
-                             self.relations(node, closing), comments, [], {"repository": scope, "issue": raw},
+                             self.relations(node, closing), comments, self.attachments(node), {"repository": scope, "issue": raw},
                              node["comments"]["nodes"])
 
     def relations(self, node: dict, closing: dict | None) -> list:
@@ -379,5 +394,45 @@ class GitHub:
             return False
         return check
 
+    def attachments(self, node: dict) -> list:
+        """Files uploaded to GitHub that the body or a comment references, each once, named by a hash of its URL."""
+        found = {}
+        for holder, text, in_comment in [(node["id"], node["body"] or "", False)] + [
+                (c.get("id", ""), c["body"] or "", True) for c in node["comments"]["nodes"]]:
+            named = {match[3]: match[2] for match in LINKED.finditer(text)}
+            for url in BARE.findall(text):
+                if url not in found:
+                    original = named.get(url) or urlsplit(url).path.rsplit("/", 1)[-1]
+                    found[url] = render.Attachment(render.attachment_name(SOURCE, url, original), url, in_comment, holder)
+        return list(found.values())
+
     def download(self, attachment) -> bytes | None:
-        return None  # attachments come in their own slice (§4.5 G27)
+        """The bytes, without any credential; for a private repository through the signed link GitHub renders."""
+        data = self.fetch(attachment.url)
+        if data is None and attachment.holder:
+            html = (self.graphql(HTML, {"id": attachment.holder}).get("node") or {}).get("bodyHTML") or ""
+            asset = urlsplit(attachment.url).path.rsplit("/", 1)[-1]
+            signed = next((url for url in SIGNED.findall(html) if asset in url), None)
+            data = self.fetch(signed.replace("&amp;", "&")) if signed else None
+        return data
+
+    def fetch(self, url: str) -> bytes | None:
+        import httpx
+        self.http = self.http or httpx.Client(follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
+        for _ in range(5):
+            parts = urlsplit(url)
+            if parts.scheme != "https" or parts.hostname not in FILE_HOSTS:
+                return None
+            with self.http.stream("GET", url) as answer:
+                if answer.status_code in (301, 302, 303, 307, 308) and answer.headers.get("location"):
+                    url = answer.headers["location"]
+                    continue
+                if answer.status_code != 200 or parts.hostname == "github.com":  # github.com itself serves pages, not files
+                    return None
+                data = bytearray()
+                for block in answer.iter_bytes():
+                    data += block
+                    if len(data) > CAP:
+                        return None
+                return bytes(data)
+        return None
