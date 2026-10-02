@@ -188,12 +188,122 @@ class Importer:
         if self.index is None:
             self.start()
         self.keys = {record.ident: record.key for record in records}
+        self.plan_links(records)
         for done, record in enumerate(records, 1):
             self.outcomes += self.one(record)
             self.progress(done, len(records))
+        if not self.dry_run:
+            self.outcomes += self.link_pass()
         if complete:
             self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
+
+    # ---------------------------------------------------------------- links (§3.6)
+
+    def plan_links(self, records: list) -> None:
+        """Every link the source asks for between this run's issues, once per pair, with each fallback's note."""
+        states = {record.ident: record.state for record in records}
+        self.planned, requires, seen = set(), defaultdict(set), set()
+
+        def reaches(start, goal):
+            stack, visited = [start], set()
+            while stack:
+                current = stack.pop()
+                if current == goal:
+                    return True
+                if current not in visited:
+                    visited.add(current)
+                    stack += requires[current]
+            return False
+
+        for record in sorted(records, key=lambda r: (len(r.ident), r.ident)):
+            for relation, ref in record.relations:
+                if ref.ident not in states or not self.ctx.shown(ref):
+                    continue
+                if relation in ("parent", "sub_issue"):
+                    child, parent = (record.ident, ref.ident) if relation == "parent" else (ref.ident, record.ident)
+                    self.planned.add(("contributes_to", child, parent))
+                elif relation in ("blocked_by", "blocking"):
+                    dependent, blocker = (record.ident, ref.ident) if relation == "blocked_by" else (ref.ident, record.ident)
+                    if (dependent, blocker) in seen:
+                        continue
+                    seen.add((dependent, blocker))
+                    note = ("completed here" if states[dependent] == "completed" else "the blocker is cancelled"
+                            if states[blocker] == "cancelled" else "it would close a cycle" if reaches(blocker, dependent) else None)
+                    if note:
+                        self.notes[(dependent, blocker)] = f"kept as related: {note}"
+                        self.planned.add(normal("related_to", dependent, blocker))
+                    else:
+                        requires[dependent].add(blocker)
+                        self.planned.add(("requires", dependent, blocker))
+                elif relation in ("duplicate_of", "related"):
+                    self.planned.add(normal("related_to", record.ident, ref.ident))
+
+    def single(self, ident: str) -> Held | None:
+        held = self.index.held.get(("issue", ident), [])
+        return held[0] if len(held) == 1 else None
+
+    def ident_of(self, item: str) -> str | None:
+        return next((ident for (kind, ident), held in self.index.held.items() if kind == "issue" and any(h.item == item for h in held)),
+                    None)
+
+    def existing(self, view: dict) -> dict:
+        """The view's links between imported issues of this run, by their planned form."""
+        found = {}
+        for entry in view.get("links_out", []):
+            ends = self.ident_of(entry["from"]), self.ident_of(entry["to"])
+            if None not in ends and ends[0] in self.keys and ends[1] in self.keys:
+                found[normal(entry["type"], *ends)] = entry["link"]
+        return found
+
+    def stale_links(self, view: dict) -> list:
+        """Removals for the importer's own links that the source no longer asks for; a person's links are never touched."""
+        stale = [link for key, link in self.existing(view).items() if key not in self.planned]
+        makers = {}
+        for start in range(0, len(stale), 32):
+            answer = self.wirk.data("/v2/query", {"fetch": stale[start:start + 32], "depth": "card"})
+            makers.update({found["id"]: found.get("created_by") for found in answer["results"]})
+        return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) == self.me]
+
+    def link_pass(self) -> list:
+        """The missing links, one write per issue (more when over 32), read from each issue's own fetch."""
+        outcomes, by_source = [], defaultdict(list)
+        for link in sorted(self.planned):
+            by_source[link[1]].append(link)
+        for ident, wanted in by_source.items():
+            source = self.single(ident)
+            targets = [(link, self.single(link[2])) for link in wanted]
+            targets = [(link, target) for link, target in targets if target and not target.archived]
+            if not source or source.archived or not targets:
+                continue
+            view = self.wirk.item(source.item, "full")
+            have = self.existing(view)
+            missing = [(link, target) for link, target in targets if link not in have]
+            for start in range(0, len(missing), 31):
+                outcomes += self.write_links(ident, source.item, view["r"], missing[start:start + 31])
+        return outcomes
+
+    def write_links(self, ident, item, revision, chunk) -> list:
+        operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}} for link, target in chunk]
+        expect = {item: revision, **{target.item: target.r for link, target in chunk if link[0] == "contributes_to"}}
+        body = {"request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}", "operations": operations, "expect": expect,
+                "reason": f"Imported from {self.ctx.source}: the relations of {self.keys[ident]}"}
+        notes = []
+        for _ in range(len(operations) + 1):
+            answer = self.wirk.write(body)
+            if answer["ok"]:
+                self.counts["linked"] += len(operations)
+                return [Outcome(self.keys[ident], "links", "linked", "; ".join(notes))] if notes else []
+            problem = answer["errors"][0]
+            index = problem.get("input_index")
+            if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
+                return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}")]
+            operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
+            body = {**body, "request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}",
+                    "expect": {key: value for key, value in expect.items() if key == item or any(
+                        op["data"]["type"] == "contributes_to" and op["data"]["to"] == key for op in operations)}}
+            notes.append(f"kept as related: WIRK refused it ({problem['code']})")
+        return [Outcome(self.keys[ident], "links", "error", "refused repeatedly")]
 
     # ---------------------------------------------------------------- planning one issue
 
@@ -284,7 +394,10 @@ class Importer:
     def operations(self, record, acting, work):
         operations, expect = [], {}
         for plan, action, held in acting:
-            uploads, patch_files = self.files_for(record, plan, held)
+            view = self.wirk.item(held.item, "all") if held else None
+            uploads, patch_files = self.files_for(record, plan, view)
+            if view and plan.kind == "issue":
+                operations += self.stale_links(view)  # before the edit, so a completion is never gated by a stale link
             if action == "create":
                 data = {"title": plan.title, "body": plan.body, **({"uploads": uploads} if uploads else {})}
                 if plan.kind == "issue":
@@ -301,9 +414,9 @@ class Importer:
                 expect[held.item] = held.r
         return operations, expect
 
-    def files_for(self, record, plan, held) -> tuple[list, dict]:
+    def files_for(self, record, plan, view) -> tuple[list, dict]:
         """Uploads for a new item, or what an edit attaches and swaps; attachments are downloaded only when missing."""
-        having = {} if held is None else {f["filename"]: f for f in self.wirk.item(held.item, "all")["all"]["files"]}
+        having = {} if view is None else {f["filename"]: f for f in view["all"]["files"]}
         attach, swap = [], []
         for name, data in plan.files:
             if name in having and having[name]["sha256"] == hashlib.sha256(data).hexdigest():
@@ -320,7 +433,7 @@ class Importer:
                                                    {"role": "original", "origin": {"uri": attachment.url,
                                                                                    "observed_at": record.version}},
                                                    self.rid(record)))
-        if held is None:
+        if view is None:
             return attach, {}
         return [], {**({"attach_uploads": attach} if attach else {}), **({"replace_files": swap} if swap else {})}
 
@@ -342,6 +455,9 @@ class Importer:
             if answer["ok"]:
                 break
             problem = answer["errors"][0]
+            if problem["code"] == "prerequisite_incomplete":
+                return [Outcome(record.key, plan.kind, "skipped", "completing it needs its prerequisites completed first "
+                                "(a link made in WIRK)", held.item if held else None) for plan, _, held in acting]
             fixed = self.fix(record, body, problem)
             if fixed is None:
                 return [Outcome(record.key, plan.kind, "error", f"{problem['code']}: {problem.get('message', '')}")
@@ -434,3 +550,8 @@ class Importer:
                     outcomes.append(Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in "
                                                                        f"{self.ctx.source}; nothing was archived", found.item))
         return outcomes
+
+
+def normal(kind: str, source: str, target: str) -> tuple:
+    """A link as the plan holds it: related_to is the same either way round."""
+    return (kind, *sorted((source, target), key=lambda ident: (len(ident), ident))) if kind == "related_to" else (kind, source, target)

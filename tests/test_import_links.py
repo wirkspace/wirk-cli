@@ -21,8 +21,9 @@ def links(fake):
     """(type, from issue number, to issue number) for every live link between work items."""
     number = {i: int(item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]) - 3000000000
               for i, item in fake.mine().items()}
-    return sorted((l["type"], number[l["from"]], number[l["to"]]) for l in fake.links.values()
-                  if not l["removed"] and l["from"] in number and l["to"] in number)
+    found = [(l["type"], number[l["from"]], number[l["to"]]) for l in fake.links.values()
+             if not l["removed"] and l["from"] in number and l["to"] in number]
+    return sorted((kind, *sorted(ends)) if kind == "related_to" else (kind, *ends) for kind, *ends in found)
 
 
 def item_of(fake, n):
@@ -104,7 +105,7 @@ def test_a_link_cycle_refused_by_wirk_falls_back(fake):
     fake.write({"request_id": "bob-1", "expect": {one: 1}, "operations": [{"op": "link.create", "data": {"type": "requires", "from": one, "to": two}}]})
     fake.as_whom = None
     make(fake).run([issue(1), issue(2, relations=[("blocked_by", to(1))])])
-    assert ("related_to", 2, 1) in links(fake) and ("requires", 2, 1) not in links(fake)
+    assert ("related_to", 1, 2) in links(fake) and ("requires", 2, 1) not in links(fake)
 
 
 def test_completing_work_that_its_own_link_gates_swaps_the_gate_first(fake):
@@ -113,7 +114,7 @@ def test_completing_work_that_its_own_link_gates_swaps_the_gate_first(fake):
     result = make(fake).run([issue(1), issue(2, state="completed", closed="closed as completed by @ada at T",
                                              relations=[("blocked_by", to(1))])])
     assert outcomes(result)[("acme/api#2", "issue")] == "updated"
-    assert links(fake) == [("related_to", 2, 1)]
+    assert links(fake) == [("related_to", 1, 2)]  # related_to reads the same either way round
     assert "(kept as related: completed here)" in body_of(fake, 2)
 
 
