@@ -118,6 +118,7 @@ class Index:
     def __init__(self, wirk: Wirk, source: str, me: str):
         self.wirk, self.source, self.me = wirk, source, me
         self.held, self.blocked_keys, self.blocked, self.forged = defaultdict(list), {}, Counter(), 0
+        self.keys = {}  # item -> (kind, source ID), for the importer's own items
 
     def build(self, texts: list):
         seen = set()
@@ -146,10 +147,11 @@ class Index:
             parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
             if not parsed:
                 return
-        self.held[parsed[1:3]].append(Held(card["id"], card["r"], card["by"], archived, parsed[4]))
+        self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4]))
 
     def add(self, kind: str, ident: str, held: Held):
         self.held[(kind, ident)] = [h for h in self.held[(kind, ident)] if h.item != held.item] + [held]
+        self.keys[held.item] = (kind, ident)
 
 
 @dataclass
@@ -244,8 +246,8 @@ class Importer:
         return held[0] if len(held) == 1 else None
 
     def ident_of(self, item: str) -> str | None:
-        return next((ident for (kind, ident), held in self.index.held.items() if kind == "issue" and any(h.item == item for h in held)),
-                    None)
+        kind, ident = self.index.keys.get(item, (None, None))
+        return ident if kind == "issue" else None
 
     def existing(self, view: dict) -> dict:
         """The view's links between imported issues of this run, by their planned form."""
@@ -299,9 +301,7 @@ class Importer:
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}")]
             operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
-            body = {**body, "request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}",
-                    "expect": {key: value for key, value in expect.items() if key == item or any(
-                        op["data"]["type"] == "contributes_to" and op["data"]["to"] == key for op in operations)}}
+            body = {**body, "request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}"}
             notes.append(f"kept as related: WIRK refused it ({problem['code']})")
         return [Outcome(self.keys[ident], "links", "error", "refused repeatedly")]
 
@@ -504,10 +504,8 @@ class Importer:
 
     def key_of(self, item: str) -> str:
         """An item's source key when it is one of this run's issues, else its short ID."""
-        for (kind, ident), held in self.index.held.items():
-            if kind == "issue" and ident in self.keys and any(h.item == item for h in held):
-                return self.keys[ident]
-        return item[5:13] if item.startswith("item_") else item
+        ident = self.ident_of(item)
+        return self.keys[ident] if ident in self.keys else item[5:13] if item.startswith("item_") else item
 
     # ---------------------------------------------------------------- parts and items no longer needed
 
