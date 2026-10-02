@@ -24,7 +24,8 @@ FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "review": {"--reason": VALUE, "--person": SWITCH, "--request-id": VALUE, "--request": VALUE},
          "show": {"--file": VALUE, "--revoke": VALUE, "--no-open": SWITCH},
          "upload": {"--description": VALUE, "--request-id": VALUE}, "download": {"-o": VALUE},
-         "login": {"--person": SWITCH, "--url": VALUE, "--new": SWITCH}, "admin": {"--request": VALUE}}
+         "login": {"--person": SWITCH, "--url": VALUE, "--new": SWITCH}, "admin": {"--request": VALUE},
+         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}}
 
 
 def parse(words: list[str], flags: dict) -> tuple[list[str], dict]:
@@ -384,8 +385,13 @@ def admin(words, options, transport):
     return emit(connect(transport, person=True).post("/v2/admin", body, uncertain=body.get("request_id")), options)
 
 
+def import_(words, options, transport):
+    from . import importers  # loaded only for this command, so the rest of the CLI stays as fast as before
+    return importers.main(words, options, transport)
+
+
 COMMANDS = {"status": status, "query": query, "write": write, "review": review, "show": show, "upload": upload,
-            "download": download, "login": login, "admin": admin}
+            "download": download, "login": login, "admin": admin, "import": import_}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:

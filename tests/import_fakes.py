@@ -44,6 +44,7 @@ class FakeWirk:
         self.items, self.links, self.objects, self.uploads, self.receipts = {}, {}, {}, {}, {}
         self.requests, self.duplicates, self.faults = [], {}, []
         self.as_whom = None  # a principal other than the importer, for tests that act as a person
+        self.tokens = None  # token -> principal; None takes every token as the importer's
 
     # ---------------------------------------------------------------- transport
 
@@ -54,6 +55,11 @@ class FakeWirk:
         body = json.loads(request.content)
         self.requests.append((request.url.path, body))
         route = request.url.path.rsplit("/", 1)[-1]
+        if self.tokens is not None:  # who the bearer token belongs to, when the test registers tokens
+            caller = self.tokens.get(request.headers.get("authorization", "").removeprefix("Bearer "))
+            if caller is None:
+                return refusal("unauthenticated", "This token is not registered", 401)
+            self.as_whom = None if caller == self.principal else caller
         for fault in list(self.faults):
             if fault(route, body, before=True):
                 raise httpx.ReadTimeout("lost before it ran")
@@ -78,7 +84,7 @@ class FakeWirk:
 
     def status(self, body):
         vocab = [{"key": key, "name": f"{key}: " + ", ".join(options)} for key, options in self.definitions.items()]
-        return envelope({"you": {"principal": self.principal, "kind": "agent", "person": self.person,
+        return envelope({"you": {"principal": self.who(), "kind": "agent", "person": self.person,
                                  "wirkspace": {"id": "wsp_" + "1" * 32, "name": "Scratch"}, "capabilities": ["read", "edit"]},
                          "ask": {"fields": vocab + [{"key": key, "name": key} for key in FIXED]}})
 
