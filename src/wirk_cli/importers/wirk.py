@@ -167,27 +167,30 @@ class Plan:
 
 class Importer:
     def __init__(self, wirk: Wirk, ctx: render.Context, *, users: dict, statuses: dict, plan: dict, withheld, download,
-                 dry_run: bool, overwrite: bool):
+                 dry_run: bool, overwrite: bool, progress=None):
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
-        self.outcomes, self.notes = [], {}
+        self.outcomes, self.notes, self.index, self.progress = [], {}, None, progress or (lambda done, total: None)
 
     # ---------------------------------------------------------------- the run
 
-    def start(self):
+    def start(self, me: str | None = None) -> dict:
+        """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
         you = self.wirk.status()
-        self.me = you["you"]["principal"]
+        self.me = me or you["you"]["principal"]
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
         self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} issue ", f"{self.ctx.source} comments"])
-        return self
+        return you["you"]
 
     def run(self, records: list, complete: bool = True) -> list:
-        self.start()
+        if self.index is None:
+            self.start()
         self.keys = {record.ident: record.key for record in records}
-        for record in records:
+        for done, record in enumerate(records, 1):
             self.outcomes += self.one(record)
+            self.progress(done, len(records))
         if complete:
             self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes

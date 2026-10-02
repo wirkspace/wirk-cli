@@ -156,8 +156,8 @@ def reactions(groups: list) -> str:
 class GitHub:
     source, noun, labels = SOURCE, NOUN, LABELS
 
-    def __init__(self, run=gh, sleep=time.sleep):
-        self.run, self.sleep, self.scopes, self.projects = run, sleep, set(), False
+    def __init__(self, run=None, sleep=None):
+        self.run, self.sleep, self.scopes, self.projects = run or gh, sleep or time.sleep, set(), False
 
     # ---------------------------------------------------------------- talking to GitHub
 
