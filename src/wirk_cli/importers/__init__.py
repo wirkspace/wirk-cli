@@ -184,7 +184,7 @@ class Run:
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
         summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run, "selected": census.selected,
                    "skipped_not_public": census.skipped, "issues": census.issues, "comments": census.comments,
-                   "pull_requests_skipped": census.pulls, "outcomes": dict(counts), "text": dict(importer.counts),
+                   "pull_requests_skipped": census.pulls, "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts),
                    "header_only": large, "missing_options": {k: sorted(v) for k, v in importer.missing.items()},
                    "fields_not_set_up": sorted(importer.unset), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None}
@@ -215,6 +215,7 @@ class Run:
         text = importer.counts
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
                      f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld")
+        lines.append(f"cost: {census.points} GraphQL points · {self.module.SOURCE} read and WIRK {'checked' if self.dry_run else 'written'}")
         lines += [f"note: {note}" for note in census.notes]
         if importer.index.forged:
             lines.append(f"ignored: {importer.index.forged} items with a provenance line the importer did not write")

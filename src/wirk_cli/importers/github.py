@@ -138,6 +138,7 @@ class Census:
     issues: int = 0
     comments: int = 0
     external_images: int = 0
+    points: int = 0  # GraphQL points the read cost
     notes: list = field(default_factory=list)
 
 
@@ -171,6 +172,7 @@ class GitHub:
 
     def __init__(self, run=None, sleep=None, http=None):
         self.run, self.sleep, self.scopes, self.projects, self.http = run or gh, sleep or time.sleep, set(), False, http
+        self.points = 0
 
     # ---------------------------------------------------------------- talking to GitHub
 
@@ -204,6 +206,7 @@ class GitHub:
 
     def pace(self, limit: dict | None) -> None:
         """Wait for the reset when the hour's points run low, so a long read never fails halfway."""
+        self.points += (limit or {}).get("cost", 0)
         if limit and limit["remaining"] < max(50, 2 * limit["cost"]):
             reset = datetime.fromisoformat(limit["resetAt"].replace("Z", "+00:00"))
             self.sleep(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds() + 1))
@@ -255,7 +258,7 @@ class GitHub:
                 census.comments += len(records[-1].comments)
                 census.external_images += sum(1 for text in [node["body"] or ""] + [c["body"] or "" for c in node["comments"]["nodes"]]
                                               for url in IMAGE.findall(text) if not BARE.fullmatch(url))
-        census.issues = len(records)
+        census.issues, census.points = len(records), self.points
         return census, records
 
     def issues(self, repo: dict):
