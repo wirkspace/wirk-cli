@@ -99,17 +99,18 @@ class Seeder:
 
     # ---------------------------------------------------------------- text
 
-    def fake(self, size: int) -> str:
+    def fake(self, size: int, upper: bool = False) -> str:
         """Credential-shaped text that is the same on every run and never a valid token (random checksums)."""
-        rng = random.Random(f"fake-{size}")
-        return "".join(rng.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") for _ in range(size))
+        rng = random.Random(f"fake-{size}{'U' if upper else ''}")
+        letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" if upper else "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        return "".join(rng.choice(letters) for _ in range(size))
 
     def expand(self, text: str) -> str:
         pem = ("-----BEGIN RSA PRIVATE KEY-----\n" + base64.b64encode(random.Random("pem").randbytes(96)).decode()
                + "\n-----END RSA PRIVATE KEY-----")
         text = (text.replace("{sentinel}", self.sentinel).replace("{fake_pem}", pem)
                 .replace("{long_title}", ("A title that keeps going far past what WIRK keeps " * 6)[:256]))
-        text = re.sub(r"\{fake(\d+)\}", lambda m: self.fake(int(m[1])), text)
+        text = re.sub(r"\{fake(U?)(\d+)\}", lambda m: self.fake(int(m[2]), bool(m[1])), text)
         text = re.sub(r"\{n:(\w+)\}", lambda m: str(self.number(m[1])), text)
         return re.sub(r"\{key:(\w+)\}", lambda m: f"{self.names[self.repo_of(m[1])]}#{self.number(m[1])}", text)
 

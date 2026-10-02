@@ -799,7 +799,7 @@
    "seed": "A05",
    "repo": "A",
    "title": "Private, with credential shapes {sentinel}",
-   "body": "Fake shapes with invalid checksums, here only to be redacted. {sentinel}\n\nghp_{fake36}\nAKIA{fake16}\nxoxb-{fake24}\nsk_live_{fake24}\nlin_api_{fake40}\n{fake_pem}",
+   "body": "Fake shapes with invalid checksums, here only to be redacted. {sentinel}\n\nghp_{fake36}\nAKIA{fakeU16}\nxoxb-{fake24}\nsk_live_{fake24}\nlin_api_{fake40}\n{fake_pem}",
    "expect": {
     "status": "open",
     "redacted": 6,
