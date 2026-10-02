@@ -59,7 +59,7 @@ class FakeGh:
             start = int(variables.get("after") or 0)
             window = nodes[start:start + variables["size"]]
             more = start + variables["size"] < len(nodes)
-            return 0, json.dumps({"data": {"rateLimit": limit, "repository": {**found, "issues": page(
+            return 0, json.dumps({"data": {"rateLimit": limit, "repository": {**found, "page": page(
                 window, more, str(start + variables["size"]) if more else None)}}}), ""
         if "repository(owner" in query:
             name = f"{variables['owner']}/{variables['name']}"
