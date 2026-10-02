@@ -205,7 +205,8 @@ def test_a_likely_duplicate_is_resent_and_reported(fake):
     assert created.outcome == "created" and "possible duplicate kept separate" in created.message
     resent = fake.writes()[-1]
     assert resent["operations"][0]["allow_duplicate_of"] == [fake.duplicates["Same words"]]
-    assert "Separate GitHub issues" in resent["reason"]
+    assert "Separate GitHub issues acme/api#2 and acme/api#1; imported as they are" in resent["reason"]
+    assert "possible duplicate kept separate: acme/api#1" in created.message
 
 
 def test_an_owner_who_is_not_a_member_is_dropped_and_reported(fake):
