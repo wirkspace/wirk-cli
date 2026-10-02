@@ -207,6 +207,9 @@ class Run:
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
         if fields:
             lines.append("fields: " + " · ".join(fields))
+        planned = getattr(importer, "planned", set())
+        lines.append(f"links: {len(planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
+                     f"{importer.counts['linked']} written this run")
         text = importer.counts
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
                      f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld")
