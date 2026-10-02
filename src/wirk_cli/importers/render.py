@@ -287,3 +287,9 @@ def digest(title: str, body: str, fields: dict, work: dict, files: list) -> str:
 def sealed(rendered: Rendered, source: str, ident: str, version: str, digest_: str) -> str:
     """The body with its real first line."""
     return line1(source, rendered.kind, ident, version, digest_) + "\n" + rendered.body.split("\n", 1)[1]
+
+
+# ---------------------------------------------------------------- fields (not built yet)
+
+def plan_fields(records, selections, limit, source):
+    raise NotImplementedError
