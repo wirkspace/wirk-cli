@@ -126,8 +126,8 @@ class Run:
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))
         you = status["data"]["you"]
-        if not you.get("files", {"ready": True})["ready"]:
-            raise Stop(f"this WIRK service has no file storage ({you['files'].get('reason')}), and each imported issue keeps "
+        if (files := you.get("files")) and not files["ready"]:  # status names it only when unavailable
+            raise Stop(f"this WIRK service has no file storage ({files.get('reason')}), and each imported issue keeps "
                        "its raw archive there. Nothing was read from GitHub or written to WIRK, and no setup was made",
                        "ask your WIRK administrator to make file storage available, then run the same command again",
                        "files_unavailable")
@@ -219,7 +219,8 @@ class Run:
                    "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None,
                    "setup_by": PERSON_STEP if setup else None}
-        errors = ([problem(stopped)] if stopped else []) + errors_of(outcomes)
+        failed = errors_of(outcomes)
+        errors = ([problem(stopped)] if stopped else []) + failed
         if self.json:
             print(json.dumps({"ok": not errors, "errors": errors,
                               "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
@@ -236,7 +237,7 @@ class Run:
                       + ". Everyone in the wirkspace would read them. To include them, name them:",
                       "  " + command("wirk", "import", self.source, *self.selection, *(name for name, _ in census.skipped), "--dry-run")]
         lines.append("items: " + (" · ".join(f"{outcome}: {count}" for outcome, count in sorted(counts.items())) or "none"))
-        lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in errors_of(outcomes)]
+        lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in failed]
         fields = [f"header only: {key} ({count} values, over the limit of {limit})" for key, count in large.items()]
         fields += [f"missing options in {key}: {', '.join(sorted(values)[:5])}" for key, values in importer.missing.items()]
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
