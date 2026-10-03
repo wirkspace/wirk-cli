@@ -464,3 +464,14 @@ def test_a_round_trip_through_a_project_not_selected_withholds_the_whole_stay(fo
     archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
     assert b"Outside" not in archive and b"OUT-9" not in archive and b"legal hold" not in archive
     assert b"First words" in archive and b"Later words" in archive
+
+
+def test_a_move_whose_from_is_missing_fails_closed(folder):
+    entries = {"20005": [
+        {"id": "41", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("status", "To Do", "Outside legal hold")]},
+        {"id": "42", "author": ADA, "created": "2026-09-02T00:00:00.000+0000", "items": [
+            history_item("project", "Outside", "Seed project", to="10000")]},
+        {"id": "43", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [history_item("summary", "Later words", "Issue 5")]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Outside" not in archive and b"Later words" in archive
