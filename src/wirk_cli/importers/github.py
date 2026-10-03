@@ -142,6 +142,7 @@ class Stop(Exception):
 class Census:
     selected: list = field(default_factory=list)
     skipped: list = field(default_factory=list)  # (repository, issues) not public and not named
+    named_private: list = field(default_factory=list)  # (repository, visibility, issues) not public, named (§3.9)
     pulls: int = 0
     issues: int = 0
     comments: int = 0
@@ -284,6 +285,8 @@ class GitHub:
             if repo is None:
                 raise Stop(f"GitHub has no repository {word} that this login can see")
             found[repo["nameWithOwner"]] = repo
+            if repo["visibility"] != "PUBLIC":
+                census.named_private.append((repo["nameWithOwner"], repo["visibility"].lower(), repo["issues"]["totalCount"]))
         census.skipped = [(name, count) for name, count in census.skipped if name not in found]
         census.selected = sorted(found)
         census.pulls = sum(repo["pullRequests"]["totalCount"] for repo in found.values())

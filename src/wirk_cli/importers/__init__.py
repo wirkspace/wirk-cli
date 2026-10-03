@@ -183,7 +183,7 @@ class Run:
         limit = self.mapped.get("field_limit", 50)
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
         summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run, "selected": census.selected,
-                   "skipped_not_public": census.skipped, "issues": census.issues, "comments": census.comments,
+                   "skipped_not_public": census.skipped, "named_not_public": census.named_private, "issues": census.issues, "comments": census.comments,
                    "pull_requests_skipped": census.pulls, "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts),
                    "header_only": large, "missing_options": {k: sorted(v) for k, v in importer.missing.items()},
                    "fields_not_set_up": sorted(importer.unset), "forged_lines_ignored": importer.index.forged,
@@ -197,6 +197,8 @@ class Run:
                  f"as {self.principal}" + (" · dry run, nothing written" if self.dry_run else ""),
                  f"selection: {len(census.selected)} repositories · {census.issues} issues · {census.comments} comments · "
                  f"pull requests skipped: {census.pulls}"]
+        lines += [f"warning: {name} is {visibility} on {self.module.SOURCE}: everyone in the wirkspace will read its {count} issues"
+                  for name, visibility, count in census.named_private]
         if census.skipped:
             lines += [f"skipped, not public: " + ", ".join(f"{name} ({count} issues)" for name, count in census.skipped)
                       + ". Everyone in the wirkspace would read them. To include them, name them:",
