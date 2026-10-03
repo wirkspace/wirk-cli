@@ -407,7 +407,7 @@ class GitHub:
             elif value["__typename"] == "IssueFieldMultiSelectValue":
                 fields[name] = [option["name"] for option in value["options"]]
             elif name == "Target date":
-                due = f"{day(value['value'])}T23:59:59Z"
+                due = f"{day(value['value'])}T23:59:59Z" if value["value"] else None
             values.append(f"{name} {', '.join(fields[name]) if name in fields else value['value']}")
         when = ", ".join([*([f"due {day(milestone['dueOn'])}"] if milestone and milestone["dueOn"] else []),
                           *([milestone["state"].lower()] if milestone else [])])

@@ -94,7 +94,7 @@ class Linear:
     def check(self) -> None:
         path = self.folder / "linear-key"
         fix = ("make a personal API key restricted to Read in Linear (Settings, Account, Security & access), then save it "
-               f"where only you can read it: (umask 077 && pbpaste > {path})")
+               f"where only you can read it: run (umask 077 && cat > {path}), paste the key, press Enter and then Ctrl-D")
         try:
             info = os.lstat(path)
         except FileNotFoundError:
