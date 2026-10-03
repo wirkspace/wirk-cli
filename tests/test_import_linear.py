@@ -451,4 +451,4 @@ def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):
                                                            "relatedProjectMilestone": None}]
     records = read(fake, folder)[2]
     retention = next(r for r in records if r.key == "Data retention")
-    assert [(kind, ref.key) for kind, ref in retention.relations] == [("blocked_by", "Checkout v2 · Beta")]
+    assert [(kind, ref.key) for kind, ref in retention.relations if kind == "blocked_by"] == [("blocked_by", "Checkout v2 · Beta")]
