@@ -92,7 +92,7 @@ class Run:
             self.mapped = mapped = self.read_map()
             adapter = self.adapter
             if "cancelled" in mapped:  # Jira's resolutions that mean done work was not done
-                adapter.cancelled = set(mapped["cancelled"])
+                adapter.cancelled = mapped["cancelled"]  # checked by the adapter that reads it
             adapter.check()
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)

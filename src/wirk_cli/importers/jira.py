@@ -69,6 +69,8 @@ class Jira:
 
     def check(self) -> None:
         path = self.folder / "jira-key"
+        if not isinstance(self.cancelled, (list, set)) or not all(isinstance(name, str) for name in self.cancelled):
+            raise Stop("the map file's cancelled must be a list of resolution names", '"cancelled": ["Won\'t Do", "Duplicate"]')
         fix = (f"make a scoped API token with the read scopes (read:jira-work, read:jira-user) at id.atlassian.com, then save "
                f'{{"site": "<name>.atlassian.net", "email": "<your Atlassian login>", "token": "<the token>"}} where only you '
                f"can read it: run (umask 077 && cat > {path}), paste it, press Enter and then Ctrl-D")
