@@ -408,3 +408,19 @@ def test_a_watch_or_vote_alone_leaves_the_work_item_current(folder):
     before = len(store.writes())
     assert set(outcomes(make(store, ctx=found.context(census.selected)).run(records)).values()) == {"current"}
     assert len(store.writes()) == before
+
+
+
+def test_the_history_never_names_a_file_that_was_not_kept(folder):
+    files = [{"id": f"1002{n}", "filename": name, "mimeType": "text/plain", "size": 3, "author": ADA, "created": "2026-09-02T00:00:00.000+0000",
+              "content": f"{BASE}/rest/api/3/attachment/content/1002{n}"} for n, name in enumerate(["seen.png", "payroll-dump.csv"])]
+    shown, hidden = comment(1, ""), comment(2, "Managers only", visibility={"type": "role", "value": "Managers"})
+    shown["body"] = {"version": 1, "type": "doc", "content": [{"type": "mediaSingle", "content": [
+        {"type": "media", "attrs": {"id": "m-seen", "alt": "seen.png"}}]}]}
+    history = {"20001": [{"id": "5", "author": ADA, "created": "2026-09-02T00:00:00.000+0000", "items": [
+        {"field": "Attachment", "fieldtype": "jira", "from": None, "fromString": None, "to": "10020", "toString": "seen.png"},
+        {"field": "Attachment", "fieldtype": "jira", "from": None, "fromString": None, "to": "10021", "toString": "payroll-dump.csv"}]}]}
+    node = issue(1, attachment=files, comment={"comments": [shown, hidden], "total": 2, "startAt": 0, "maxResults": 100})
+    found, census, records = read(FakeJira([node], history), folder)
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"payroll-dump.csv" not in archive and b"seen.png" in archive
