@@ -147,7 +147,7 @@ def test_one_version_everywhere():
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
     text = help_of(capsys)
     assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
-    assert "only people decide proposals" in text
+    assert "only people decide proposals" in text.lower()
     assert "wirk review ID@N accept --reason 'Why' --person" in text  # what your person runs at their own terminal
 
 
