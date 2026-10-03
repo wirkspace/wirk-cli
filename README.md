@@ -55,6 +55,18 @@ Agents never run them. The agent help, the skill and the MCP server name only th
 
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
 
+## Changes
+
+### 0.4.0
+
+- `wirk import github OWNER` brings a GitHub owner's issues into a wirkspace. Each issue becomes work, with its history as text, its comments in a linked doc and its raw record as a file, and running it again brings only what changed. Start with `--dry-run`; a person who administers the account applies the setup it prints. GitHub is only read, through your `gh` login. See `wirk import --help`.
+
+### 0.3.1
+
+- `wirk --version` prints the version.
+- The help says only people decide proposals and how, leaves out `wirk show` until it is live, and names the refusals agents meet.
+- Login prints the service's next step once.
+
 ## Development
 
 `uv run --extra test python -m pytest tests -q` runs the tests. The contract tests run against a scratch WIRK service when `WIRK_TEST_URL` and `WIRK_TEST_ADMIN_TOKEN_FILE` are set.
