@@ -120,6 +120,7 @@ class Context:
     labels: dict  # relation -> header label
     kinds: tuple = ("issue",)  # what the adapter writes, besides discussions
     docs: frozenset = frozenset()  # the kinds written as docs, not work
+    seen: frozenset = frozenset()  # IDs of objects other than issues the source still has, selected or not
 
     def shown(self, ref: Ref) -> bool:
         return ref.public or ref.scope in self.selected

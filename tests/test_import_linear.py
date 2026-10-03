@@ -414,8 +414,8 @@ def test_projects_milestones_initiatives_documents_and_updates_of_the_selected_t
     kinds = {(record.kind, record.key) for record in records}
     assert kinds == {("issue", "ENG-1"), ("project", "Checkout v2"), ("project", "Data retention"), ("milestone", "Checkout v2 · Beta"),
                      ("milestone", "Checkout v2 · GA"), ("initiative", "Reliability 2026"), ("initiative", "Self-serve"),
-                     ("document", "Checkout spec"), ("document", "Old notes"), ("update", "Checkout v2 update 2026-09-20"),
-                     ("update", "Reliability 2026 update 2026-09-20")}  # nothing of the private team's
+                     ("document", "Checkout spec"), ("document", "Old notes"), ("update", "Checkout v2 update 2026-09-20 (pu-1)"),
+                     ("update", "Reliability 2026 update 2026-09-20 (iu-2)")}  # nothing of the private team's
     assert "also read: 2 projects · 2 milestones · 2 initiatives · 2 documents · 2 updates" in census.notes
     by = {(record.kind, record.key): record for record in records}
     links = lambda kind, key: [(relation, ref.key) for relation, ref in by[(kind, key)].relations]
@@ -437,8 +437,8 @@ def test_projects_milestones_initiatives_documents_and_updates_of_the_selected_t
     spec = by[("document", "Checkout spec")]
     assert links("document", "Checkout spec") == [("of", "Checkout v2")] and spec.attachments[0].name.endswith("-flow.png")
     assert [c.body for c in spec.comments] == ["On the spec"] and by[("document", "Old notes")].archived.startswith("In Linear's trash")
-    weekly = by[("update", "Checkout v2 update 2026-09-20")]
-    assert links("update", "Checkout v2 update 2026-09-20") == [("of", "Checkout v2")] and "Health: On track" in weekly.facts
+    weekly = by[("update", "Checkout v2 update 2026-09-20 (pu-1)")]
+    assert links("update", "Checkout v2 update 2026-09-20 (pu-1)") == [("of", "Checkout v2")] and "Health: On track" in weekly.facts
     assert [c.body for c in weekly.comments] == ["On the update"]
     ctx = found.context(census.selected)
     assert ctx.docs == {"initiative", "document", "update"} and set(ctx.kinds) >= {"issue", "project", "milestone"}
@@ -452,3 +452,14 @@ def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):
     records = read(fake, folder)[2]
     retention = next(r for r in records if r.key == "Data retention")
     assert [(kind, ref.key) for kind, ref in retention.relations if kind == "blocked_by"] == [("blocked_by", "Checkout v2 · Beta")]
+
+
+def test_update_keys_are_unique_and_a_bracket_in_a_name_is_escaped_in_its_key(folder):
+    fake = FakeLinear([issue(1)])
+    fake.lists["projectUpdates"] = [update(1, "p-1"), update(3, "p-1", body="Again the same day.")]
+    fake.lists["projects"] = PROJECTS + [project(4, "Odd ] name", ["ENG"])]
+    records = read(fake, folder)[2]
+    assert {r.key for r in records if r.key.startswith("Checkout v2 update")} == {
+        "Checkout v2 update 2026-09-20 (pu-1)", "Checkout v2 update 2026-09-20 (pu-3)"}
+    odd = next(r for r in records if r.ident == "p-4")
+    assert odd.key == "Odd \\] name" and odd.title == "Odd ] name"

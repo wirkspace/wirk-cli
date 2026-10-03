@@ -92,6 +92,11 @@ def due_at(day: str, zone: str | None) -> str:
     return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def bracketed(name: str) -> str:
+    """A name as a key: a ] inside it escaped, so `text='Linear project [<key>]'` finds that one object (§3.3)."""
+    return name.replace("\\", "\\\\").replace("]", "\\]")
+
+
 def reactions(data) -> str:
     counts = Counter()
     for entry in data or []:
@@ -189,7 +194,7 @@ class Linear:
     # ---------------------------------------------------------------- what to read
 
     def context(self, selected: list) -> render.Context:
-        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS)
+        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, frozenset(self.seen))
 
     def read(self, selection: list) -> tuple[render.Census, list]:
         lists = {name: self.every(name, args, nodes) for name, (args, nodes) in LISTS.items()}
@@ -203,6 +208,8 @@ class Linear:
                        f"the teams it can see: {', '.join(sorted(keys))}")
         chosen = [keys[word] for word in selection] or [team for team in lists["teams"] if not team["private"]]
         self.chosen = {team["id"] for team in chosen}
+        self.seen = {node["id"] for name in ("projects", "projectMilestones", "initiatives", "documents", "projectUpdates",
+                                             "initiativeUpdates") for node in lists[name]}  # in Linear, selected or not
         issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
         for node in issues:
             for name in NESTED:
@@ -274,26 +281,30 @@ class Linear:
         for node in milestones:
             project = self.projects[node["project"]["id"]]
             records.append(self.build("milestone", node, self.part(node["id"]).key, node["description"] or "", project["url"],
-                                      node.get("updatedAt") or project["updatedAt"], state="completed" if node["status"] == "done" else "open",
+                                      node.get("updatedAt") or project["updatedAt"], title=f"{project['name']} · {node['name']}", state="completed" if node["status"] == "done" else "open",
                                       facts=[f"Target: {node['targetDate']}"] if node["targetDate"] else [],
                                       due=due_at(node["targetDate"], "UTC") if node["targetDate"] else None,
                                       relations=[("project", self.part(project["id"]))] + related[node["id"]]))
-        records += [self.build("initiative", node, node["name"], self.text(node), node["url"], node["updatedAt"],
+        records += [self.build("initiative", node, bracketed(node["name"]), self.text(node), node["url"], node["updatedAt"],
+                               title=node["name"],
                                facts=[" · ".join([f"Status: {node['status']}",
                                                   *([f"Health: {HEALTH[node['health']]}"] if node["health"] in HEALTH else []),
                                                   *([f"Target: {node['targetDate']}"] if node["targetDate"] else []),
                                                   *([f"Owner: {self.person(node['owner'])}"] if node["owner"] else [])])],
                                relations=related[node["id"]], comments=comments[node["id"]]) for node in initiatives]
+        names = {node["id"]: node["name"] for node in projects + initiatives}
         parents = {**{node["id"]: self.part(node["id"]) for node in projects + initiatives},
                    **{node["id"]: self.reference(node) for node in issues}}
-        records += [self.build("document", node, node["title"], node["content"] or "", node["url"], node["updatedAt"],
+        records += [self.build("document", node, bracketed(node["title"]), node["content"] or "", node["url"], node["updatedAt"],
+                               title=node["title"],
                                opened=[f"Written by {self.person(node['creator'])} {node['createdAt']}"],
                                relations=[("of", parents[parent])], comments=comments[node["id"]])
                     for node in lists["documents"]
                     for parent in [((node["project"] or node["initiative"] or node["issue"]) or {}).get("id")] if parent in parents]
         for name, kind in (("projectUpdates", "project"), ("initiativeUpdates", "initiative")):
-            records += [self.build("update", node, f"{parents[node[kind]['id']].key} update {node['createdAt'][:10]}", node["body"] or "",
-                                   node["url"], node["editedAt"] or node["createdAt"],
+            records += [self.build("update", node, f"{parents[node[kind]['id']].key} update {node['createdAt'][:10]} ({node['id']})",
+                                   node["body"] or "", node["url"], node["editedAt"] or node["createdAt"],
+                                   title=f"{names[node[kind]['id']]} update {node['createdAt'][:10]}",
                                    opened=[" · ".join([f"Posted by {self.person(node['user'])} {node['createdAt']}",
                                                        *(["edited"] if node["editedAt"] else [])])],
                                    facts=[f"Health: {HEALTH[node['health']]}" if node["health"] in HEALTH else "",
@@ -307,12 +318,12 @@ class Linear:
         if ident in self.milestones:
             milestone = self.milestones[ident]
             project = self.part(milestone["project"]["id"])
-            return render.Ref(f"{project.key} · {milestone['name']}", project.scope, project.public, ident)
+            return render.Ref(f"{project.key} · {bracketed(milestone['name'])}", project.scope, project.public, ident)
         if ident in self.initiatives:  # initiatives belong to the whole workspace
-            return render.Ref(self.initiatives[ident]["name"], "", True, ident)
+            return render.Ref(bracketed(self.initiatives[ident]["name"]), "", True, ident)
         teams = [self.teams[t["id"]] for t in self.projects[ident]["teams"]["nodes"] if t["id"] in self.teams]
         scope = next((t["key"] for t in teams if t["id"] in self.chosen), teams[0]["key"] if teams else "")
-        return render.Ref(self.projects[ident]["name"], scope, any(not t["private"] for t in teams), ident)
+        return render.Ref(bracketed(self.projects[ident]["name"]), scope, any(not t["private"] for t in teams), ident)
 
     def project(self, node: dict, comments: dict, related: dict) -> render.Record:
         teams = [self.teams[t["id"]] for t in node["teams"]["nodes"] if t["id"] in self.teams]
@@ -320,7 +331,8 @@ class Linear:
         status, priority, health = node["status"] or {}, PRIORITIES.get(node["priority"]), HEALTH.get(node["health"])
         target, day = self.target(node["targetDate"], node["targetDateResolution"])
         return self.build(
-            "project", node, node["name"], self.text(node), node["url"], node["updatedAt"], state=STATES.get(status.get("type"), "open"),
+            "project", node, self.part(node["id"]).key, self.text(node), node["url"], node["updatedAt"], title=node["name"],
+            state=STATES.get(status.get("type"), "open"),
             opened=[" · ".join([f"Created {node['createdAt']}", *(f"{word} {node[word + 'At']}" for word in ("completed", "canceled")
                                                                 if node.get(word + "At"))])],
             facts=[" · ".join([f"Teams: {', '.join(shown)}", f"Status: {status.get('name')} ({status.get('type')})",
@@ -349,13 +361,13 @@ class Linear:
     def text(node: dict) -> str:
         return "\n\n".join(part for part in (node["description"], node["content"]) if part)
 
-    def build(self, kind: str, node: dict, key: str, body: str, url: str, version: str, *, state="open", closed=None, opened=(),
-              facts=(), lead=None, fields=None, due=None, relations=(), comments=()) -> render.Record:
+    def build(self, kind: str, node: dict, key: str, body: str, url: str, version: str, *, title=None, state="open", closed=None,
+              opened=(), facts=(), lead=None, fields=None, due=None, relations=(), comments=()) -> render.Record:
         """Any object but an issue, as a record."""
         ordered, lead = self.thread(list(comments)), self.users.get((lead or {}).get("id"))
         archived = (f"In Linear's trash since {node['archivedAt'][:10]}" if node.get("trashed") else
                     f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
-        return render.Record(SOURCE, kind, node["id"], key, url, version, key, body, state, closed, list(opened),
+        return render.Record(SOURCE, kind, node["id"], key, url, version, title or key, body, state, closed, list(opened),
                              [fact for fact in facts if fact] + ([archived] if archived else []),
                              [(lead["displayName"], f"@{lead['displayName']}")] if lead else [],
                              {name: values for name, values in (fields or {}).items() if values and None not in values}, due,

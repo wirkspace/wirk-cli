@@ -13,6 +13,7 @@ from . import render
 
 PAGE = {"limit": 100, "max_bytes": 65536}
 UNSETTLED = {"outcome_unknown", "storage_failed", "storage_mismatch"}  # failures of one issue's write or file
+KEYED = re.compile(r"\[((?:\\.|[^\]\\])*)\]")  # a key in brackets, a ] inside it escaped
 
 
 class WirkError(Exception):
@@ -589,22 +590,24 @@ class Importer:
         return outcomes
 
     def gone(self, present: set) -> list:
-        """The importer's active items whose issue a complete read of the same selection no longer has."""
+        """The importer's active items that the source no longer has: an issue missing from a complete read of its scope, or
+        another object missing from everything the source showed, selected or not."""
         outcomes = []
         for (kind, ident), held in self.index.held.items():
-            if kind != "issue" or ident in present:
+            if kind.startswith("comments") or ident in present or kind != "issue" and ident in self.ctx.seen:
                 continue
             for found in held:
                 if not found.archived:
-                    outcomes += self.guarded(ident, "issue", self.missing_one, ident, found)
+                    outcomes += self.guarded(ident, kind, self.missing_one, kind, ident, found)
         return outcomes
 
-    def missing_one(self, ident: str, found: Held) -> list:
+    def missing_one(self, kind: str, ident: str, found: Held) -> list:
         lines = self.wirk.item(found.item, "full")["body"].split("\n")
-        key = next((line.split("[", 1)[1].split("]", 1)[0] for line in lines if line.startswith(f"{self.ctx.source} issue [")), ident)
-        scope = re.sub(r"[#-][0-9]+$", "", key)  # acme/api#12 is in acme/api, ENG-12 in ENG
-        return [Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; "
-                                                 "nothing was archived", found.item)] if scope in self.ctx.selected else []
+        key = next((m[1] for line in lines if line.startswith(f"{self.ctx.source} {kind} [") for m in [KEYED.search(line)] if m), ident)
+        if kind == "issue" and re.sub(r"[#-][0-9]+$", "", key) not in self.ctx.selected:  # acme/api#12 is in acme/api, ENG-12 in ENG
+            return []
+        return [Outcome(key, kind, "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; nothing was archived",
+                        found.item)]
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
