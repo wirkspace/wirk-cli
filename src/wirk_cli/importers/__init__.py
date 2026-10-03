@@ -261,10 +261,8 @@ class Run:
             lines.append(f"ignored: {importer.index.forged} items with a provenance line the importer did not write")
         if setup:
             lines.append(f"setup: review {setup}; {PERSON_STEP}: wirk admin --request {setup}")
-        if outcomes:
-            first = next((o.key for o in outcomes if o.kind == "issue"), None)
-            if first:
-                lines.append(f"find one: wirk query text='{self.adapter.source} issue [{first}]'")
+        if first := next((o.key for o in outcomes if o.kind == "issue"), None):
+            lines.append(f"find one: wirk query text='{self.adapter.source} issue [{first}]'")
         for outcome in attention[:50]:
             lines.append("  " + outcome.line())
         if len(attention) > 50:
