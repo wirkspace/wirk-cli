@@ -442,3 +442,13 @@ def test_projects_milestones_initiatives_documents_and_updates_of_the_selected_t
     assert [c.body for c in weekly.comments] == ["On the update"]
     ctx = found.context(census.selected)
     assert ctx.docs == {"initiative", "document", "update"} and set(ctx.kinds) >= {"issue", "project", "milestone"}
+
+
+def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):
+    fake = FakeLinear([issue(1)])
+    fake.lists["projectRelations"] = PROJECT_RELATIONS + [{"id": "pr-2", "type": "blocks", "project": {"id": "p-unseen"},
+                                                           "relatedProject": {"id": "p-2"}, "projectMilestone": None,
+                                                           "relatedProjectMilestone": None}]
+    records = read(fake, folder)[2]
+    retention = next(r for r in records if r.key == "Data retention")
+    assert [(kind, ref.key) for kind, ref in retention.relations] == [("blocked_by", "Checkout v2 · Beta")]
