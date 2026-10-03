@@ -18,16 +18,11 @@ from ..client import Failure, Service, config_dir, digest, new_token, read_token
 from ..grammar import UsageError, command
 from ..help import HELP
 from . import github, render, wirk
+from .render import Stop
 
 SOURCES = {"github": github}
 DEFAULT_STATUSES = {"open": "open", "in_progress": "in_progress", "completed": "completed", "cancelled": "cancelled"}
 ATTENTION = {"skipped", "blocked", "ambiguous", "missing", "error", "would archive", "archived"}
-
-
-class Stop(Exception):
-    def __init__(self, message: str, fix: str = ""):
-        super().__init__(message)
-        self.fix = fix
 
 
 def main(words: list, options: dict, transport=None) -> int:
@@ -36,7 +31,7 @@ def main(words: list, options: dict, transport=None) -> int:
         return 0
     try:
         return Run(words, options, transport).go()
-    except (Stop, github.Stop) as stop:
+    except Stop as stop:
         print(f"Error import: {stop}" + (f"\n  {stop.fix}" if stop.fix else ""), file=sys.stderr)
         return 2
     except wirk.WirkError as error:
@@ -77,7 +72,7 @@ class Run:
             adapter.check()
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
-            plan = render.plan_fields(records, adapter.selections(records), mapped.get("field_limit", 50), adapter.source)
+            plan = render.plan_fields(records, adapter.selections(records), adapter.source)
             importer = wirk.Importer(wirk.Wirk(service, self.pairs.get("workspace_id")), ctx, users=mapped.get("users", {}),
                                      statuses={**DEFAULT_STATUSES, **mapped.get("status", {})}, plan=plan,
                                      withheld=adapter.withheld(ctx), download=adapter.download, dry_run=self.dry_run,
@@ -86,7 +81,7 @@ class Run:
             self.check_statuses(importer)
             try:
                 outcomes = importer.run(records)
-            except (Stop, github.Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
+            except (Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
                 self.report(census, importer, importer.outcomes, you, setup=None, stopped=stop)
                 return 2
             if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
@@ -220,8 +215,7 @@ class Run:
         if importer.not_members:
             lines.append(f"owners: {', '.join(sorted(importer.not_members))} not in this wirkspace, so their issues have no owner; "
                          f"add them, or change {self.map_file}")
-        planned = getattr(importer, "planned", set())
-        lines.append(f"links: {len(planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
+        lines.append(f"links: {len(importer.planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
                      f"{importer.counts['linked']} written this run")
         lines.append(f"files: attachments stored {importer.counts['attachments']} · left as links {importer.counts['left as links']} · "
                      f"images on other hosts left as links {census.external_images}")

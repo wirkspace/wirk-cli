@@ -40,6 +40,14 @@ SPAM = {"spam", "abuse"}
 RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "related", "transferred_from", "mentioned")
 
 
+class Stop(Exception):
+    """The run cannot start or go on; `fix` is what helps (exit status 2, §2.3)."""
+
+    def __init__(self, message: str, fix: str = ""):
+        super().__init__(message)
+        self.fix = fix
+
+
 @dataclass(frozen=True)
 class Ref:
     """A reference to another object: shown only when its scope is selected or public."""
@@ -69,7 +77,6 @@ class Record:
     ident: str
     key: str
     url: str
-    scope: str
     version: str
     title: str
     body: str
@@ -305,7 +312,6 @@ class FieldPlan:
     name: str
     selection: str  # one or many
     options: dict  # option name -> key, in use
-    descriptions: dict  # option name -> description
 
 
 @dataclass(frozen=True)
@@ -329,7 +335,7 @@ def field_key(name: str, source: str) -> str:
     return f"{source.lower()}_{key}" if key in RESERVED else key
 
 
-def plan_fields(records: list, selections: dict, limit: int, source: str) -> dict:
+def plan_fields(records: list, selections: dict, source: str) -> dict:
     """Every field the source may fill, with the options in use; `small` ones become fields (§3.8)."""
     used = {name: {} for name in selections}
     for record in records:
@@ -345,7 +351,7 @@ def plan_fields(records: list, selections: dict, limit: int, source: str) -> dic
                 key, number = f"{slug(value)}_{number}", number + 1
             taken.add(key)
             options[value] = key
-        plans[name] = FieldPlan(field_key(name, source), name, selections[name], options, {})
+        plans[name] = FieldPlan(field_key(name, source), name, selections[name], options)
     return plans
 
 

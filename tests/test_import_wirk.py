@@ -18,7 +18,7 @@ LABELS = {"open": "open", "in_progress": "in_progress", "completed": "completed"
 
 def issue(number, **changes):
     base = dict(source="GitHub", kind="issue", ident=str(3000000000 + number), key=f"acme/api#{number}",
-                url=f"https://github.com/acme/api/issues/{number}", scope="acme/api", version="2026-09-30T12:00:00Z",
+                url=f"https://github.com/acme/api/issues/{number}", version="2026-09-30T12:00:00Z",
                 title=f"Issue {number}", body=f"Body of {number}.", state="open", closed=None,
                 opened=[f"Opened by @ada 2026-09-01T10:00:00Z"], facts=[], assignees=[], fields={"Repository": ["acme/api"]},
                 due=None, relations=[], comments=[], attachments=[], raw={"number": number}, raw_comments=[])
@@ -32,10 +32,12 @@ def said(text, when="2026-09-02T11:00:00Z"):
 
 def make(fake, **options):
     service = Service("https://wirk.test", "wirk_" + "t" * 43, transport=httpx.MockTransport(fake))
-    plan = render.plan_fields([], {"Repository": "one"}, 50, "GitHub")
+    plan = render.plan_fields([], {"Repository": "one"}, "GitHub")
     defaults = dict(users={}, statuses=LABELS, plan=plan, withheld=lambda node: False, download=lambda attachment: b"",
                     dry_run=False, overwrite=False)
-    return wirk.Importer(wirk.Wirk(service), CTX, **{**defaults, **options})
+    importer = wirk.Importer(wirk.Wirk(service), CTX, **{**defaults, **options})
+    importer.start()
+    return importer
 
 
 @pytest.fixture
@@ -79,9 +81,9 @@ def test_a_completed_issue_is_created_completed_with_its_evidence(fake):
 
 
 def test_fields_without_an_option_stay_text_and_are_reported(fake):
-    importer = make(fake, plan=render.plan_fields([issue(4, fields={"Repository": ["acme/api"], "Label": ["bug", "new"]})],
-                                                  {"Repository": "one", "Label": "many"}, 50, "GitHub"))
     fake.definitions["label"] = {"bug": "active"}
+    importer = make(fake, plan=render.plan_fields([issue(4, fields={"Repository": ["acme/api"], "Label": ["bug", "new"]})],
+                                                  {"Repository": "one", "Label": "many"}, "GitHub"))
     importer.run([issue(4, fields={"Repository": ["acme/api"], "Label": ["bug", "new"]})])
     assert next(iter(fake.mine().values()))["revisions"][-1]["fields"]["label"] == ["bug"]
     assert importer.missing == {"label": {"new"}}

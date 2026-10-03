@@ -21,11 +21,7 @@ class WirkError(Exception):
 
 
 class NotMember(Exception):
-    """WIRK refused an owner: the issue is planned again without them."""
-
-    def __init__(self, owner: str):
-        super().__init__(owner)
-        self.owner = owner
+    """WIRK refused an owner (the exception's argument): the issue is planned again without them."""
 
 
 @dataclass
@@ -186,7 +182,7 @@ class Importer:
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
         self.not_members = set()  # owners WIRK refused this run: their issues are planned without an owner
-        self.outcomes, self.notes, self.index, self.progress = [], {}, None, progress or (lambda done, total: None)
+        self.outcomes, self.notes, self.progress = [], {}, progress or (lambda done, total: None)
 
     # ---------------------------------------------------------------- the run
 
@@ -199,9 +195,7 @@ class Importer:
         self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} issue ", f"{self.ctx.source} comments"])
         return you["you"]
 
-    def run(self, records: list, complete: bool = True) -> list:
-        if self.index is None:
-            self.start()
+    def run(self, records: list) -> list:
         self.keys = {record.ident: record.key for record in records}
         self.plan_links(records)
         for done, record in enumerate(records, 1):
@@ -209,8 +203,7 @@ class Importer:
             self.progress(done, len(records))
         if not self.dry_run:
             self.outcomes += self.link_pass()
-        if complete:
-            self.outcomes += self.gone({record.ident for record in records})
+        self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
 
     def attempt(self, record: render.Record) -> list:
@@ -219,7 +212,7 @@ class Importer:
             return self.one(record)
         except NotMember as refused:  # nothing of this issue was written: plan it again, without that owner
             self.counts = counts
-            self.not_members.add(refused.owner)
+            self.not_members.add(refused.args[0])
             return self.attempt(record)
 
     def guarded(self, key: str, kind: str, work, *args) -> list:
@@ -501,10 +494,6 @@ class Importer:
             if answer["ok"]:
                 break
             problem = answer["errors"][0]
-            operation = body["operations"][problem.get("input_index", 0)]
-            owner = ((operation.get("data") or operation.get("patch") or {}).get("work") or {}).get("owner_id")
-            if problem["code"] == "unknown_owner" and owner and owner not in self.not_members:
-                raise NotMember(owner)
             if problem["code"] == "prerequisite_incomplete":
                 return each("skipped", "completing it needs its prerequisites completed first (a link made in WIRK)")
             fixed = self.fix(record, body, problem)
@@ -528,6 +517,9 @@ class Importer:
         """Change the refused write so it can go through, and say what changed; None when it cannot."""
         operation = body["operations"][problem.get("input_index", 0)]
         part = operation.get("data") or operation.get("patch") or {}
+        owner = (part.get("work") or {}).get("owner_id")
+        if problem["code"] == "unknown_owner" and owner and owner not in self.not_members:
+            raise NotMember(owner)
         if problem["code"] == "likely_duplicate" and operation["op"] == "item.create":
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
             # an item the importer made is kept separate only when the index knows it as another issue's work

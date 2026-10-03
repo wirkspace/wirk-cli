@@ -12,6 +12,7 @@ import time
 from urllib.parse import urlsplit
 
 from . import render
+from .render import Stop
 
 SOURCE = "GitHub"
 NOUN = ("repository", "repositories")
@@ -128,14 +129,6 @@ def more_query(name: str, projects: bool) -> str:
     args = args.replace("first: 100", "first: 100, after: $after")
     return (f"query($id: ID!, $after: String) {{ {LIMIT} node(id: $id) {{ ... on Issue {{ {name}({args}) "
             f"{{ pageInfo {{ hasNextPage endCursor }} {nodes} }} }} }} }}")
-
-
-class Stop(Exception):
-    """GitHub cannot be read as asked; `fix` is the command that helps."""
-
-    def __init__(self, message: str, fix: str = ""):
-        super().__init__(message)
-        self.fix = fix
 
 
 @dataclass
@@ -375,7 +368,7 @@ class GitHub:
                                    reactions(c["reactionGroups"]), (c["minimizedReason"] or "hidden").lower() if c["isMinimized"] else None,
                                    c["lastEditedAt"] or c["createdAt"]) for c in node["comments"]["nodes"]]
         raw = {key: value for key, value in node.items() if key not in ("comments", "updatedAt", "id")}
-        return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"], scope,
+        return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"],
                              node["updatedAt"], node["title"], node["body"] or "", state, closed, [opened], facts,
                              [(a["login"], f"@{a['login']}") for a in node["assignees"]["nodes"]], fields, due,
                              self.relations(node, closing), comments, self.attachments(node), {"repository": scope, "issue": raw},

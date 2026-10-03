@@ -17,7 +17,7 @@ def ref(number, scope="acme/api", public=False, note="", ident=None):
 
 def record(**changes):
     base = dict(source="GitHub", kind="issue", ident="3000000017", key="acme/api#17", url="https://github.com/acme/api/issues/17",
-                scope="acme/api", version="2026-09-30T12:00:00Z", title="Fix login redirect", body="The body.\n\nMore.",
+                version="2026-09-30T12:00:00Z", title="Fix login redirect", body="The body.\n\nMore.",
                 state="open", closed=None, opened=["Opened by @ada 2026-09-01T10:00:00Z"], facts=["Labels: bug"],
                 assignees=[], fields={}, due=None, relations=[], comments=[], attachments=[], raw={}, raw_comments=[])
     base.update(changes)
