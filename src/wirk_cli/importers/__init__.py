@@ -186,7 +186,7 @@ class Run:
         fields = [{"op": "field.create", "field": {
             "key": field.key, "name": field.name, "applies_to": "item", "selection": field.selection, "required": False,
             "options": [{"key": key, "name": name, "order": order} for order, (name, key) in enumerate(field.options.items(), 1)]}}
-            for field in plan.values() if render.small(field, limit) and field.key not in importer.vocab]
+            for field in plan.values() if 0 < len(field.options) <= limit and field.key not in importer.vocab]
         operations = fields
         if not registered:
             if not self.token_file.exists():

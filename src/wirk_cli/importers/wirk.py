@@ -65,9 +65,6 @@ class Wirk:
             raise WirkError(answer["errors"][0])
         return answer
 
-    def status(self) -> dict:
-        return self.ok("/v2/status", {"max_bytes": 65536})["data"]
-
     def cards(self, fields: dict):
         body = {"fields": fields, **PAGE}
         while True:
@@ -187,10 +184,11 @@ class Importer:
 
     def start(self, me: str | None = None) -> dict:
         """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
-        you = self.wirk.status()
+        you = self.wirk.ok("/v2/status", {"max_bytes": 65536})["data"]
         self.me = me or you["you"]["principal"]
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
+        self.managed = {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
         self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
@@ -354,9 +352,6 @@ class Importer:
                 found[plan.key] = present if plan.selection == "many" else present[0]
         return found
 
-    def managed(self) -> set:
-        return {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
-
     def plans(self, record: render.Record) -> list:
         users = {user: wirk_id for user, wirk_id in self.users.items() if wirk_id not in self.not_members}
         made = render.work_item(self.ctx, record, users, self.notes)
@@ -460,7 +455,7 @@ class Importer:
             else:
                 patch = {"title": plan.title, "body": plan.body, **patch_files}
                 if plan.work is not None:
-                    patch["fields"] = {key: plan.fields.get(key) for key in self.managed()}
+                    patch["fields"] = {key: plan.fields.get(key) for key in self.managed}
                     patch["work"] = {"owner_id": plan.work.get("owner_id"), "due_at": plan.work.get("due_at")}
                 operations.append({"op": "item.edit", "id": held.item, "patch": patch})
                 expect[held.item] = held.r

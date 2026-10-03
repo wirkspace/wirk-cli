@@ -357,7 +357,7 @@ def field_key(name: str, source: str) -> str:
 
 
 def plan_fields(records: list, selections: dict, source: str) -> dict:
-    """Every field the source may fill, with the options in use; `small` ones become fields (§3.8)."""
+    """Every field the source may fill, with the options in use; those within the field limit become fields (§3.8)."""
     used = {name: {} for name in selections}
     for record in records:
         for name, values in record.fields.items():
@@ -374,10 +374,6 @@ def plan_fields(records: list, selections: dict, source: str) -> dict:
             options[value] = key
         plans[name] = FieldPlan(field_key(name, source), name, selections[name], options)
     return plans
-
-
-def small(plan: FieldPlan, limit: int) -> bool:
-    return 0 < len(plan.options) <= limit
 
 
 def attachment_name(source: str, source_id: str, original: str) -> str:
