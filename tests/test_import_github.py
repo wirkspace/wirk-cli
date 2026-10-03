@@ -316,3 +316,26 @@ def test_a_secondary_limit_pauses_every_reader():
     for thread in threads:
         thread.join()
     assert len(slept) == 4 and all(55 <= seconds <= 60 for seconds in slept)
+
+
+def test_a_spent_hourly_budget_waits_for_its_reset():
+    """GitHub's primary limit ("API rate limit already exceeded") is a wait until the hour's reset, never a failure."""
+    from datetime import datetime, timedelta, timezone
+    fake = FakeGh([repo("acme/web")], {"acme/web": [node(1)]})
+    reset = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    refused, slept = [], []
+
+    def spent(args, stdin=None):
+        query = json.loads(stdin)["query"] if stdin else ""
+        if "page: issues" in query and not refused:
+            refused.append(1)
+            return 1, json.dumps({"errors": [{"type": "RATE_LIMIT", "code": "graphql_rate_limit",
+                                              "message": "API rate limit already exceeded for user ID 1."}]}), "gh: API rate limit already exceeded"
+        if query.strip() == github.RESET:
+            return 0, json.dumps({"data": {"rateLimit": {"cost": 1, "remaining": 0, "resetAt": reset}}}), ""
+        return fake(args, stdin)
+
+    adapter = github.GitHub(run=spent, sleep=slept.append)
+    adapter.check()
+    census, records = adapter.read(["acme"])
+    assert len(records) == 1 and refused and slept and 1700 < max(slept) <= 1810
