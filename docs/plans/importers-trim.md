@@ -142,3 +142,29 @@ One pull request carries the commits in the order of §3, with the evidence for 
 ## 6. Budget
 
 No number is fixed in advance. The budget for three sources becomes the count measured after the trim, which the coordinator records as decision 82. The estimates in §3 put it at about 1,259. Each later source argues its own shared additions in its plan.
+
+## 7. Result
+
+The shared code is **1,260 lines** (`__init__.py` 269, `render.py` 382, `wirk.py` 609), down 19 from 1,279. `jira.py` is 376 (+1, the relocation in #5). GitHub (485), Linear (530) and `adf.py` (169) are unchanged.
+
+| Cut | Measured |
+|---|---|
+| #1 Single-use helpers | −9 |
+| #6 + `scoped` | −4 |
+| `check_statuses` | −1 |
+| `field_limit` | −1 |
+| The `if outcomes:` guard | −2: the guard and the separate lookup became one `if first := …` |
+| `links_of` | −1 |
+| #5 The map passed to `check` | −2 shared, +1 in `jira.py` |
+| #3 One `Outcome` builder | not made. A builder inside `one` measured 0 and left `send`'s construction separate; one builder for both measured +1 or more. The four constructions differ in which action, message and item they carry, so they stay as they are |
+| #2 One archive-or-restore body | +1 |
+| One request-ID format, the version on `Rendered`, two unused defaults | 0 each |
+
+**One addition during #6.** `connect` sent a `workspace_id=` given empty as it was, so WIRK refuses it. `Wirk.post` left an empty one out. A characterization test now pins `connect`'s behavior, and `Wirk.post` sends any `workspace_id` that was named, so the run still stops at its first status request rather than falling back to the caller's only wirkspace.
+
+**Proof.**
+- Tests after every commit: 455 passed and 20 skipped for the full suite; 195 passed and 4 skipped for the importer command (§2.1 plus the 18 characterization tests).
+- The recorder: 202 recordings (every test of the importer command and three source scenarios), and an empty diff after every cut. Its seeded mutations were all caught: 21 of 21 on the baseline and 22 of 22 on the trimmed code.
+- Real core at `60b84ae`, the three GitHub seeds, before and after: the same items, first lines, hashes, statuses and links; the same report; the re-run current; the REST verifier at zero differences. The full suite against the scratch core passed 475 before and after.
+
+The budget for decision 82 is the measured 1,260.
