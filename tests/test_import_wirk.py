@@ -340,3 +340,10 @@ def test_what_the_source_archived_is_archived_after_its_write_and_restored_with_
     assert outcomes(make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)]))[("acme/api#2", "issue")] == "skipped"
     dry = make(fake, dry_run=True).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])
     assert ("issue", "would archive") in [(o.kind, o.outcome) for o in dry if o.key == "acme/api#1"]
+
+
+def test_an_item_updated_while_archived_is_still_restored_when_the_source_restores_it(fake):
+    make(fake).run([issue(1, archived="Archived in Linear on 2026-03-01")])
+    result = make(fake).run([issue(1, body="Changed when it came back.")])
+    assert [(o.kind, o.outcome) for o in result] == [("issue", "updated"), ("issue", "restored")]
+    assert not fake.items[item_of_issue(fake, 1)]["archived"]
