@@ -241,10 +241,21 @@ def test_a_likely_duplicate_is_resent_and_reported(fake):
     assert "possible duplicate kept separate: acme/api#1" in created.message
 
 
-def test_an_owner_who_is_not_a_member_is_dropped_and_reported(fake):
-    result = make(fake, users={"ben": "carol"}).run([issue(1, assignees=[("ben", "@ben")])])
-    assert result[0].outcome == "created" and "carol is not a member" in result[0].message
-    assert next(iter(fake.mine().values()))["revisions"][-1]["work"] == {}
+def test_an_owner_who_is_not_a_member_is_neither_claimed_nor_sealed_until_they_join(fake):
+    records = [issue(n, assignees=[("ben", "@ben")]) for n in (1, 2)]
+    importer = make(fake, users={"ben": "carol"})
+    assert set(outcomes(importer.run(records)).values()) == {"created"} and importer.not_members == {"carol"}
+    for item in fake.mine().values():
+        snap = item["revisions"][-1]
+        assert snap["work"] == {} and "owner carol" not in snap["body"] and "@ben (not in WIRK)" in snap["body"]
+    before = len(fake.writes())
+    assert set(outcomes(make(fake, users={"ben": "carol"}).run(records)).values()) == {"current"}
+    assert len(fake.writes()) == before + 1  # one refused try a run, to learn carol is still not a member
+    fake.members.add("carol")
+    assert set(outcomes(make(fake, users={"ben": "carol"}).run(records)).values()) == {"updated"}
+    for item in fake.mine().values():
+        snap = item["revisions"][-1]
+        assert snap["work"] == {"owner_id": "carol"} and "@ben (owner carol)" in snap["body"]
 
 
 def test_a_lost_answer_is_settled_by_its_receipt(fake):
