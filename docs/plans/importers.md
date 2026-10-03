@@ -1,6 +1,6 @@
 # Plan: `wirk import`, one command that brings a team's tracker into WIRK
 
-Revision 3, 2 October 2026: revision 2, approved by the root with six conditions, folded in below (§ What revision 3 changes). The build follows it. Branch `importers` of `wirkspace/wirk-cli`.
+Revision 3, 2 October 2026: revision 2, approved by the root with six conditions, folded in below (§ What revision 3 changes). GitHub Issues is built; the build record at the end gives the evidence, and the one change the evidence forced (timelines read one issue at a time, §4.1). Branch `importers` of `wirkspace/wirk-cli`.
 
 — importer-implementer
 
@@ -377,17 +377,18 @@ tests/verify/   the independent REST reader (§7, A5); test code
 - **Issues** through GraphQL `Repository.issues`, 25 a page, ordered by creation, with the first page of each nested connection:
   - labels and assignees;
   - comments (100), with reactions, hidden state and edit time;
-  - timeline items (100) except comments and the mentioned, subscribed and unsubscribed events that comments cause, through one fragment per event type, so unknown types still arrive with their type name and are counted;
+  - not the timeline: see below;
   - parent, sub-issues, `blockedBy`, `blocking` and `duplicateOf`;
   - `closedByPullRequestsReferences`, issue type, milestone, issue field values, lock and pin state;
   - project items and their field values, when the scope allows.
 
   Every referenced node carries its repository's name and visibility, for §3.9's reference rule.
+- **Timelines, one issue at a time** (changed in the build; build record). Each issue's timeline is read by its own query, 100 events a page, except comments and the mentioned, subscribed and unsubscribed events that comments cause, through one fragment per event type, so unknown types still arrive with their type name. On the real organization GitHub's paged query returned 141 timelines short, `totalCount` included and with no error, every time; batched `node()` reads of 10 issues lost 22 of 60, of 5 lost 1 of 60, and of one lost none.
 - **Paging.** A connection with more than a page is fetched on its own, issue by issue. A page that times out is retried at half the size. Pull requests are never read: only `pullRequests.totalCount`, for the report.
 - **Pacing and bounds.**
   - Requests are serial. Each query asks for `rateLimit { cost remaining resetAt }` and waits for the reset when the next page would not fit.
   - A secondary-limit refusal waits a minute and doubles, three times, then stops with exit 2 and the outcomes so far.
-  - A page of 25 issues with ten nested connections costs about 3 points, so the real organization's 2,200 issues are about 90 pages: bounded at **1,000 points a run**, a fifth of an hour's budget.
+  - A page of 25 issues costs about 3 points and each issue's own timeline read 1, so the real organization's 2,200 issues cost about 2,400 points a run, half an hour's budget. Revision 3 bounded a run at 1,000 points, which assumed timelines inside pages; the build record gives the measured cost.
 - **Attachments.** Rendered bodies (`bodyHTML`) are read only for issues and comments whose text holds a `user-attachments` URL. For a private repository they carry short-lived signed image URLs, downloaded at once, without any credential, within §3.7's allowlist and cap. Public attachments download directly. Anything else stays a link and is reported (GitHub note §2.6; proven or refuted on the seed, §4.6).
 
 ### 4.2 Mapping
@@ -769,7 +770,7 @@ Settled here, simplest faithful option first. Where the root's rulings on revisi
 17. **Linear archives** are mirrored by the importer on its own items. GitHub and Jira never archive, except the importer's own stale discussion parts.
 18. **Jira switches.** `--include-restricted`, `--resume` and `--archived` are dropped; naming an issue key is the opt-in.
 19. **GitHub projects** are built on fixtures and the seed project. Agreed with the review's condition: the person grants `read:project` before VERIFY (§8), so VERIFY covers real project data.
-20. **The GitHub timeline** is read through GraphQL, with one fragment per event type: about 300 points a run for the real organization, against the REST timeline's call per issue on every run. Agreed with the review's conditions: the run is bounded at 1,000 points, and the archive's timeline counts are checked against the independent REST reader (A5).
+20. **The GitHub timeline** is read through GraphQL, with one fragment per event type. Agreed with the review's conditions: the run is bounded at 1,000 points, and the archive's timeline counts are checked against the independent REST reader (A5). **Changed in the build:** that check found GitHub returning timelines short inside paged queries, so each issue's timeline is now its own query, about 2,400 points a run for the real organization; the bound no longer holds (build record).
 21. **Discussion parts** (agreed with the review's condition) are cut by the encoded bytes of the write that carries them, at 2 MiB, and written one to a write.
 22. **Owners** come from the map only, with no automatic matching, because agents have no member list.
 23. **A second importer** (ruled): another `*-<source>-import` principal's items block their keys, and the dry run stops and explains.
@@ -795,3 +796,100 @@ An agent could port a backlog with `wirk write` alone, as an earlier rewrite bet
 The command adds no server operation, argument or default, and no MCP tool. It is a client of `/v2/status`, `/v2/query`, `/v2/write`, `/v2/files` and, through the person, `/v2/admin`, as documented. Considered and not proposed, each needing that discussion first: lookup by external key, backdated authors and times, an import mode for the duplicate judgment, number and date fields, and an erasure path for imported names.
 
 — importer-implementer
+
+## Build record: GitHub Issues (2 October 2026)
+
+The build follows revision 3. Every slice ran RED → GREEN → SIMPLIFY → VERIFY, one concern per commit, each pushed to `importers`. VERIFY ran against scratch wirk-core services started locally from core `main` at `60b84ae`, the line the root named after the move to AWS (an earlier pass on `05770e3` gave the same results). Each service had its own data folder, a loopback object store and a kernel-chosen port checked free with `lsof`. Nothing was imported into a live service. The importer only read GitHub; the seed tool wrote only to `wirkspace/import-seed-*`.
+
+### Slices
+
+| Slice | RED | GREEN | SIMPLIFY | What the simplify pass removed, or why it kept |
+|---|---|---|---|---|
+| G0 seeds | `47d4669` | `d4b6757` | (with the fixes below) | Manifest and tool; the seed fixes are `09d2ed8`, `ae63941`, `5012172` |
+| G1 render | `1f02bc8` (16 failing), `fdde283` | `206f748`, `37754b0` | `cbb624a` | A module helper shadowed by loop variables was renamed `part_kind`; the reference holder is named for what it is |
+| G2 WIRK side | `b3fc627` (17 failing), `516580f`, `7873056`, `8a74773` | `d4a8327`, `9c5b16c`, `dbf292f`, `81dc8bd` | `4018309`, `d21255b` | One name for what goes in an issue's own write; the work item fetched once per update; one message for changed items; stale parts found by key instead of a scan of the whole index; one answer for every plan of a refused write |
+| G3 GitHub reader | `42da5df` (18 failing; the message says 15), `49a7aad`, `11c7b30`, `eabb731` | `4ea862d`, `ee574af`, `6d5148e`, `5a7a6d9`, `b550efa` | `1439f8a` | The record split into three named parts: the issue, its relations, its fields and facts |
+| G4 command | `f238bcd` (8 failing), `37c08e7`, `beb7053` | `3a7bb57`, `ca921cd`, `27f9d24` | `8936dc2` | The map file read once per run |
+| G5 links | `c197cb1` (10 tests, 6 failing) | `4191430` | `384dcb8` | The index keeps each item's key, so link ends are a lookup, not a scan; a link refused as a cycle keeps its write's `expect` |
+| G6 attachments | `b079e78` | `2b1a7de` | reviewed, kept | Download, allowlist and cap are one short loop each |
+| G7 verifier | — | `c458dc6`, `707dc72` | — | Test tooling: an independent REST reader; no importer code shared |
+| Contract test | — | `92ba8da` | — | Against a scratch service, as the CLI's own contract tests are |
+
+Not built: **G8 projects**. The person's `gh` login still lacks `read:project` (§8 step 1), so there is no real or seed project to verify against; the reader already leaves project timeline events out without the scope and says so in every report. Projects are the next slice once the scope is granted.
+
+**Tests.** 86 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 19, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. The whole suite passes: 338 passed and 17 skipped without a scratch service. With one, the importer's contract tests pass, and 5 of the CLI's existing contract tests fail on `main` too: core `60b84ae` changed the login wording, lets only people decide proposals, has no views address and limits who adds context. That is outside this build.
+
+**Size.** Shared code is 1,156 lines (`__init__` 235, `render` 360, `wirk` 561) against the plan's budget of 1,000; the GitHub adapter is 445 against 450. Most of the overrun is the link pass and the stale-link and stale-part rules that the review added (§3.6), and the report. The simplify passes are listed above; the overrun is for the reviewer to judge.
+
+### A finding that changed the build: timelines inside paged queries
+
+The independent REST reader (A5) found 141 of the real organization's issues whose archived timeline held fewer events than GitHub's REST timeline. The read was checked again the same way, and the cause was GitHub's own:
+- The same paged query returned the same short timelines every time, with `totalCount` short too and no error.
+- The same issue's timeline was complete when it was read alone.
+- Batched `node()` reads lost events as the batch grew: of 60 affected issues, 22 short in batches of 10, 1 in batches of 5, none one at a time.
+
+Comments and labels in the same pages were complete: the REST reader matched all 14,080 comments and every labels line. So each issue's timeline is now read by its own query: RED `eabb731`, GREEN `5a7a6d9` and `b550efa`.
+
+A re-run with the fix updated exactly those 141 issues and left the other 4,142 current. The REST reader then found **zero differences** over 2,200 issues, 14,080 comments and 28,757 timeline events.
+
+The fix costs a query per issue: about 2,400 GraphQL points a run for the real organization, and a run of about 25 minutes. Before, it was 206 points and 6 minutes.
+
+**What the earlier, short timelines had cost.** Those 141 issues' archives lacked events. Where the missing events were cross-references or the closing event, their headers lacked mentions, and evidence could lack the closer. The re-run repaired both, through the normal update path.
+
+### Evidence, by the matrix of §4.5
+
+**On the seed repositories** (core `60b84ae`):
+- **Public seed alone** (A14): 146 issues, 119 comments, 176 timeline events, 152 imported items scanned, with zero differences against REST and the manifest. Nothing from the private seeds appears anywhere: no sentinel and no private repository name. There were 16 references withheld.
+- **All three seeds:** 154 issues, 120 comments, 188 events, 161 items, 12 links (2 kept as related, with their notes) and 6 credential shapes redacted, with zero differences against REST and every manifest row.
+- **Stage 2 of the scripted changes** (A8): exactly the four changed issues were updated, and the one newly commented issue gained a discussion doc while its work item was left as it was. Zero differences after.
+- **Re-runs** (A7): no write and no upload, each time.
+- **A9.** A person's edit is skipped and named (`r2 by bob`). `--dry-run --overwrite` lists it, and `--overwrite` replaces it.
+- **A11.** A forged line is ignored and counted. A retargeted line is keyed by the importer's own revision, so the other issue stays current. Another importer's item blocks its key: the dry run prints its plan and stops with exit 2, and the run reports `blocked`.
+- **A10.** Runs were killed after an upload and before its write, between discussion parts, and in the middle of the link pass. Each re-run ended with the same 161 items (kind, ID, hash and status), the same 19 links and no duplicate.
+- **The seed tool** re-runs with one content request. That request is a dependency GitHub refuses because it would close a cycle, which the manifest records.
+
+**On the real organization**, read-only (core `60b84ae`):
+- **Census.** An independent count gave 2,200 issues (206 open, 1,856 completed, 138 not planned), 14,080 comments and 2,343 pull requests. The named dry run's census equals it.
+- **Owner dry run:** 3 public repositories with 18 issues. The 6 private repositories with 2,182 issues are named with counts and the line that names them, and 20 references are withheld. It took 7 points and 6 s.
+- **Import:** 4,283 items (2,200 work items and 2,083 discussion docs), from exactly 2,200 writes, one per issue, and 4,283 archives.
+- **Text:**
+  - 4 credential shapes redacted;
+  - 4 references withheld;
+  - 1,682 email addresses typed in text kept as written and counted (choice 10), many of them in pasted `curl` commands;
+  - labels: 82 values, over the limit, kept as header lines.
+- **A5:** zero differences over every issue, comment and timeline event, as above. **A6:** the exact key search found exactly one item for each of the 2,200 issues.
+- **A10, a real kill.** The run was killed with `SIGKILL` after 1,002 writes and run again. Its items (with hashes) and links equal the uninterrupted import's, with no duplicates.
+- **Coexistence:** no imported item contains `[github `.
+- **Judgment.** With a scripted judgment answering after 100 ms, the import took 1,504 s against 344 s without one, about half a second more per issue. The live judgment's latency will set import time.
+
+### Acceptance
+
+| | Result |
+|---|---|
+| A1 | Met: censuses equal the independent counts, setup files in `<config>/import/`, the token owner-only, no receipt written |
+| A2 | Met: the setup applied by `wirk admin --request` at a terminal, rows before the token; the importer an editor in that wirkspace only |
+| A3 | Met: exact counts, zero errors, nothing about comments on work items |
+| A4 | Met: statuses and evidence as §4.2, checked on every seed and every real issue |
+| A5 | Met, after the timeline fix: zero differences on the seeds and the real organization |
+| A6 | Met for every issue, not a sample |
+| A7 | Met on the seeds and the real organization: the final real re-run found all 4,283 items current, with no write and no upload (1,530 s, 2,411 points) |
+| A8 | Met on the seeds |
+| A9, A11 | Met on the seeds, against real core |
+| A10 | Met at the three points on the seeds, and by a real kill |
+| A12 | Met: links, fallbacks with their notes, `link_cycle`, unlinking only the importer's own (seeds, fakes, contract test) |
+| A13 | Met on fakes; the timed run used a scripted judgment that answered "distinct" |
+| A14 | Met: the sentinel scan on the public seed, no email field in any archive, credentials redacted, markers guarded, only reads of GitHub, no token printed |
+| A15 | Met: fields only created by the setup, reserved keys avoided, missing options reported |
+| A16 | Met on fakes and in the runs |
+| A17 | Not yet: the blind trial follows the independent review (§8) |
+| A18 | For the reviewer: shared code over its budget, as above |
+| A19 | Seeds within their bounds. Real organization: the import (about 6 minutes plus the timeline reads) is within 60 minutes. The dry run and the re-run take about 25 minutes and 2,400 points with timelines read alone, over the 15 and 20 minutes and 1,000 points revision 3 set. A finding for the root |
+
+### Still to do, and what needs the person
+
+- **G8 projects,** after `gh auth refresh -s read:project`.
+- **Attachments on real data.** The seeds hold none: they need a `gh` from September 2026 or later, or a hand upload. The code is proven on fakes only.
+- **Second-account cases:** several assignees, a deleted user.
+- **Hand deletions:** a deleted issue, and a conversion to a discussion.
+- **The independent review and the blind trial.**
+- **The CLI's own contract tests** need updating for core `60b84ae`: 5 fail there on `main` too.
