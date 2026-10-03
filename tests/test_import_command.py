@@ -197,3 +197,14 @@ def test_the_setup_is_a_persons_step_and_says_so(world):
     answer = json.loads(world["run"]("github", "acme", "--dry-run", "--json")[1])
     assert "wirk login --person" in answer["data"]["summary"]["setup_by"]
     assert "wirk login --person" in world["run"]()[1] and "agent cannot" in world["run"]()[1]
+
+
+def test_a_blocked_dry_run_prints_one_json_answer(world):
+    fake = world["fake"]
+    fake.as_whom = "bob-github-import"
+    line = render.line1("GitHub", "issue", "3000000001", "2026-09-30T12:00:00Z", "0" * 12)
+    fake.write({"request_id": "bob-1", "operations": [{"op": "item.create", "data": {"title": "Issue 1", "body": line, "work": {}}}]})
+    fake.as_whom = None
+    code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
+    answer = json.loads(out)  # one document
+    assert code == 2 and not answer["ok"] and "bob-github-import" in answer["errors"][0]["message"]

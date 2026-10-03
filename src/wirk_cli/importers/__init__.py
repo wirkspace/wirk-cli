@@ -9,6 +9,7 @@ from collections import Counter
 import fcntl
 import json
 import os
+import re
 import secrets
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ from .render import Stop
 SOURCES = {"github": github}
 DEFAULT_STATUSES = {"open": "open", "in_progress": "in_progress", "completed": "completed", "cancelled": "cancelled"}
 ATTENTION = {"skipped", "blocked", "ambiguous", "missing", "error", "would archive", "archived"}
+PERSON_STEP = "a person who administers the account applies it, at their own terminal after wirk login --person (an agent cannot)"
+CODED = re.compile(r"([a-z][a-z_]*): (.*)", re.S)  # an error outcome's message: WIRK's code, then its words
 
 
 def main(words: list, options: dict, transport=None) -> int:
@@ -32,8 +35,25 @@ def main(words: list, options: dict, transport=None) -> int:
     try:
         return Run(words, options, transport).go()
     except (Stop, wirk.WirkError) as stop:
+        if options.get("--json"):
+            print(json.dumps({"ok": False, "data": {}, "errors": [problem(stop)]}, ensure_ascii=False))
         tell(stop)
         return 2
+
+
+def problem(stop: Exception) -> dict:
+    return {"code": getattr(stop, "code", None) or "import_stopped", "count": 1, "message": str(stop)}
+
+
+def errors_of(outcomes: list) -> list:
+    """Each kind of error once, with how many issues it hit and its first message."""
+    found = {}
+    for outcome in outcomes:
+        if outcome.outcome == "error":
+            coded = CODED.fullmatch(outcome.message)
+            code, message = coded.groups() if coded else ("error", outcome.message)
+            found.setdefault(code, {"code": code, "count": 0, "message": message})["count"] += 1
+    return list(found.values())
 
 
 def tell(stop: Exception) -> None:
@@ -83,15 +103,14 @@ class Run:
             self.check_statuses(importer)
             try:
                 outcomes = importer.run(records)
+                if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
+                    raise Stop("another importer for this source already holds some of these issues: " + ", ".join(
+                        f"{name} made {count}" for name, count in importer.index.blocked.items()),
+                        "run the import as that principal, or import into another wirkspace (workspace_id=)")
             except (Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
                 self.report(census, importer, importer.outcomes, you, setup=None, stopped=stop)
                 tell(stop)
                 return 2
-            if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
-                self.report(census, importer, outcomes, you, setup=None)
-                raise Stop("another importer for this source already holds some of these issues: " + ", ".join(
-                    f"{name} made {count}" for name, count in importer.index.blocked.items()),
-                    "run the import as that principal, or import into another wirkspace (workspace_id=)")
             setup = self.write_setup(importer, plan, records, registered) if self.dry_run else None
             self.report(census, importer, outcomes, you, setup)
             return 1 if any(o.outcome == "error" for o in outcomes) else 0
@@ -107,6 +126,11 @@ class Run:
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))
         you = status["data"]["you"]
+        if not you.get("files", {"ready": True})["ready"]:
+            raise Stop(f"this WIRK service has no file storage ({you['files'].get('reason')}), and each imported issue keeps "
+                       "its raw archive there. Nothing was read from GitHub or written to WIRK, and no setup was made",
+                       "ask your WIRK administrator to make file storage available, then run the same command again",
+                       "files_unavailable")
         person = you.get("person") or you["principal"]
         self.principal = f"{person}-{self.source}-import"
         if len(self.principal) > 40:
@@ -119,7 +143,7 @@ class Run:
             if answer["ok"]:
                 return mine, True
         if not self.dry_run:
-            fix = (f"a person applies the setup: wirk admin --request {self.setup_file}" if self.setup_file.exists()
+            fix = (f"{PERSON_STEP}: wirk admin --request {self.setup_file}" if self.setup_file.exists()
                    else command("wirk", "import", self.source, *self.selection, "--dry-run"))
             raise Stop(f"the {self.source} importer is not set up for this wirkspace yet", fix)
         return agent, False
@@ -193,10 +217,11 @@ class Run:
                    "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts), "header_only": large,
                    "missing_options": {k: sorted(v) for k, v in importer.missing.items()}, "fields_not_set_up": sorted(importer.unset),
                    "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
-                   "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None}
+                   "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None,
+                   "setup_by": PERSON_STEP if setup else None}
+        errors = ([problem(stopped)] if stopped else []) + errors_of(outcomes)
         if self.json:
-            errors = [{"code": getattr(stopped, "code", "stopped"), "message": str(stopped)}] if stopped else []
-            print(json.dumps({"ok": not counts["error"] and not stopped, "errors": errors,
+            print(json.dumps({"ok": not errors, "errors": errors,
                               "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
             return
         space = you["wirkspace"]
@@ -211,6 +236,7 @@ class Run:
                       + ". Everyone in the wirkspace would read them. To include them, name them:",
                       "  " + command("wirk", "import", self.source, *self.selection, *(name for name, _ in census.skipped), "--dry-run")]
         lines.append("items: " + (" · ".join(f"{outcome}: {count}" for outcome, count in sorted(counts.items())) or "none"))
+        lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in errors_of(outcomes)]
         fields = [f"header only: {key} ({count} values, over the limit of {limit})" for key, count in large.items()]
         fields += [f"missing options in {key}: {', '.join(sorted(values)[:5])}" for key, values in importer.missing.items()]
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
@@ -232,8 +258,7 @@ class Run:
         if importer.index.forged:
             lines.append(f"ignored: {importer.index.forged} items with a provenance line the importer did not write")
         if setup:
-            lines.append(f"setup: a person who administers the account reviews {setup} and runs: "
-                         f"wirk admin --request {setup}")
+            lines.append(f"setup: review {setup}; {PERSON_STEP}: wirk admin --request {setup}")
         if outcomes:
             first = next((o.key for o in outcomes if o.kind == "issue"), None)
             if first:

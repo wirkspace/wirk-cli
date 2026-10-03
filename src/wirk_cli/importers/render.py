@@ -43,9 +43,9 @@ RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "r
 class Stop(Exception):
     """The run cannot start or go on; `fix` is what helps (exit status 2, §2.3)."""
 
-    def __init__(self, message: str, fix: str = ""):
+    def __init__(self, message: str, fix: str = "", code: str | None = None):
         super().__init__(message)
-        self.fix = fix
+        self.fix, self.code = fix, code
 
 
 @dataclass(frozen=True)
