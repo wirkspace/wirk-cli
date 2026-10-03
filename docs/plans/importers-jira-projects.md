@@ -2,7 +2,7 @@
 
 Plan only, for adversarial review before any code. Branch `importers-jira-projects`, from main `e930b04`. It builds on slice 1 (`docs/plans/importers.md` §6 and §6.1) and on the Jira research note (§2.1, §2.4, §2.5, §4.7). Every answer in the tests stays synthetic until a Jira Cloud site exists.
 
-This is the second version, revised after the plan review of 3 October:
+This is the second version, revised after the plan review of 3 October and approved on recheck with the conditions folded in below (§4, §5, §6.1, §8):
 - boards are out of this slice;
 - project docs come only from projects selected as projects;
 - archives keep an allowlist;
@@ -49,7 +49,7 @@ A Jira project is a container, like a GitHub repository or a Linear team. Those 
 
 **Cut**, as churn or as faithfulness with no use:
 - boards, columns and filters;
-- version descriptions;
+- version descriptions and component descriptions;
 - the statuses, issue types and link types a project uses, which the fields already show;
 - issue counts;
 - the version's `overdue` flag, and the localized `userStartDate` and `userReleaseDate`;
@@ -60,6 +60,7 @@ A Jira project is a container, like a GitHub repository or a Linear team. Those 
 - **Docs only for projects selected as projects (§1).** A named issue never brings its project's details along.
 - **Restricted projects** follow slice 1's selection unchanged, which is the release gate's question (§6.1).
 - **No email is requested or written.** Leads are written by display name only.
+- **Sprints come only from the issues kept,** after restricted issues are dropped. A sprint that holds only a skipped restricted issue never appears.
 - **Each archive is an allowlist:** the fields the doc shows, plus IDs. The project archive holds:
   - from the project: `id`, `key`, `name`, `description`, and the lead's `accountId` and `displayName`;
   - from each component: `id`, `name`, and the lead's `accountId` and `displayName`;
@@ -72,12 +73,14 @@ A Jira project is a container, like a GitHub repository or a Linear team. Those 
 
 ## 4. Reads never stop the run
 
-A read of a project's components or versions can fail: Jira refuses it, or does not answer after the retries. That project then gets no doc this run, and the report counts it (`project docs: 3 written · 1 skipped, its components or versions could not be read`). An earlier doc stays as it is. Every other failure keeps slice 1's handling: a CAPTCHA lockout still stops the run, and a 429 still waits.
+A read of a project's components or versions can fail. That project then gets no doc this run, and the report counts it (`project docs: 3 read · 1 skipped, its components or versions could not be read: OPS`). An earlier doc stays as it is.
+
+The skip applies only to a 403, a 404, another 4xx, or no answer after the retries. A CAPTCHA lockout and a 401 (a dead token) still stop the run with exit status 2, and a 429 still waits. `Jira.call` tells them apart: the skippable failures raise `Refused`, a kind of `Stop`, so everywhere else they stop the run exactly as today. The project reads catch only `Refused`, never every `Stop` the way `download` does.
 
 ## 5. Refreshing
 
 - **Provenance and hash.** The first line is `Jira project 10000, version <read time>, hash <12 hex>`. Jira keeps no update time for a project, so the version is the time of the read, from a clock the tests inject. The hash covers the body and the archive. Both are built from the allowlist, so an unchanged project is never rewritten.
-- **No churn.** A re-run writes nothing when only viewer-dependent or volatile fields change. A doc is revised only when something it shows changes:
+- **No churn.** A re-run writes nothing when only viewer-dependent or volatile fields change. Sprints, components and versions are sorted by ID, and each sprint keeps one snapshot per ID, so issues moving between sprints change nothing the doc shows. A doc is revised only when something it shows changes:
   - a renamed component or a new lead;
   - a release date moved or a version released;
   - a sprint started, closed, added or given a new goal.
@@ -92,7 +95,12 @@ Only what `wirk import jira` does changes: no new flag, argument, selection word
 
 ### 6.1 Open for Samuel: restricted projects (§5.1 of the first version)
 
-Should restricted projects be left out by default? Telling them apart needs each project's permission scheme, and reading a scheme needs project-administrator rights. Leaving them out would also change slice 1's default. This is the release gate.
+Should restricted projects be left out by default? This is the release gate. Samuel's options:
+1. **Keep the default** (every project the token browses), and have the dry run warn that each one will be readable by everyone in the wirkspace.
+2. **Require projects to be named.** This changes a default, so it needs the interface discussion.
+3. **Skip restricted projects.** This needs each project's permission scheme, and reading a scheme takes project-administrator rights.
+
+`isPrivate` on a project cannot tell them apart: it is computed for the viewer, so it says only what this token sees.
 
 ## 7. Size
 
@@ -110,9 +118,10 @@ Should restricted projects be left out by default? Telling them apart needs each
 1. One doc for each project selected as a project, with every line of §1. No email appears anywhere, though the fixture's leads carry them.
 2. `wirk import jira ENG SEC-5` writes ENG's doc and no doc for SEC.
 3. Each archive holds only the allowlist of §3.
-4. A re-run writes nothing, even when `overdue`, `userStartDate`, `userReleaseDate`, `issueCount`, `favourite` and the read time all change.
+4. A re-run writes nothing, even when `overdue`, `userStartDate`, `userReleaseDate`, `issueCount`, `favourite` and the read time all change, and when issues move between sprints while nothing the doc shows changes.
 5. A moved release date or a started sprint revises that project's doc and nothing else.
-6. A project whose components or versions answer 403, or 500 after the retries, gets no doc and is counted, and the run goes on. Its earlier doc is untouched.
+6. A project whose components or versions answer 403 or 404, or 500 after the retries, gets no doc and is counted, and the run goes on. Its earlier doc is untouched. A CAPTCHA lockout and a 401 during a components read each stop the run with exit status 2.
+6a. A sprint that holds only a skipped restricted issue appears on no doc.
 7. A narrower selection reports no earlier project `missing`. A project the token no longer browses is reported `missing` and stays unarchived.
 8. Every request is a GET, apart from slice 1's two read POSTs.
 9. The contract test against a scratch core at `60b84ae`: the docs created, a re-run that writes nothing.
