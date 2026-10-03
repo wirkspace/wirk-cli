@@ -358,9 +358,11 @@ class Importer:
         found = active[0]
         if found.hash == digest:
             return "current", found, ""
-        if found.by == self.me or self.overwrite:
+        if found.by == self.me:
             return "update", found, ""
-        return "skipped", found, f"changed in WIRK since import (r{found.r} by {found.by}); to replace it: --overwrite"
+        changed = f"changed in WIRK since import (r{found.r} by {found.by})"
+        return ("update", found, changed + "; replaced by --overwrite") if self.overwrite else \
+            ("skipped", found, changed + "; to replace it: --overwrite")
 
     # ---------------------------------------------------------------- one issue
 
@@ -378,10 +380,9 @@ class Importer:
                     for plan, action, held, message in decided if action not in ("create", "update")]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ("create", "update")]
         if self.dry_run:  # what --overwrite would replace says who changed it
-            return outcomes + [Outcome(record.key, plan.kind, f"would {action}", "" if not held or held.by == self.me else
-                                       f"changed in WIRK since import (r{held.r} by {held.by}); --overwrite replaces it",
-                                       held.item if held else None)
-                               for plan, action, held in acting] + self.stale(record, len(plans) - 1)
+            return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
+                               for plan, action, held, message in decided if action in ("create", "update")] + \
+                self.stale(record, len(plans) - 1)
         # the work item and the discussion's first part go in one write; later parts one to a write (§3.5)
         together = [entry for entry in acting if entry[0].kind in ("issue", "comments")]
         work = held.item if held else None
@@ -454,22 +455,24 @@ class Importer:
         body = {"request_id": self.rid(record), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
         notes = []
+
+        def each(outcome: str, message: str) -> list:
+            return [Outcome(record.key, plan.kind, outcome, message, held.item if held else None) for plan, _, held in acting]
+
         for _ in range(4):
             answer = self.wirk.write(body)
             if answer["ok"]:
                 break
             problem = answer["errors"][0]
             if problem["code"] == "prerequisite_incomplete":
-                return [Outcome(record.key, plan.kind, "skipped", "completing it needs its prerequisites completed first "
-                                "(a link made in WIRK)", held.item if held else None) for plan, _, held in acting]
+                return each("skipped", "completing it needs its prerequisites completed first (a link made in WIRK)")
             fixed = self.fix(record, body, problem)
             if fixed is None:
-                return [Outcome(record.key, plan.kind, "error", f"{problem['code']}: {problem.get('message', '')}")
-                        for plan, _, _ in acting]
+                return each("error", f"{problem['code']}: {problem.get('message', '')}")
             notes.append(fixed)
             body = {**body, "request_id": self.rid(record)}
         else:
-            return [Outcome(record.key, plan.kind, "error", "refused repeatedly: " + "; ".join(notes)) for plan, _, _ in acting]
+            return each("error", "refused repeatedly: " + "; ".join(notes))
         results = answer["data"]["results"]
         if answer.get("receipt"):
             notes.append(f"confirmed by its receipt {body['request_id']}")
@@ -482,11 +485,10 @@ class Importer:
 
     def fix(self, record, body, problem) -> str | None:
         """Change the refused write so it can go through, and say what changed; None when it cannot."""
-        index = problem.get("input_index", 0)
-        operation = body["operations"][index]
+        operation = body["operations"][problem.get("input_index", 0)]
+        part = operation.get("data") or operation.get("patch") or {}
         if problem["code"] == "unknown_owner" and operation["op"] in ("item.create", "item.edit"):
-            work = operation.get("data", operation.get("patch", {})).get("work") or {}
-            owner = work.pop("owner_id", None)
+            owner = (part.get("work") or {}).pop("owner_id", None)
             return f"owner {owner} is not a member, so the issue has no owner"
         if problem["code"] == "likely_duplicate" and operation["op"] == "item.create":
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
@@ -499,7 +501,7 @@ class Importer:
                               "imported as they are")[:2048]
             return f"possible duplicate kept separate: {others}"
         if problem["code"] in ("unknown_enum_field", "unknown_enum_option") and operation["op"] in ("item.create", "item.edit"):
-            fields = operation.get("data", operation.get("patch", {})).get("fields") or {}
+            fields = part.get("fields") or {}
             dropped = [key for key in list(fields) if key != "status"]
             for key in dropped:
                 fields.pop(key)
@@ -515,12 +517,11 @@ class Importer:
 
     def stale(self, record, parts: int) -> list:
         """Discussion parts beyond what the discussion needs now are archived, when the importer wrote them last."""
-        outcomes = []
-        for (kind, ident), held in list(self.index.held.items()):
-            number = 1 if kind == "comments" else int(kind.split("-")[1]) if kind.startswith("comments-") else 0
-            if ident != record.ident or number <= parts:
-                continue
-            for found in held:
+        outcomes, number = [], parts
+        while (render.part_kind(number + 1), record.ident) in self.index.held:
+            number += 1
+            kind = render.part_kind(number)
+            for found in self.index.held[(kind, record.ident)]:
                 if found.archived:
                     continue
                 if found.by != self.me:
