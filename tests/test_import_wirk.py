@@ -1,6 +1,8 @@
 """The importer against WIRK (docs/plans/importers.md §3.4–§3.7): the index and its trust rules, the decision for each
 object, one issue per write, refusals, receipts and files, on an in-memory WIRK."""
 
+from dataclasses import replace
+
 import httpx
 import pytest
 
@@ -378,3 +380,14 @@ def test_projects_milestones_and_initiative_docs_are_written_and_linked_by_their
     before = len(fake.writes())
     assert set(outcomes(make(fake, ctx=LINEARISH).run(records)).values()) == {"current"}
     assert len(fake.writes()) == before
+
+
+def test_a_project_or_doc_gone_from_the_source_is_missing_but_one_outside_a_narrower_selection_is_not(fake):
+    to = lambda key, ident: Ref(key=key, scope="ENG", public=True, ident=ident)
+    records = [issue(1, source="Linear", kind="project", ident="p-1", key="Checkout v2"),
+               issue(2, source="Linear", kind="project", ident="p-2", key="Odd \\] name"),
+               issue(3, source="Linear", kind="initiative", ident="i-1", key="Reliability", relations=[("includes", to("Checkout v2", "p-1"))])]
+    make(fake, ctx=linearish()).run(records)
+    seen = replace(linearish(), seen=frozenset({"p-1"}))  # p-1 still in Linear, outside this run's teams; the rest are gone
+    result = {(o.kind, o.key): o.outcome for o in make(fake, ctx=seen).run([])}
+    assert result == {("project", "Odd \\] name"): "missing", ("initiative", "Reliability"): "missing"}

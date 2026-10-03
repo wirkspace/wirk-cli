@@ -452,3 +452,14 @@ def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):
     records = read(fake, folder)[2]
     retention = next(r for r in records if r.key == "Data retention")
     assert [(kind, ref.key) for kind, ref in retention.relations if kind == "blocked_by"] == [("blocked_by", "Checkout v2 · Beta")]
+
+
+def test_update_keys_are_unique_and_a_bracket_in_a_name_is_escaped_in_its_key(folder):
+    fake = FakeLinear([issue(1)])
+    fake.lists["projectUpdates"] = [update(1, "p-1"), update(3, "p-1", body="Again the same day.")]
+    fake.lists["projects"] = PROJECTS + [project(4, "Odd ] name", ["ENG"])]
+    records = read(fake, folder)[2]
+    assert {r.key for r in records if r.key.startswith("Checkout v2 update")} == {
+        "Checkout v2 update 2026-09-20 (pu-1)", "Checkout v2 update 2026-09-20 (pu-3)"}
+    odd = next(r for r in records if r.ident == "p-4")
+    assert odd.key == "Odd \\] name" and odd.title == "Odd ] name"
