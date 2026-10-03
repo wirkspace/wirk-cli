@@ -787,7 +787,7 @@ S is the seed site of the Jira note's §7 (phase A, free plan). Its seeding tool
 
 The first Jira slice imports issues. Projects and boards as docs (with components, versions, columns and sprints) are the next slice. **No real site yet:** every answer in the tests is synthetic, shaped from the REST v3 OpenAPI and the document format the Jira note read. The person creates the seed site later. Not for release.
 
-**Built:** `src/wirk_cli/importers/jira.py` (335 lines) and `adf.py` (159), with tests in `tests/test_import_jira.py`, `test_import_adf.py` and `test_import_jira_contract.py`.
+**Built:** `src/wirk_cli/importers/jira.py` (367 lines after the review's fixes) and `adf.py` (169), with tests in `tests/test_import_jira.py`, `test_import_adf.py` and `test_import_jira_contract.py`.
 
 - **Access.**
   - `<config>/import/jira-key` holds `{"site", "email", "token"}` as JSON and must be owner-only.
@@ -808,7 +808,7 @@ The first Jira slice imports issues. Projects and boards as docs (with component
   - `story_points` while it has at most 20 values;
   - select, radio, checkbox and cascading custom fields (a field named Owner becomes `jira_owner`).
 
-  Every value is also a header line: labels, components, versions, every sprint with its state, story points, time tracking, watchers and votes at import, other custom fields and web links. Paragraph fields become `## <name>` sections of the body.
+  Every value is also a header line: labels, components, versions, every sprint with its state, story points, other custom fields and web links. Watcher, vote and time-tracking counts stay in the archive only. Paragraph fields become `## <name>` sections of the body.
 - **ADF to Markdown** by the Jira note's §2.8 contract.
   - Every line that would read as a heading, quote or list is escaped. Headings are written as text.
   - Unknown nodes keep their text and are counted, and so are dropped styling and unresolved images. An image names its attachment when its alt text matches a file.
@@ -827,8 +827,8 @@ The first Jira slice imports issues. Projects and boards as docs (with component
 1. **Built on main after the Linear merge, reusing its shared code.** The adapter registry, the census, due instants, the every-heading escape and the `previously` relation came with Linear; Jira added only the map file's `names`.
 2. **Watchers and votes are counts only**, with no per-issue watcher calls.
 3. **Remote links are one call per issue.** The note's optimization, which reads the changelog first, waits for the seed site.
-4. **Attachments added in restricted comments** cannot be told apart without the media-ID mapping, so they stay on the item. They need the seed site.
-5. **The cancelled resolutions** are a constant (Won't Do, Duplicate). They are not yet in the map file.
+4. ~~Attachments added in restricted comments stay on the item~~: rejected by the review, and fixed (below).
+5. ~~The cancelled resolutions are a constant~~: they are in the map file now (below).
 
 **Evidence:**
 - On fakes: 14 adapter tests and 7 converter tests.
@@ -841,6 +841,16 @@ The first Jira slice imports issues. Projects and boards as docs (with component
   - a comment's heading escaped;
   - a re-run that writes nothing.
 - The whole suite: 441 passed against a scratch core, and 421 passed with 20 skipped without one.
+
+**The review of `b2e2fb5`** said fix. It found these held: requests only to the gateway, no token in any error, fidelity to the REST v3 fixtures, and no regression on GitHub. Its findings were fixed RED first (`f12eb08`), one GREEN commit each:
+- **High: a skipped restricted issue's title leaked through the issues around it** (`1e72288`). Each skipped issue's key and ID are now collected, and every reference to one is withheld: header, link, archive and history alike. No issue embedded in another's archive (parent, sub-task or link) keeps its title.
+- **Medium: files of comments or worklogs left out were still imported** (`7f500b9`). When a comment or worklog is left out, only the files the description, paragraph fields or shown comments reference (media by their alt text) are imported. The rest are neither fetched nor named, and the header counts them (`Not imported: 1 restricted comment, 2 attachments`).
+- **Medium-low: a moved issue's history named the project it left** (`cecaacc`). For a move from a project not selected, that project's `project` and `Workflow` changelog items are withheld, as its `Key` item was.
+- **Low:**
+  - The resolutions that mean cancelled come from the map file's `cancelled`. It defaults to Won't Do, Duplicate, Won't Fix, Cannot Reproduce and Declined, and the template writes the list out (`932a314`).
+  - A `tenant_info` answer that is not JSON, or gives a cloud ID of another shape, stops with a clean message (`f8b96ac`).
+  - Watcher, vote and time-tracking counts left the header for the archive (`b16ca8f`). A changed count still changes the archive file, and so the work item's files.
+- **Linear, from #8's review:** milestones and updates are read with their archived ones, so an archived one is mirrored rather than reported missing (`16f7562`).
 
 **Rows still waiting for the real site (S):**
 - J1–J14 as the table above lists, beyond the fakes and the contract test;
