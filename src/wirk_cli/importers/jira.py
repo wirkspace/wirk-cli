@@ -211,16 +211,6 @@ class Jira:
         web = [" ".join(((link.get("object") or {}).get(part) or "") for part in ("title", "url")) for link in links]
         gone = [f"{n} restricted {word}{'s' if n != 1 else ''}" for n, word in zip(hidden, ("comment", "worklog")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        relations = ([("parent", self.reference(f["parent"]))] if f.get("parent") else [])
-        relations += [("sub_issue", self.reference(child)) for child in {c["id"]: c for c in (f.get("subtasks") or []) + children}.values()]
-        for link in f.get("issuelinks") or []:
-            kind, other = (link["type"], link.get("outwardIssue")) if link.get("outwardIssue") else (link["type"], link.get("inwardIssue"))
-            outward = bool(link.get("outwardIssue"))
-            relation = {("Blocks", True): "blocking", ("Blocks", False): "blocked_by", ("Duplicate", True): "duplicate_of",
-                        ("Duplicate", False): "duplicated_by"}.get((kind["name"], outward), "related")
-            relations.append((relation, self.reference(other, "" if relation != "related" else kind["outward" if outward else "inward"])))
-        relations += [("previously", render.Ref(item["fromString"], item["fromString"].rsplit("-", 1)[0], False))
-                      for entry in history for item in entry.get("items", []) if item.get("field") == "Key" and item.get("fromString")]
         raw = {"issue": clean({**node, "fields": {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}}),
                "worklogs": clean(worklogs), "changelog": clean(history), "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)
@@ -230,13 +220,26 @@ class Jira:
             f"is {status.get('name')} there (resolution {resolution or 'none'}, resolved {f.get('resolutiondate')})" if category == "done" else None,
             [f"Reported by {self.name(f.get('reporter'))} {f['created']}"], facts,
             [(assignee["accountId"], self.name(assignee))] if assignee else [], fields,
-            f"{f['duedate']}T23:59:59Z" if f.get("duedate") else None, relations,
+            f"{f['duedate']}T23:59:59Z" if f.get("duedate") else None, self.relations(f, history, children),
             [render.Comment(self.name(c.get("author")), c["created"], c.get("updated", c["created"]) != c["created"],
                             adf.markdown(c.get("body"), self.counts, files), "", None, c.get("updated", c["created"]),
                             ("internal",) if c.get("jsdPublic") is False else ()) for c in comments],
             [render.Attachment(render.attachment_name(SOURCE, a["id"], a["filename"]), f"{self.base}/rest/api/3/attachment/content/{a['id']}",
                                False) for a in f.get("attachment") or []],
             raw, clean(comments))
+
+    def relations(self, f: dict, history: list, children: list) -> list:
+        """The parent, the children, each link as seen from this issue, and the keys it had before a move."""
+        found = [("parent", self.reference(f["parent"]))] if f.get("parent") else []
+        found += [("sub_issue", self.reference(child)) for child in {c["id"]: c for c in (f.get("subtasks") or []) + children}.values()]
+        for link in f.get("issuelinks") or []:  # on this issue, outwardIssue reads "this <outward> other"
+            outward, kind = "outwardIssue" in link, link["type"]
+            relation = {("Blocks", True): "blocking", ("Blocks", False): "blocked_by", ("Duplicate", True): "duplicate_of",
+                        ("Duplicate", False): "duplicated_by"}.get((kind["name"], outward), "related")
+            note = kind["outward" if outward else "inward"] if relation == "related" else ""
+            found.append((relation, self.reference(link["outwardIssue" if outward else "inwardIssue"], note)))
+        return found + [("previously", render.Ref(item["fromString"], item["fromString"].rsplit("-", 1)[0], False))
+                        for entry in history for item in entry.get("items", []) if item.get("field") == "Key" and item.get("fromString")]
 
     def every(self, node: dict, field: str, key: str, size: int) -> list:
         """An issue's comments or worklogs: those that came with it, or all of them when there are more."""
