@@ -35,7 +35,8 @@ def make(fake, **options):
     plan = render.plan_fields([], {"Repository": "one"}, "GitHub")
     defaults = dict(users={}, statuses=LABELS, plan=plan, withheld=lambda node: False, download=lambda attachment: b"",
                     dry_run=False, overwrite=False)
-    importer = wirk.Importer(wirk.Wirk(service), CTX, **{**defaults, **options})
+    ctx = options.pop("ctx", CTX)
+    importer = wirk.Importer(wirk.Wirk(service), ctx, **{**defaults, **options})
     importer.start()
     return importer
 
@@ -347,3 +348,33 @@ def test_an_item_updated_while_archived_is_still_restored_when_the_source_restor
     result = make(fake).run([issue(1, body="Changed when it came back.")])
     assert [(o.kind, o.outcome) for o in result] == [("issue", "updated"), ("issue", "restored")]
     assert not fake.items[item_of_issue(fake, 1)]["archived"]
+
+
+
+def linearish():
+    return Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"),
+                   labels={**CTX.labels, "project": "Project", "milestone": "Milestone", "includes": "Projects",
+                           "initiative": "Initiatives"},
+                   kinds=("issue", "project", "milestone", "initiative"), docs=frozenset({"initiative"}))
+
+
+def test_projects_milestones_and_initiative_docs_are_written_and_linked_by_their_kinds(fake):
+    LINEARISH = linearish()
+    to = lambda key, ident: Ref(key=key, scope="ENG", public=True, ident=ident)
+    records = [issue(1, source="Linear", kind="project", ident="p-1", key="Checkout v2", relations=[("initiative", to("Reliability", "i-1"))]),
+               issue(2, source="Linear", kind="milestone", ident="m-1", key="Checkout v2 · Beta", relations=[("project", to("Checkout v2", "p-1"))]),
+               issue(3, source="Linear", ident="u-3", key="ENG-3", relations=[("milestone", to("Checkout v2 · Beta", "m-1"))]),
+               issue(4, source="Linear", kind="initiative", ident="i-1", key="Reliability", relations=[("includes", to("Checkout v2", "p-1"))])]
+    assert set(outcomes(make(fake, ctx=LINEARISH).run(records)).values()) == {"created"}
+    items = {item["revisions"][-1]["body"].split("\n")[0].split(",")[0]: (i, item) for i, item in fake.items.items()}
+    initiative = items["Linear initiative i-1"][1]["revisions"][-1]
+    assert initiative["work"] is None and initiative["fields"] == {}
+    assert initiative["body"].split("\n")[1] == "Linear initiative [Reliability] · https://github.com/acme/api/issues/4"
+    assert items["Linear project p-1"][1]["revisions"][-1]["work"] is not None
+    ids = {name.split(" ")[2]: item_id for name, (item_id, _) in items.items()}
+    live = {(l["type"], l["from"], l["to"]) for l in fake.links.values() if not l["removed"]}
+    assert ("contributes_to", ids["m-1"], ids["p-1"]) in live and ("contributes_to", ids["u-3"], ids["m-1"]) in live
+    assert {("related_to", ids["p-1"], ids["i-1"]), ("related_to", ids["i-1"], ids["p-1"])} & live
+    before = len(fake.writes())
+    assert set(outcomes(make(fake, ctx=LINEARISH).run(records)).values()) == {"current"}
+    assert len(fake.writes()) == before
