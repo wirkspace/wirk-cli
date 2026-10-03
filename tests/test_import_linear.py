@@ -198,7 +198,7 @@ def read(fake, folder, selection=()):
 
 
 def by_key(records):
-    return {record.key: record for record in records}
+    return {record.key: record for record in records if record.kind == "issue"}
 
 
 # ---------------------------------------------------------------- the key and the selection
@@ -349,7 +349,7 @@ def test_pages_and_long_nested_connections_are_followed(folder):
     fake = FakeLinear([issue(n) for n in range(1, 60)] + [issue(60, history=page(history[:50], True, "50"))])
     fake.nested[(uid(60), "history")] = history
     records = read(fake, folder)[2]
-    assert len(records) == 60 and len(by_key(records)["ENG-60"].raw["issue"]["history"]["nodes"]) == 70
+    assert len(by_key(records)) == 60 and len(by_key(records)["ENG-60"].raw["issue"]["history"]["nodes"]) == 70
 
 
 def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
@@ -359,7 +359,7 @@ def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
     found = adapter(fake, folder, slept)
     found.check()
     census, records = found.read([])
-    assert len(records) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
+    assert len(by_key(records)) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
     assert census.points == 50 * (len(fake.requests) - 1)  # every answered query, the check included
 
 

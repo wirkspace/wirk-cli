@@ -22,10 +22,16 @@ FILE_HOSTS = {"uploads.linear.app"}  # where uploads are read, with the key; any
 TRANSPORT = None  # how requests leave; tests answer through a fake
 KEY = re.compile(r"lin_api_[A-Za-z0-9]{20,}")
 LABELS = {"parent": "Parent", "sub_issue": "Sub-issues", "blocked_by": "Blocked by", "blocking": "Blocking",
-          "duplicate_of": "Duplicate of", "duplicated_by": "Duplicates", "related": "Related", "previously": "Previously"}
-SELECTIONS = {"Team": "many", "Workflow": "one", "Priority": "one", "Estimate": "one", "Cycle": "one", "Label": "many"}
+          "duplicate_of": "Duplicate of", "duplicated_by": "Duplicates", "related": "Related", "project": "Project",
+          "milestone": "Milestone", "of": "Belongs to", "initiative": "Initiatives", "includes": "Projects",
+          "parent_initiative": "Parent initiative", "sub_initiative": "Sub-initiatives",
+          "previously": "Previously"}
+KINDS, DOCS = ("issue", "project", "milestone", "initiative", "document", "update"), frozenset({"initiative", "document", "update"})
+SELECTIONS = {"Team": "many", "Workflow": "one", "Priority": "one", "Estimate": "one", "Cycle": "one", "Label": "many",
+              "Health": "one"}
 STATES = {"triage": "open", "backlog": "open", "unstarted": "open", "started": "in_progress", "completed": "completed",
-          "canceled": "cancelled", "duplicate": "cancelled"}
+          "canceled": "cancelled", "duplicate": "cancelled", "planned": "open", "paused": "open"}  # issue and project types
+HEALTH = {"onTrack": "On track", "atRisk": "At risk", "offTrack": "Off track"}
 PRIORITIES = {1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
 SIZES = {1: "XS", 2: "S", 3: "M", 5: "L", 8: "XL", 13: "XXL", 21: "XXXL"}  # Linear keeps T-shirt sizes as these numbers
 RELATIONS = {"blocks": ("blocking", "blocked_by"), "duplicate": ("duplicate_of", "duplicated_by")}  # else related both ways
@@ -48,17 +54,29 @@ ISSUE = ("id identifier number previousIdentifiers url title description priorit
          "project { id } projectMilestone { id } cycle { id } assignee { id } creator { id } "
          + " ".join(f"{name}({args}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }}"
                     for name, (args, nodes) in NESTED.items()))
-COMMENT = ("id body createdAt editedAt quotedText resolvedAt reactionData parent { id } issue { id } user { id } "
+COMMENT = ("id body createdAt editedAt quotedText resolvedAt reactionData parent { id } issue { id } project { id } "
+           "initiative { id } projectUpdate { id } initiativeUpdate { id } documentContent { document { id } } user { id } "
            "resolvingUser { id } botActor { name } externalUser { name }")
+UPDATE = "id body health url createdAt editedAt user { id } reactionData"
 LISTS = {  # read whole at the start: (arguments, what each node holds)
     "teams": ("", "id key name private timezone issueEstimationType"),
     "workflowStates": ("includeArchived: true", "id name type position team { id }"),
     "users": ("includeDisabled: true", "id name displayName"),
     "issueLabels": ("includeArchived: true", "id name isGroup parent { id }"),
     "cycles": ("includeArchived: true", "id number name team { id }"),
-    "projects": ("includeArchived: true", "id name"),
-    "projectMilestones": ("", "id name"),
+    "projects": ("includeArchived: true", "id name description content url status { id name type } priority lead { id } "
+                 "teams(first: 20) { nodes { id } } targetDate targetDateResolution health createdAt updatedAt completedAt "
+                 "canceledAt archivedAt trashed"),
+    "projectMilestones": ("", "id name description targetDate status project { id }"),
     "issueRelations": ("includeArchived: true", f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"),
+    "projectRelations": ("", "id type project { id } relatedProject { id } projectMilestone { id } relatedProjectMilestone { id }"),
+    "initiatives": ("includeArchived: true", "id name description content url status owner { id } targetDate health "
+                    "parentInitiative { id } createdAt updatedAt archivedAt trashed"),
+    "initiativeToProjects": ("", "id initiative { id } project { id }"),
+    "documents": ("includeArchived: true", "id title content url creator { id } createdAt updatedAt project { id } "
+                  "initiative { id } issue { id } archivedAt trashed"),
+    "projectUpdates": ("", UPDATE + " project { id }"),
+    "initiativeUpdates": ("", UPDATE + " initiative { id }"),
 }
 PARTIAL = {"issueRelations"}  # lists whose answer may leave out what the key cannot read, with an error saying so
 IN_TEAMS = "team: { id: { in: $teams } }"
@@ -171,50 +189,178 @@ class Linear:
     # ---------------------------------------------------------------- what to read
 
     def context(self, selected: list) -> render.Context:
-        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS)
+        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS)
 
     def read(self, selection: list) -> tuple[render.Census, list]:
         lists = {name: self.every(name, args, nodes) for name, (args, nodes) in LISTS.items()}
-        self.teams, self.states, self.users, self.labels, self.cycles, self.projects, self.milestones = (
+        self.teams, self.states, self.users, self.labels, self.cycles, self.projects, self.milestones, self.initiatives = (
             {node["id"]: node for node in lists[name]} for name in
-            ("teams", "workflowStates", "users", "issueLabels", "cycles", "projects", "projectMilestones"))
+            ("teams", "workflowStates", "users", "issueLabels", "cycles", "projects", "projectMilestones", "initiatives"))
         self.keys = keys = {team["key"]: team for team in lists["teams"]}
         unknown = [word for word in selection if word not in keys]
         if unknown:
             raise Stop(f"Linear has no team {', '.join(unknown)} that this key can see",
                        f"the teams it can see: {', '.join(sorted(keys))}")
         chosen = [keys[word] for word in selection] or [team for team in lists["teams"] if not team["private"]]
-        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, [t["id"] for t in chosen])
+        self.chosen = {team["id"] for team in chosen}
+        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
         for node in issues:
             for name in NESTED:
                 self.rest_of(node, name)
         comments = defaultdict(list)
         for found in self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
-                                [t["id"] for t in chosen]):
-            comments[found["issue"]["id"]].append(found)
+                                sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
+                                                                  COMMENT, 100):
+            parent = found["issue"] or found["projectUpdate"] or found["initiativeUpdate"] or \
+                (found["documentContent"] or {}).get("document") or found["project"] or found["initiative"]
+            comments[(parent or {}).get("id")].append(found)
         read, related, children = {node["id"] for node in issues}, defaultdict(list), defaultdict(list)
         readable = [r for r in lists["issueRelations"] if r and r["issue"] and r["relatedIssue"]]
         for relation in readable:
             ends, kinds = (relation["issue"], relation["relatedIssue"]), RELATIONS.get(relation["type"], ("related", "related"))
             for this, other, kind in ((ends[0], ends[1], kinds[0]), (ends[1], ends[0], kinds[1])):
                 if this["id"] in read:
-                    related[this["id"]].append((kind, other, relation))
+                    related[this["id"]].append((kind, self.reference(other), relation))
         for node in sorted(issues, key=lambda node: node["number"]):
             if node["parent"]:
                 children[node["parent"]["id"]].append(node)
         records = [self.record(node, comments[node["id"]], related[node["id"]], children[node["id"]]) for node in issues]
+        others = self.others(lists, issues, comments)
         census = render.Census(selected=sorted(team["key"] for team in chosen), issues=len(records), points=self.points)
         census.skipped = [(team["key"], None) for team in sorted(lists["teams"], key=lambda t: t["key"])
                           if team["private"] and team not in chosen]
         census.named_private = [(team["key"], "private", sum(node["team"]["id"] == team["id"] for node in issues))
                                 for team in chosen if team["private"]]
+        records += others
         census.comments = sum(len(record.comments) for record in records)
         if len(readable) < len(lists["issueRelations"]):
             census.notes.append(f"relations this key cannot read, left out: {len(lists['issueRelations']) - len(readable)}")
-        census.external_images = sum(1 for node in issues for text in [node["description"] or ""] +
-                                     [c["body"] or "" for c in comments[node["id"]]]
+        census.external_images = sum(1 for record in records for text in [record.body] + [c.body for c in record.comments]
                                      for url in IMAGE.findall(text) if not UPLOAD.match(url))
+        counts = Counter(record.kind for record in others)
+        census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:]))
         return census, records
+
+    # ---------------------------------------------------------------- projects, milestones, initiatives, documents and updates
+
+    def others(self, lists: dict, issues: list, comments: dict) -> list:
+        """The objects around the issues: a selected team's projects with their milestones and relations, the initiatives
+        that hold them, and the documents and updates of what is imported (§5)."""
+        projects = [p for p in lists["projects"] if {t["id"] for t in p["teams"]["nodes"]} & self.chosen]
+        ids = {p["id"] for p in projects}
+        milestones = [m for m in lists["projectMilestones"] if m["project"]["id"] in ids]
+        holds = defaultdict(list)
+        for link in lists["initiativeToProjects"]:
+            if link["project"]["id"] in self.projects:
+                holds[link["initiative"]["id"]].append(self.projects[link["project"]["id"]])
+        initiatives = [i for i in lists["initiatives"] if not holds[i["id"]] or {p["id"] for p in holds[i["id"]]} & ids]
+        ids |= {node["id"] for node in milestones + initiatives}
+        related = defaultdict(list)
+        for found in lists["projectRelations"]:
+            blocker, blocked = found["projectMilestone"] or found["project"], found["relatedProjectMilestone"] or found["relatedProject"]
+            kinds = ("blocking", "blocked_by") if found["type"] == "blocks" else ("related", "related")
+            related[blocker["id"]].append((kinds[0], self.part(blocked["id"])))
+            related[blocked["id"]].append((kinds[1], self.part(blocker["id"])))
+        for initiative in initiatives:
+            for project in sorted(holds[initiative["id"]], key=lambda p: p["name"]):
+                related[project["id"]].append(("initiative", self.part(initiative["id"])))
+                related[initiative["id"]].append(("includes", self.part(project["id"])))
+        for initiative in initiatives:
+            parent = (initiative["parentInitiative"] or {}).get("id")
+            if parent in ids:
+                related[initiative["id"]].append(("parent_initiative", self.part(parent)))
+                related[parent].append(("sub_initiative", self.part(initiative["id"])))
+        records = [self.project(node, comments, related) for node in projects]
+        records += [self.build("milestone", node, self.part(node["id"]).key, node["description"] or "",
+                               self.projects[node["project"]["id"]]["url"], node.get("updatedAt") or self.projects[node["project"]["id"]]["updatedAt"],
+                               state="completed" if node["status"] == "done" else "open",
+                               facts=[f"Target: {node['targetDate']}"] if node["targetDate"] else [],
+                               due=due_at(node["targetDate"], "UTC") if node["targetDate"] else None,
+                               relations=[("project", self.part(node["project"]["id"]))] + related[node["id"]]) for node in milestones]
+        records += [self.build("initiative", node, node["name"], self.text(node), node["url"], node["updatedAt"],
+                               facts=[" · ".join([f"Status: {node['status']}",
+                                                  *([f"Health: {HEALTH[node['health']]}"] if node["health"] in HEALTH else []),
+                                                  *([f"Target: {node['targetDate']}"] if node["targetDate"] else []),
+                                                  *([f"Owner: {self.person(node['owner'])}"] if node["owner"] else [])])],
+                               relations=related[node["id"]], comments=comments[node["id"]]) for node in initiatives]
+        parents = {**{node["id"]: self.part(node["id"]) for node in projects + initiatives},
+                   **{node["id"]: self.reference(node) for node in issues}}
+        records += [self.build("document", node, node["title"], node["content"] or "", node["url"], node["updatedAt"],
+                               opened=[f"Written by {self.person(node['creator'])} {node['createdAt']}"],
+                               relations=[("of", parents[parent])], comments=comments[node["id"]])
+                    for node in lists["documents"]
+                    for parent in [((node["project"] or node["initiative"] or node["issue"]) or {}).get("id")] if parent in parents]
+        for name, kind in (("projectUpdates", "project"), ("initiativeUpdates", "initiative")):
+            records += [self.build("update", node, f"{parents[node[kind]['id']].key} update {node['createdAt'][:10]}", node["body"] or "",
+                                   node["url"], node["editedAt"] or node["createdAt"],
+                                   opened=[" · ".join([f"Posted by {self.person(node['user'])} {node['createdAt']}",
+                                                       *(["edited"] if node["editedAt"] else [])])],
+                                   facts=[f"Health: {HEALTH[node['health']]}" if node["health"] in HEALTH else "",
+                                          f"Reactions: {reactions(node['reactionData'])}" if reactions(node["reactionData"]) else ""],
+                                   relations=[("of", parents[node[kind]["id"]])], comments=comments[node["id"]])
+                        for node in lists[name] if node[kind]["id"] in parents]
+        return records
+
+    def part(self, ident: str) -> render.Ref:
+        """A project, milestone or initiative as a reference: shown when one of its teams is selected or public."""
+        if ident in self.milestones:
+            milestone = self.milestones[ident]
+            project = self.part(milestone["project"]["id"])
+            return render.Ref(f"{project.key} · {milestone['name']}", project.scope, project.public, ident)
+        if ident in self.initiatives:  # initiatives belong to the whole workspace
+            return render.Ref(self.initiatives[ident]["name"], "", True, ident)
+        teams = [self.teams[t["id"]] for t in self.projects[ident]["teams"]["nodes"] if t["id"] in self.teams]
+        scope = next((t["key"] for t in teams if t["id"] in self.chosen), teams[0]["key"] if teams else "")
+        return render.Ref(self.projects[ident]["name"], scope, any(not t["private"] for t in teams), ident)
+
+    def project(self, node: dict, comments: dict, related: dict) -> render.Record:
+        teams = [self.teams[t["id"]] for t in node["teams"]["nodes"] if t["id"] in self.teams]
+        shown = [t["key"] for t in teams if t["id"] in self.chosen or not t["private"]]  # a private team not named stays unnamed
+        status, priority, health = node["status"] or {}, PRIORITIES.get(node["priority"]), HEALTH.get(node["health"])
+        target, day = self.target(node["targetDate"], node["targetDateResolution"])
+        return self.build(
+            "project", node, node["name"], self.text(node), node["url"], node["updatedAt"], state=STATES.get(status.get("type"), "open"),
+            opened=[" · ".join([f"Created {node['createdAt']}", *(f"{word} {node[word + 'At']}" for word in ("completed", "canceled")
+                                                                if node.get(word + "At"))])],
+            facts=[" · ".join([f"Teams: {', '.join(shown)}", f"Status: {status.get('name')} ({status.get('type')})",
+                               *([f"Priority: {priority}"] if priority else []), *([f"Health: {health}"] if health else [])]),
+                   *([f"Target: {target}"] if target else [])],
+            lead=node["lead"], due=due_at(day, "UTC") if day else None, relations=related[node["id"]], comments=comments[node["id"]],
+            fields={"Team": shown, "Workflow": [status.get("name")], "Priority": [priority], "Health": [health]},
+            closed=next((f"{word} at {node[word + 'At']}" for word in ("completed", "canceled") if node.get(word + "At")), None))
+
+    @staticmethod
+    def target(day: str | None, resolution: str | None) -> tuple[str | None, str | None]:
+        """A target as Linear shows it, and the last day it covers: a month, quarter, half or year ends with its period."""
+        if not day:
+            return None, None
+        when = date.fromisoformat(day)
+        months = {"month": 1, "quarter": 3, "halfYear": 6, "year": 12}.get(resolution)
+        if not months:
+            return day, day
+        first = (when.month - 1) // months * months  # months before the period starts
+        end = date(when.year + (first + months) // 12, (first + months) % 12 + 1, 1).toordinal() - 1
+        shown = {"month": f"{when:%Y-%m}", "quarter": f"{when.year} Q{first // 3 + 1}", "halfYear": f"{when.year} H{first // 6 + 1}",
+                 "year": f"{when.year}"}[resolution]
+        return shown, date.fromordinal(end).isoformat()
+
+    @staticmethod
+    def text(node: dict) -> str:
+        return "\n\n".join(part for part in (node["description"], node["content"]) if part)
+
+    def build(self, kind: str, node: dict, key: str, body: str, url: str, version: str, *, state="open", closed=None, opened=(),
+              facts=(), lead=None, fields=None, due=None, relations=(), comments=()) -> render.Record:
+        """Any object but an issue, as a record."""
+        ordered, lead = self.thread(list(comments)), self.users.get((lead or {}).get("id"))
+        archived = (f"In Linear's trash since {node['archivedAt'][:10]}" if node.get("trashed") else
+                    f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
+        return render.Record(SOURCE, kind, node["id"], key, url, version, key, body, state, closed, list(opened),
+                             [fact for fact in facts if fact] + ([archived] if archived else []),
+                             [(lead["displayName"], f"@{lead['displayName']}")] if lead else [],
+                             {name: values for name, values in (fields or {}).items() if values and None not in values}, due,
+                             list(relations), [self.comment(found, {c["id"]: c for c in ordered}) for found in ordered],
+                             self.uploads({"description": body}, ordered),
+                             {kind: {key: value for key, value in node.items() if key != "updatedAt"}}, ordered, archived)
 
     # ---------------------------------------------------------------- one issue as a record
 
@@ -240,9 +386,12 @@ class Linear:
                     f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
         times = [f"{word} {node[word + 'At']}" for word in ("started", "completed", "canceled") if node.get(word + "At")]
         ordered, assignee = self.thread(comments), self.users.get((node["assignee"] or {}).get("id"))
+        milestone, project = (node["projectMilestone"] or {}).get("id"), (node["project"] or {}).get("id")
         relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
             [("sub_issue", self.reference(child)) for child in children] + \
-            sorted(((kind, self.reference(other)) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
+            ([("milestone", self.part(milestone))] if milestone in self.milestones else
+             [("project", self.part(project))] if project in self.projects else []) + \
+            sorted(((kind, other) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
         # an identifier from before a move names its team: shown, and kept in the archive, only as any reference is (§3.9)
         previous = [{"identifier": key, "team": {"key": prefix, "private": self.keys.get(prefix, {"private": True})["private"]}}
                     for key in node["previousIdentifiers"] for prefix in [key.rsplit("-", 1)[0]]]
@@ -271,15 +420,11 @@ class Linear:
         priority, estimate, cycle = PRIORITIES.get(node["priority"]), self.estimate(node["estimate"], team), self.cycle(node["cycle"])
         fields = {"Team": [team["key"]], "Workflow": [state["name"]], "Priority": [priority], "Estimate": [estimate],
                   "Cycle": [cycle], **groups}
-        project, milestone = (self.projects.get((node["project"] or {}).get("id")),
-                              self.milestones.get((node["projectMilestone"] or {}).get("id")))
         facts = [" · ".join([f"Team: {team['name']} ({team['key']})", f"Status: {state['name']} ({state['type']})",
                              *([f"Priority: {priority}"] if priority else []),
                              *([f"Estimate: {estimate} ({team['issueEstimationType']})"] if estimate else [])]),
                  f"Due: {node['dueDate']} ({team['timezone'] or 'UTC'})" if node["dueDate"] else "",
                  f"Cycle: {cycle}" if cycle else "",
-                 " · ".join([*([f"Project: {project['name']}"] if project else []),
-                             *([f"Milestone: {milestone['name']}"] if milestone else [])]),
                  " · ".join(f"{'Labels' if name == 'Label' else name}: {', '.join(values)}" for name, values in groups.items()),
                  f"Reactions: {reactions(node['reactionData'])}" if reactions(node["reactionData"]) else "",
                  *(" ".join(filter(None, ["Attachment:", card["sourceType"] or "link", f'"{card["title"]}"', card["subtitle"],
