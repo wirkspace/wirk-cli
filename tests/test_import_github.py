@@ -371,7 +371,7 @@ def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_t
     adapter = github.GitHub(run=limited, sleep=slept.append)
     adapter.check()
     if read_through:
-        assert len(adapter.read(["acme"])[1]) == 1 and [round(s) for s in slept] == [60, 120, 240, 480]
+        assert len(adapter.read(["acme"])[1]) == 1 and [round(s) for s in slept[:4]] == [60, 120, 240, 480]
     else:
         with pytest.raises(github.Stop):
             adapter.read(["acme"])

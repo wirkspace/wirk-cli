@@ -221,8 +221,8 @@ class GitHub:
 
     def graphql(self, query: str, variables: dict) -> dict:
         assert not query.lstrip().startswith("mutation")  # the importer only reads
-        attempt = 0
-        while attempt < 4:
+        refusals = 0
+        while True:
             self.gate.wait()
             code, out, err = self.run(["api", "graphql", "--input", "-"], json.dumps({"query": query, "variables": variables}))
             try:
@@ -236,14 +236,15 @@ class GitHub:
             if SPENT.search(text):  # waiting for the reset is not a failed attempt
                 self.gate.hold(self.until_reset() + 1)
                 continue
-            attempt += 1
-            if LIMITED.search(text):
-                self.gate.hold(60 * 2 ** (attempt - 1))
+            if LIMITED.search(text) and refusals < 4:  # a minute, doubling: four pauses, each followed by a retry
+                self.gate.hold(60 * 2 ** refusals)
+                refusals += 1
                 continue
+            if LIMITED.search(text):
+                raise Stop("GitHub kept refusing for its secondary rate limit; wait an hour and run the same command again")
             if TIMEOUT.search(text):
                 raise TimeoutError(text[:200])
             raise Stop(f"GitHub refused a read: {(answer.get('errors') or [{}])[0].get('message') or err.strip()[:200]}")
-        raise Stop("GitHub kept refusing for its secondary rate limit; wait an hour and run the same command again")
 
     def until_reset(self) -> float:
         """Seconds until the hour's GraphQL budget resets; GitHub answers this query even when the budget is spent."""
