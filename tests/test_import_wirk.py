@@ -4,7 +4,7 @@ object, one issue per write, refusals, receipts and files, on an in-memory WIRK.
 import httpx
 import pytest
 
-from import_fakes import FakeWirk
+from import_fakes import FakeWirk, refusal
 from wirk_cli.client import Service
 from wirk_cli.importers import render, wirk
 from wirk_cli.importers.render import Comment, Context, Record, Ref
@@ -41,6 +41,10 @@ def make(fake, **options):
 @pytest.fixture
 def fake():
     return FakeWirk(fields={"repository": {"acme_api": "active"}})
+
+
+def item_of_issue(fake, number):
+    return next(i for i, item in fake.mine().items() if f" {3000000000 + number}," in item["revisions"][-1]["body"].split("\n")[0])
 
 
 def outcomes(result):
@@ -248,6 +252,21 @@ def test_a_lost_answer_is_settled_by_its_receipt(fake):
     result = make(fake).run([issue(1)])
     assert result[0].outcome == "created" and "receipt" in result[0].message
     assert len(fake.mine()) == 1
+
+
+def test_a_refusal_or_an_unsettled_write_is_an_error_for_that_issue_and_the_run_goes_on(fake):
+    make(fake).run([issue(1), issue(2)])
+    first = item_of_issue(fake, 1)
+    query = fake.query
+    fake.query = lambda body: refusal("not_available", "No record") if first in str(body.get("fetch")) else query(body)
+    result = outcomes(make(fake).run([issue(1, body="Changed."), issue(2, body="Changed.")]))
+    assert result == {("acme/api#1", "issue"): "error", ("acme/api#2", "issue"): "updated"}
+    fake.query = query
+    fake.lose("write", after=False, times=2, when=lambda body: "3000000003" in body["request_id"])  # never ran, never settled
+    result = make(fake).run([issue(1), issue(2), issue(3), issue(4)])
+    assert outcomes(result)[("acme/api#3", "issue")] == "error" and "outcome_unknown" in result[2].message
+    assert outcomes(result)[("acme/api#4", "issue")] == "created"
+    assert outcomes(make(fake).run([issue(3)]))[("acme/api#3", "issue")] == "created"
 
 
 # ---------------------------------------------------------------- parts

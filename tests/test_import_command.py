@@ -135,3 +135,17 @@ def test_naming_a_private_repository_warns_who_will_read_it(world):
     assert code == 0 and warning in out
     code, out, err = world["run"]("github", "acme", "--dry-run")
     assert "private on GitHub" not in out
+
+
+def test_a_run_that_stops_still_prints_what_it_did(world):
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    fake, write = world["fake"], world["fake"].write
+
+    def write_until_the_service_goes(body):
+        if fake.items:  # the first issue went in; then WIRK cannot be reached
+            raise httpx.ConnectError("refused")
+        return write(body)
+    fake.write = write_until_the_service_goes
+    code, out, err = world["run"]("github", "acme")
+    assert code == 1 and "created: 1" in out and "service_unavailable" in err
