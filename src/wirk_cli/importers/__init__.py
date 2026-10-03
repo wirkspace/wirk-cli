@@ -164,8 +164,7 @@ class Run:
         return mapped
 
     def check_statuses(self, importer) -> None:
-        wanted = {**DEFAULT_STATUSES, **self.mapped.get("status", {})}
-        missing = sorted(set(wanted.values()) - set(importer.vocab.get("status", [])))
+        missing = sorted(set(importer.statuses.values()) - set(importer.vocab.get("status", [])))
         if missing:
             raise Stop(f"this wirkspace's status has no {', '.join(missing)}; its options are "
                        f"{', '.join(importer.vocab.get('status', []))}",
