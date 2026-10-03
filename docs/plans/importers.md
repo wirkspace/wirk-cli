@@ -157,7 +157,7 @@ Markdown conversion and pacing belong to the adapter.
   - Title `<key> discussion: <issue title>`, cut to 200. Its body is its own provenance line, its key line (`GitHub comments on [Acme/api#123] · <url>`), the content notice, then every comment in order: a heading `### @ada · 2026-03-02T11:00:00Z · edited`, the comment, its reactions.
   - **Forged headings are neutralized.** A line inside a comment that starts like a heading of this doc (`### @`) is written with a backslash, `\### @…`, so it reads as text and cannot pose as another comment; the report counts them.
   - It is `related_to` the work item. Its files are the comments' archive and the attachments the comments reference.
-  - **Parts.** When the encoded JSON of the write that carries a part (the request body exactly as sent, escapes included) would pass 2 MiB, the discussion continues in parts (`… discussion (2)`, first-line kind `comments-2`), each `related_to` the work item. Parts are cut between comments, or inside a comment only when one comment alone is too big. Parts after the first go one to a write. So no write nears the 4 MiB request limit, whatever the script or emoji in the text.
+  - **Parts.** When the encoded JSON of the write that carries a part (the request body exactly as sent, escapes included) would pass 2 MiB, the discussion continues in parts (`… discussion (2)`, first-line kind `comments-2`), each `related_to` the work item. Parts are cut between comments; a source's longest comment always fits in a part of its own. The first part goes in one write with the work item, so the work item's bytes count toward it. Parts after the first go one to a write. So no write nears the 4 MiB request limit, whatever the script or emoji in the text.
   - **Stale parts.** A part the discussion no longer needs (comments deleted, or shorter after a redaction) is archived by the importer with the reason `No longer needed: the discussion of [Acme/api#123] now fits in 1 part`, when the importer made its latest revision; otherwise it is reported.
 - **Two raw archives per issue** (ruling 6), canonical JSON with sorted keys, every email field removed (§3.9), credentials redacted, references into scopes that are neither selected nor public removed and counted (§3.9):
   - `github-issue-<ID>.json` on the work item: the issue, its relations and its timeline events except comments, without the values that move with every comment (`updatedAt`, comment counts);
@@ -202,7 +202,7 @@ GitHub comments on [Acme/api#123] · https://github.com/Acme/api/issues/123
 
 **The index** (Granola's `imports.py`, shared, with its lessons):
 1. **List.** For each kind the adapter writes, list items whose text contains `<Source> <kind> `, active and then `archived: true`. Each page asks for `limit=100` and `max_bytes=65536`, the most a card list may carry, so about 100 cards arrive a page; the loop follows `next_cursor` whatever the count. For the real organization that is about 22 pages of work items and 21 of discussion docs, plus one per archived listing: about 45 pages a run, measured in VERIFY.
-2. **Match.** Keep the cards whose `line` matches §3.3 exactly. The key is (kind, ID).
+2. **Match.** Keep the cards whose `line` matches §3.3 exactly. The key is (kind, ID). A card whose line no longer matches (a person wrote a line above it) goes through the trust rule too, so the importer's own item is never lost and duplicated: its key comes from the importer's own latest revision (step 4). Anyone else's card without a provenance line is left alone and not counted.
 3. **Trust: who created it.** A card the importer revised last is its own. For any other card, one `depth=all` fetch (32 refs a request, cached for the run) reads `created_by`.
    - Created by the importer's principal: one of its items.
    - Created by **another `*-<source>-import` principal** (another person's importer for the same source): that key is **blocked**. A real run writes nothing for it and reports `blocked: imported by bob-github-import`. A dry run that finds any blocked key stops after its plan (exit 2), writes no setup file, and explains: which principal, how many keys, and the two ways on (import as that principal, or into another wirkspace).
@@ -233,10 +233,10 @@ A person's later edit wins: the team can keep re-running during cutover without 
   WIRK stores the reason on each revision the write makes.
 - **Request IDs** are fresh per write, `github-<ID>-<16 hex>`, never derived from the body, so a refusal stored under an old ID is never replayed. After an uncertain answer the CLI's transport resends the identical body once; if it is still uncertain, the importer looks the ID up with `query receipt=`. Applied counts as done; anything else is that issue's `error`, and the next run's index decides again.
 - **Refusals** apply nothing and name `operations[i]`:
-  - `unknown_owner`: the owner is dropped, the write resent under a new ID, and the issue reported (`owner @ben → bob is not a member`).
+  - `unknown_owner`: that owner is learnt for the run and the issue planned again without them, so the body never claims an owner WIRK did not set and the hash seals what was written; the person shows as `@ben (not in WIRK)`. The report names who is not a member. Each later run tries the owner once, and sets them as soon as they join.
   - `unknown_enum_option`: an option retired or removed since the run read `status`; that value becomes header-only, the write is resent, and the field is reported.
-  - `likely_duplicate`: if a named item is the importer's own item for the same key, the object is `current`. Otherwise the importer resends with `allow_duplicate_of` naming the choices (at most 8) and the reason `Separate GitHub issues Acme/api#7 and Acme/api#9; imported as they are`, and reports the pair as `possible duplicates kept separate`. A faithful import never drops an issue because it resembles another.
-  - Anything else: that issue's `error`; the run goes on.
+  - `likely_duplicate`: a choice the importer made is overridden only when the index knows it as another issue's work item; if a choice is its item for the same key, or one it made that the index cannot place, the issue is an `error` and nothing is forced. Otherwise the importer resends with `allow_duplicate_of` naming the choices (at most 8) and the reason `Separate GitHub issues Acme/api#7 and Acme/api#9; imported as they are`, and reports the pair as `possible duplicates kept separate`. A faithful import never drops an issue because it resembles another.
+  - Anything else: that issue's `error`; the run goes on. So is a refused read of one of its items, and a write whose outcome stays unknown after its receipt is looked up. WIRK not answering at all stops the run (exit 2), with every outcome reached so far printed.
 - **Suggestions** in receipts are counted and ignored: the importer writes the source's links, not new ones.
 - **Order.** Repositories, then issues by number. WIRK requests go one at a time.
 
@@ -253,6 +253,7 @@ Links come in a second pass, after every issue's own write, so both ends exist.
 - **Text always.** Both headers keep the source's exact relation, and a fallback says why: `Blocked by: [Acme/api#120] (kept as related: completed here)`. A relation whose other end is outside the selection stays text when its scope may be shown, and a count when it is withheld (§3.9). A later run that includes that end makes the link.
 - **No link to an item archived in WIRK.** Core hides `related_to` links to archived items from `links_out`, so such a link would look missing and be re-added on every run. A relation whose other end is archived in WIRK stays text.
 - **One plan per pair.** The same relation arrives from both ends (`blockedBy` on one issue, `blocking` on the other; a parent and its sub-issue lists). The plan dedupes by link type and ends, `related_to` as an unordered pair, so a link is made once.
+- **A `related_to` meets a `requires`.** When WIRK refuses a planned `requires` (a person completed the work in WIRK, or removed the gate), the link is kept as `related_to`; on later runs that `related_to` counts as the `requires` being there, so nothing more is added.
 - **Cycles** are found by a local graph check in ID order, so the same source gives the same links on every machine. Core still refuses a cycle the local check cannot see (one closed by a link a person made): a `link_cycle` refusal makes that link `related_to`, reported, and the rest of the write is resent.
 - **Reading links.** Each work item with planned or existing relations is fetched on its own (one ref, `depth=full`, `max_bytes=65536`, following the continuation until the item is complete), so a long body never crowds its links out of a shared budget. The makers of the importer-candidate links are read by fetching the link IDs, 32 a request.
 - **Each run keeps the importer's own links in step.** Missing links are added. A link the importer made whose relation is gone from the source, or whose type must change, is removed and reported as `unlinked`, **but only after a complete read of both ends' relations**; a partial read or a page that failed unlinks nothing. Links anyone else made are never touched. A removal and its replacement go in the same write.
@@ -387,7 +388,7 @@ tests/verify/   the independent REST reader (§7, A5); test code
 - **Paging.** A connection with more than a page is fetched on its own, issue by issue. A page that times out is retried at half the size. Pull requests are never read: only `pullRequests.totalCount`, for the report.
 - **Pacing and bounds.**
   - Pages are read one at a time; each page's timelines are read at most four at once (decision 80). Every reader shares one rate-limit budget: each query asks for `rateLimit { cost remaining resetAt }`, and a pause any reader sets, for the hour's reset or a secondary limit, holds them all. Writes to WIRK stay one at a time, one issue per write.
-  - A secondary-limit refusal waits a minute and doubles, three times, then stops with exit 2 and the outcomes so far. A spent hour's budget is not a refusal: every reader waits for its reset.
+  - A secondary-limit refusal pauses every reader for a minute, doubling: four pauses (1, 2, 4 and 8 minutes), each followed by a retry; a fifth refusal stops with exit 2 and the outcomes so far. A reader that wakes checks the pause again, since another reader may have extended it. A spent hour's budget is not a refusal: every reader waits for its reset.
   - A page of 25 issues costs about 3 points and each issue's own timeline read 1, so the real organization's 2,200 issues cost about 2,400 points a run, half an hour's budget. Revision 3 bounded a run at 1,000 points, which assumed timelines inside pages; decision 80 set the bound at the measured cost plus 20%, 2,900 points (A19).
 - **Attachments.** Rendered bodies (`bodyHTML`) are read only for issues and comments whose text holds a `user-attachments` URL. For a private repository they carry short-lived signed image URLs, downloaded at once, without any credential, within §3.7's allowlist and cap. Public attachments download directly. Anything else stays a link and is reported (GitHub note §2.6; proven or refuted on the seed, §4.6).
 
@@ -412,7 +413,7 @@ tests/verify/   the independent REST reader (§7, A5); test code
 | Issue fields: text, number, date | Header lines; the default `Target date` becomes `due_at`, the end of that day in UTC |
 | Sub-issue of | `contributes_to`; the parent's header lists sub-issues in GitHub's order |
 | Blocked by | `requires`, or `related_to` by §3.6 |
-| Cross-references | Header line `Mentioned in: [Acme/api#88], [Acme/api#91] (issues) · [Acme/api#130] (pull request)`; no links, so thousands of passing mentions do not bury real relations |
+| Cross-references | Header line `Mentioned in: [Acme/api#88], [Acme/api#91] (issues) · [Acme/api#130] (pull request)`, at most 100 shown and then `N more in the raw archive`, which keeps them all; no links, so thousands of passing mentions do not bury real relations |
 | References into private repositories not selected | Counted, never named (§3.9) |
 | Closing pull requests and commit | Header line, and the completion evidence |
 | Comments | The discussion doc (§3.2) |
@@ -709,7 +710,7 @@ Each is observed by a test or a run, not inferred. GitHub first, on the seeds an
 15. **A15 Fields.** Fields are created only through the setup and never edited by the importer. A vocabulary over the limit stays header-only; a key never takes a reserved or request key; missing and retired options are reported with the person's next step.
 16. **A16 Exit status.** 0, 1 and 2 as in §2.3. A missing `gh` login or scope gives 2 and the command that fixes it.
 17. **A17 Blind trial** (build contract step 7). A fresh agent with only `wirk import --help` completes the import of `wirkspace/import-seed-public` into a scratch service, and the result passes A14. Its friction is recorded and fixed.
-18. **A18 Simplicity.** The code is within budget, and the simplify pass is recorded with what it removed.
+18. **A18 Simplicity.** The code is within budget, and the simplify pass is recorded with what it removed. Decision 81 set the budget at about 1,120 lines of shared code and 490 for the GitHub adapter, once the dead code the review listed was removed.
 19. **A19 Time and cost bounds**, measured on this machine against a local scratch service, each a finding to report if missed:
     - seeds: import within 10 minutes, re-run within 3;
     - real organization:
@@ -820,9 +821,9 @@ The build follows revision 3. Every slice ran RED → GREEN → SIMPLIFY → VER
 
 Not built: **G8 projects**. The person's `gh` login still lacks `read:project` (§8 step 1), so there is no real or seed project to verify against; the reader already leaves project timeline events out without the scope and says so in every report. Projects are the next slice once the scope is granted.
 
-**Tests.** 89 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 22, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. After merging `main` at wirk 0.3.1 (`fb23db5`), which matched the CLI's help and contract tests to core `60b84ae`, the whole suite passes: 348 passed and 18 skipped without a scratch service, and all 366 passed against a scratch core at `60b84ae` with its loopback file store.
+**Tests.** 102 importer tests on fakes (render 21, WIRK side 22, links 11, GitHub reader 25, command 10, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. After merging `main` at wirk 0.3.1 (`fb23db5`), which matched the CLI's help and contract tests to core `60b84ae`, and after the review's fixes, the whole suite passes: 361 passed and 18 skipped without a scratch service, and all 379 passed against a scratch core at `60b84ae` with its loopback file store.
 
-**Size.** Shared code is 1,156 lines (`__init__` 235, `render` 360, `wirk` 561) against the plan's budget of 1,000; the GitHub adapter is 497 against 450, after decision 80's four readers, their shared pause and the wait for a spent budget added 52 lines. Most of the overrun is the link pass and the stale-link and stale-part rules that the review added (§3.6), and the report. The simplify passes are listed above; the overrun is for the reviewer to judge.
+**Size.** At the review, shared code was 1,156 lines against the plan's budget of 1,000, and the GitHub adapter 497 against 450. Most of the overrun is the link pass, the stale-link and stale-part rules that the plan's review added (§3.6), the report and decision 80's readers. Decision 81 set the budgets, and the review's fixes changed the counts (below).
 
 ### A finding that changed the build: timelines inside paged queries
 
@@ -856,6 +857,35 @@ Measured on this machine against fresh scratch cores at `60b84ae`, each real run
 - **The re-run** found all 4,283 items current, with no receipt and no stored object added.
 - **The bounds.** Every time is now within its bound. The points stay at 2,411, because reading in parallel changes when the queries run, not how many there are. Decision 80 set the point bounds at the measured cost plus 20%, 2,900 points. Revision 3's 1,000 assumed timelines inside pages, which GitHub returns short: correctness over speed.
 - **Not measured:** the backoff on a secondary limit is shown on fakes only. The report does not count pauses, so the real runs cannot show whether one happened. The scripted-judgment run below came before decision 80, with timelines inside pages.
+
+### The independent review and its fixes (decision 81)
+
+The independent review of `71eec95` said fix. What held: the suite, the seed import, the A14 scan, re-runs, retargeting and forgery, a compact interface and a clean public repository. Each finding was fixed RED, then GREEN, one concern per commit; two SIMPLIFY passes followed.
+
+| Finding | RED | GREEN | What changed |
+|---|---|---|---|
+| High: a line a person wrote above the provenance line hid the importer's item, so the next run made a duplicate, which a live judgment would have forced with `allow_duplicate_of` | `c9fe826` | `940e18b` | A card whose line no longer parses goes through the creator and own-revision path. A duplicate choice the importer made is overridden only when the index knows it as another issue's work |
+| Medium: a `requires` a person removed, with the dependent completed in WIRK, added another `related_to` on every run | `56a71ad` | `9ec435d` | An existing `related_to` meets a planned `requires` |
+| Medium: no warning when a repository that is not public is named | `3218749` | `6eb08c5` | `warning: Acme/api is private on GitHub: everyone in the wirkspace will read its 812 issues`, in the dry run and every report |
+| Medium: a refused read crashed with a traceback, and an unsettled write ended the run | `dfdde4c` | `f77de61` | Each is an error for its issue, and the run goes on. A run that stops prints its outcomes and exits 2 |
+| Medium: the forged-heading check was quadratic: 6.4 s for 64 KB of blank lines | `4c842aa` | `5563911` | The check stays within one line; a test bounds it at 0.5 s |
+| Low: a reader did not check the shared pause after sleeping | `0fa0535` | `cc71009` | It checks again, and sleeps again when another reader extended the pause |
+| Low: a fourth secondary-limit refusal stopped without using its pause | `c49db99` | `52b28ba` | Four pauses, each followed by a retry; a fifth refusal stops |
+| Low: after `unknown_owner` the body still claimed the owner and the hash sealed it | `de9283d` | `4f05b78` | The refused owner is learnt for the run and the issue planned again without them |
+| Low: `Mentioned in` was unbounded, and part sizing left out the work item | `01b5649` | `d62a5e1` | 100 mentions shown, then a count. The work item's bytes count toward the first part |
+| Found while fixing: an issue gone from the source was not named when a person had written above its key line | `41c3eab` | `392a382` | The key line is found wherever it sits |
+
+**SIMPLIFY.** `14eaeb8` removed the dead code the review listed: `run(complete=)`, the `limit` of `plan_fields`, `FieldPlan.descriptions`, `Record.scope`, the `getattr` for `planned`, the test-only start inside `run`, and the duplicate `Stop` classes (one remains, in `render`). The per-character split went with the new part sizing (`d62a5e1`). `76d7e4b` made one checked call for WIRK's answers, which also catches a refused continuation of a long body, and one upload helper. It also made one function say why a run stopped, and removed an unused retry command.
+
+**Verified on core `60b84ae`**, in scratch services only:
+- **All three seeds into a fresh core:** 162 items (154 issues), 13 links and both private-repository warnings, in 33 s. The re-run wrote nothing, with receipts and stored objects unchanged (30 s). The REST reader and the manifest at stage 2 show zero differences. The manifest's issue mentioned from everywhere now expects 100 mentions and a count (`025e769`).
+- **The public seed alone into a fresh core:** 153 items and 16 references withheld, with zero differences and a clean sentinel scan of all 153 items.
+- **As a person, on the seeded core:**
+  - A line written above an imported item's first line: the next run found the item current, with no duplicate.
+  - A `requires` removed and its dependent completed in WIRK: the first re-run kept the link as `related_to` and reported it; the next two wrote nothing.
+- **The whole suite:** 379 passed against a scratch core, and 361 passed with 18 skipped without one.
+
+**Size (decision 81).** The root accepted about 1,120 lines of shared code and about 490 for the GitHub adapter, once the listed dead code was gone. The dead code came to about 20 lines, and the fixes above added about 60 to the shared code. Shared code is now 1,199 lines (`__init__` 246, `render` 364, `wirk` 589) and the GitHub adapter 499. The excess over the ruling is the fixes, which were not cut for line counts.
 
 ### Evidence, by the matrix of §4.5
 
@@ -895,15 +925,15 @@ Measured on this machine against fresh scratch cores at `60b84ae`, each real run
 | A6 | Met for every issue, not a sample |
 | A7 | Met on the seeds and the real organization: the real re-run with four readers found all 4,283 items current, with no write and no upload (564 s, 2,411 points) |
 | A8 | Met on the seeds |
-| A9, A11 | Met on the seeds, against real core |
+| A9, A11 | Met on the seeds, against real core, including a line a person writes above the importer's first line |
 | A10 | Met at the three points on the seeds, and by a real kill |
-| A12 | Met: links, fallbacks with their notes, `link_cycle`, unlinking only the importer's own (seeds, fakes, contract test) |
+| A12 | Met: links, fallbacks with their notes, `link_cycle`, unlinking only the importer's own, and a refused `requires` kept as `related_to` once (seeds, fakes, contract test) |
 | A13 | Met on fakes; the timed run used a scripted judgment that answered "distinct" |
-| A14 | Met: the sentinel scan on the public seed, no email field in any archive, credentials redacted, markers guarded, only reads of GitHub, no token printed |
+| A14 | Met, and again after the review's fixes: the sentinel scan on the public seed, no email field in any archive, credentials redacted, markers guarded, only reads of GitHub, no token printed |
 | A15 | Met: fields only created by the setup, reserved keys avoided, missing options reported |
-| A16 | Met on fakes and in the runs |
+| A16 | Met on fakes and in the runs. A refused read or an unsettled write is that issue's error, and a run that stops prints its outcomes |
 | A17 | Not yet: the blind trial follows the independent review (§8) |
-| A18 | For the reviewer: shared code over its budget, as above |
+| A18 | Decision 81: about 1,120 lines shared and 490 GitHub, after the dead code. Now 1,199 and 499, the excess being the review's fixes |
 | A19 | Met against the bounds decision 80 set. With four readers the real dry run took 516 s, the import 584 s and the re-run 564 s, each 2,411 points; the point bounds are now 2,900, the measured cost plus 20% |
 
 ### Still to do, and what needs the person
