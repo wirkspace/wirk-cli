@@ -1013,7 +1013,9 @@
      ]
     },
     "header": [
-     "Blocking: [{key:P12}], [{key:P33}]"
+     "Blocking: ",
+     "[{key:P12}]",
+     "[{key:P33}]"
     ]
    }
   },
