@@ -65,6 +65,11 @@ def bare(found: dict | None) -> dict | None:
     return found and {**found, "fields": {key: value for key, value in (found.get("fields") or {}).items() if key != "summary"}}
 
 
+def kind_of(definition: dict) -> str:
+    """A field's type, the last part of its schema's custom key: select, textarea, gh-sprint …"""
+    return ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1]
+
+
 def by_id(items) -> list:
     return sorted(items, key=lambda item: (len(str(item["id"])), str(item["id"])))
 
@@ -221,8 +226,7 @@ class Jira:
     def projects(self, chosen: list, issues: list, census: render.Census) -> list:
         """One doc per project selected as a project, with the sprints of its issues kept; one whose components or
         versions Jira will not give is left for a later run."""
-        marked = [ident for ident, definition in self.fields.items()
-                  if ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1] == "gh-sprint"]
+        marked = [ident for ident, definition in self.fields.items() if kind_of(definition) == "gh-sprint"]
         sprints = defaultdict(dict)  # one snapshot per sprint ID
         for node in issues:
             for found in (sprint for ident in marked for sprint in node["fields"].get(ident) or []):
@@ -257,9 +261,10 @@ class Jira:
                              + (f" · goal: {one(s['goal'])}" if s["goal"] else "") for s in raw["sprints"]]}
         body = "\n\n".join([render.HEADING.sub(r"\1\\\2", (node.get("description") or "").strip()),
                              *(f"## {name}\n\n" + "\n".join(found) for name, found in lines.items() if found)]).strip("\n")
-        return render.Record(SOURCE, "project", "p" + node["id"], node["key"], f"https://{self.site}/browse/{node['key']}", self.clock(),
-                             node["name"], body, "open", None, [f"Lead: {self.name(node.get('lead'))}"], [], [], {}, None, [], [],
-                             [], raw, [])
+        return render.Record(SOURCE, "project", ident="p" + node["id"], key=node["key"], url=f"https://{self.site}/browse/{node['key']}",
+                             version=self.clock(), title=node["name"], body=body, state="open", closed=None,
+                             opened=[f"Lead: {self.name(node.get('lead'))}"], facts=[], assignees=[], fields={}, due=None,
+                             relations=[], comments=[], attachments=[], raw=raw, raw_comments=[])
 
     def changelogs(self, ids: list) -> dict:
         """Every issue's history, oldest first, from the bulk fetch (up to 1,000 issues a request)."""
@@ -368,10 +373,10 @@ class Jira:
         """Field values by name (small current sets only become fields, §6), header facts, and paragraph-field sections."""
         sprints, points, custom, sections, fields = [], None, [], [], defaultdict(list)
         for ident, definition in self.fields.items():
-            value, schema = f.get(ident), definition.get("schema") or {}
+            value = f.get(ident)
             if value in (None, [], "") or not definition.get("custom"):
                 continue
-            kind, name = (schema.get("custom") or "").rsplit(":", 1)[-1], definition["name"]
+            kind, name = kind_of(definition), definition["name"]
             if kind == "gh-sprint":
                 sprints = value
             elif name in STORY_POINTS:
@@ -419,7 +424,7 @@ class Jira:
     def selections(self, records: list) -> dict:
         found = dict(SELECTIONS)
         for definition in self.fields.values():
-            kind = ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1]
+            kind = kind_of(definition)
             if kind in SELECT:
                 found[definition["name"]] = SELECT[kind]
         return found
