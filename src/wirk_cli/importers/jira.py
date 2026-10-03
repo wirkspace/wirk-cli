@@ -43,11 +43,6 @@ def clean(value):
     return value
 
 
-def duration(seconds: int) -> str:
-    hours, minutes = divmod(seconds // 60, 60)
-    return " ".join(part for part in (f"{hours}h" if hours else "", f"{minutes}m" if minutes else "") if part) or "0m"
-
-
 def number(value) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
@@ -306,8 +301,6 @@ class Jira:
                        "Release": [v["name"] for v in f.get("fixVersions") or [] if not v.get("released") and not v.get("archived")],
                        "Sprint": [s["name"] for s in sprints if s.get("state") in ("active", "future")], "Story points": [points]})
         names = lambda values: ", ".join(v["name"] for v in values or [])
-        estimates = [(word, f.get(field)) for word, field in (("estimate", "timeoriginalestimate"), ("remaining", "timeestimate"),
-                                                             ("logged", "timespent")) if f.get(field)]
         facts = [" · ".join([f"Type: {f['issuetype']['name']}", f"Status: {f['status']['name']} ({f['status'].get('statusCategory', {}).get('key')})",
                              f"Resolution: {resolution or 'none'}", f"Priority: {(f.get('priority') or {}).get('name') or 'none'}",
                              f"Project: {project['key']} ({project.get('name')})"]),
@@ -317,8 +310,6 @@ class Jira:
                                               f"Affects versions: {names(f.get('versions'))}" if f.get("versions") else ""] if part),
                  " · ".join(part for part in ["Sprints: " + ", ".join(f"{s['name']} ({s.get('state')})" for s in sprints) if sprints else "",
                                               f"Story points: {points}" if points else "", f"Due: {f['duedate']}" if f.get("duedate") else ""] if part),
-                 "Time: " + ", ".join(f"{word} {duration(seconds)}" for word, seconds in estimates) if estimates else "",
-                 f"Watchers at import: {(f.get('watches') or {}).get('watchCount', 0)} · Votes: {(f.get('votes') or {}).get('votes', 0)}",
                  " · ".join(custom)]
         return ({name: values for name, values in fields.items() if values and None not in values}, [fact for fact in facts if fact],
                 sections)
