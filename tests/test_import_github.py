@@ -194,7 +194,7 @@ def test_the_archive_holds_no_comments_and_nothing_that_moves_with_them():
 def test_timeline_leaves_out_comments_and_the_events_they_cause():
     fake = FakeGh([repo("acme/web")], {"acme/web": [node(1)]})
     read(fake)
-    query = next(json.loads(stdin)["query"] for args, stdin in fake.calls if stdin and "issues(first" in stdin)
+    query = next(json.loads(stdin)["query"] for args, stdin in fake.calls if stdin and "timelineItems(" in stdin)
     types = query.split("itemTypes: [", 1)[1].split("]", 1)[0]
     for left_out in ("ISSUE_COMMENT", "MENTIONED_EVENT", "SUBSCRIBED_EVENT", "UNSUBSCRIBED_EVENT"):
         assert left_out not in types.split(", ")

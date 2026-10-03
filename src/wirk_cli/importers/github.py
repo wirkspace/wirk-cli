@@ -92,7 +92,10 @@ def connections(projects: bool) -> dict:
 
 
 def issue_fields(projects: bool) -> str:
-    paged = " ".join(f"{name}({args}) {{ pageInfo {{ hasNextPage endCursor }} {nodes} }}" for name, (args, nodes) in connections(projects).items())
+    """An issue's fields for the paged query. Its timeline is not among them: GitHub's paged query can return a timeline
+    short, totalCount included, without saying so, so each issue's timeline is read on its own (§4.1)."""
+    paged = " ".join(f"{name}({args}) {{ pageInfo {{ hasNextPage endCursor }} {nodes} }}"
+                     for name, (args, nodes) in connections(projects).items() if name != "timelineItems")
     return (f"id fullDatabaseId number title body url state stateReason(enableDuplicate: true) createdAt updatedAt closedAt "
             f"lastEditedAt locked activeLockReason isPinned author {{ __typename login }} assignees(first: 10) {{ nodes {{ login }} }} "
             f"milestone {{ title dueOn state }} issueType {{ name }} parent {{ {REF} }} duplicateOf {{ {REF} }} "
@@ -274,6 +277,7 @@ class GitHub:
                 continue
             issues = answer["repository"]["page"]
             for node in issues["nodes"]:
+                node["timelineItems"] = {"pageInfo": {"hasNextPage": True, "endCursor": None}, "nodes": []}  # read alone
                 for connection in connections(self.projects):
                     self.rest_of(node, connection)
                 yield node
