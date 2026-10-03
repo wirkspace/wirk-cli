@@ -236,7 +236,7 @@ class Jira:
         gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
             hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        ordered = sorted(history, key=lambda e: e.get("created") or "")
+        ordered = sorted(history, key=lambda e: (render.compact(e["created"]), int(e["id"])))  # the instant, then Jira's order
         moves = [next((i for i in e.get("items", []) if i.get("field") == "project"), None) for e in ordered]
         where = next((m.get("from") for m in moves if m is not None), f["project"]["id"])  # where it began; unknown fails closed
         for entry, move in zip(ordered, moves):  # a change made in, or moving into or out of, a project not selected names it (§3.9)
