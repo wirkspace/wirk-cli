@@ -56,8 +56,9 @@ LISTS = {  # read whole at the start: (arguments, what each node holds)
     "cycles": ("includeArchived: true", "id number name team { id }"),
     "projects": ("includeArchived: true", "id name"),
     "projectMilestones": ("", "id name"),
-    "issueRelations": ("", f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"),
+    "issueRelations": ("includeArchived: true", f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"),
 }
+PARTIAL = {"issueRelations"}  # lists whose answer may leave out what the key cannot read, with an error saying so
 IN_TEAMS = "team: { id: { in: $teams } }"
 
 
@@ -104,7 +105,8 @@ class Linear:
         self.key = key
         self.graphql("query { viewer { id } organization { urlKey } }", {})
 
-    def graphql(self, query: str, variables: dict) -> dict:
+    def graphql(self, query: str, variables: dict, partial: bool = False) -> dict:
+        """The answer's data. With `partial`, an answer that left out what the key cannot read is taken as it is."""
         assert query.lstrip().startswith("query")  # the importer only reads
         failures = 0
         while True:
@@ -115,10 +117,11 @@ class Linear:
                 answer, body = None, {}
             errors = body.get("errors") or []
             codes = {(error.get("extensions") or {}).get("code") for error in errors}
+            whole = not (partial and isinstance(body.get("data"), dict))
             if "RATELIMITED" in codes:  # waiting for the reset is not a failure
                 self.sleep(self.until(answer.headers))
                 continue
-            if answer is not None and (answer.status_code in (401, 403) or codes & {"AUTHENTICATION_ERROR", "FORBIDDEN"}):
+            if answer is not None and (answer.status_code in (401, 403) or whole and codes & {"AUTHENTICATION_ERROR", "FORBIDDEN"}):
                 raise Stop("Linear refused the key", "make a new key restricted to Read, and save it as the last one was")
             if answer is None or answer.status_code >= 500:
                 failures += 1
@@ -126,7 +129,7 @@ class Linear:
                     raise Stop("Linear did not answer; run the same command again")
                 self.sleep(5 * 2 ** failures)
                 continue
-            if answer.status_code != 200 or errors or "data" not in body:
+            if answer.status_code != 200 or errors and whole or "data" not in body:
                 raise Stop(f"Linear refused a read: {(errors or [{}])[0].get('message') or f'HTTP {answer.status_code}'}")
             self.points += int(answer.headers.get("X-Complexity") or 0)
             if (int(answer.headers.get("X-RateLimit-Requests-Remaining") or 100) < 5
@@ -146,7 +149,8 @@ class Linear:
                  f"after: $after{', ' + args if args else ''}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }} }}")
         found, after = [], None
         while True:
-            answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})})[name]
+            answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})},
+                                  name in PARTIAL)[name]
             found += answer["nodes"]
             if not answer["pageInfo"]["hasNextPage"]:
                 return found
@@ -187,7 +191,8 @@ class Linear:
                                 [t["id"] for t in chosen]):
             comments[found["issue"]["id"]].append(found)
         read, related, children = {node["id"] for node in issues}, defaultdict(list), defaultdict(list)
-        for relation in lists["issueRelations"]:
+        readable = [r for r in lists["issueRelations"] if r and r["issue"] and r["relatedIssue"]]
+        for relation in readable:
             ends, kinds = (relation["issue"], relation["relatedIssue"]), RELATIONS.get(relation["type"], ("related", "related"))
             for this, other, kind in ((ends[0], ends[1], kinds[0]), (ends[1], ends[0], kinds[1])):
                 if this["id"] in read:
@@ -202,6 +207,8 @@ class Linear:
         census.named_private = [(team["key"], "private", sum(node["team"]["id"] == team["id"] for node in issues))
                                 for team in chosen if team["private"]]
         census.comments = sum(len(record.comments) for record in records)
+        if len(readable) < len(lists["issueRelations"]):
+            census.notes.append(f"relations this key cannot read, left out: {len(lists['issueRelations']) - len(readable)}")
         census.external_images = sum(1 for node in issues for text in [node["description"] or ""] +
                                      [c["body"] or "" for c in comments[node["id"]]]
                                      for url in IMAGE.findall(text) if not UPLOAD.match(url))
