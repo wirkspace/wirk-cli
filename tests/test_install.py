@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -70,7 +70,7 @@ build-backend = "hatchling.build"
 name = "wirk-mcp"
 version = "{VERSION}"
 requires-python = ">=3.12"
-dependencies = ["wirk>=0.3,<0.4"]
+dependencies = ["wirk=={VERSION}"]
 [project.scripts]
 wirk-mcp = "wirk_mcp:main"
 [tool.hatch.build.targets.wheel]

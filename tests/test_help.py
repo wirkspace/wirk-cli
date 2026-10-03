@@ -141,7 +141,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.3.1"
+    assert project == __version__ == "0.4.0"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -166,3 +166,8 @@ def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
     text = help_of(capsys, "write")
     assert "when you may make it" in text and "your person may" not in text and "requires_review" in text and "--propose --reason" in text
     assert "basis_changed" in text and "quotation_mismatch" in text
+
+
+def test_the_readme_says_what_this_release_changed():
+    changes = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
+    assert f"### {__version__}" in changes and "wirk import github" in changes.split("\n### ", 2)[1]
