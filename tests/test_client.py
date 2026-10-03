@@ -55,6 +55,18 @@ def test_two_failures_on_a_write_are_an_unknown_outcome_with_the_exact_retry(run
     assert "wirk query receipt=w-1" in err
 
 
+@pytest.mark.parametrize("verb, body", [
+    ("write", {"request_id": "w-9", "operations": [{"op": "item.create", "data": {"title": "T"}}]}),
+    ("review", {"request_id": "r-9", "decisions": [{"id": "c4a1e902", "revision": 1, "action": "accept", "reason": "Fine"}]})])
+def test_an_unknown_outcome_of_a_request_file_says_to_run_the_same_command_again(run, home, verb, body):
+    """--request takes no --request-id: the file carries it, so the retry is the same command; the receipt still helps."""
+    (home.parent / "body.json").write_text(json.dumps(body))
+    code, out, err, fake = run([verb, "--request", "body.json"], failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and len(fake.requests) == 2 and "Error outcome_unknown" in err
+    assert f"Run the same command again: wirk {verb} --request body.json" in err
+    assert f"wirk query receipt={body['request_id']}" in err and "--request-id" not in err
+
+
 def test_an_unknown_admin_outcome_says_to_run_the_same_command_again(run, home, monkeypatch):
     """wirk admin takes its request ID from the file and has no --request-id; resending the file replays the receipt,
     while query receipt= finds only writes, reviews and uploads."""
