@@ -64,8 +64,27 @@ def wirk(capsys, *argv):
     return code, captured.out, captured.err
 
 
+def as_person(monkeypatch, capsys, name, *argv):
+    """Run a person's command as `name`, as if at their terminal typing what it asks; the first call makes and
+    registers their person token the way an administrator would."""
+    typed = []
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda prompt: typed.append(prompt) or prompt.split('"')[1])
+    if not (Path(os.environ["WIRK_CONFIG_DIR"]) / "person-token").exists():
+        code, out, err = wirk(capsys, "login", "--person")
+        digest = re.search(r"\b[0-9a-f]{64}\b", out).group(0)
+        admin({"request_id": f"{name}-person-token", "operations": [
+            {"op": "token.add", "principal_id": name, "sha256": digest, "label": "test person"}]})
+    return wirk(capsys, *argv, "--person")
+
+
+def created(out):
+    return re.search(r"created ([0-9a-f]{8})", out).group(1)
+
+
 def test_login_status_and_the_context_header(agent, capsys):
-    assert cli.main(["login"]) == 0 and "Logged in to" in capsys.readouterr().out
+    code, out, err = wirk(capsys, "login")
+    assert code == 0 and out.count("Logged in") == 1 and out.count("status") == 1, out  # one line says what is next
     code, out, err = wirk(capsys, "status")
     assert code == 0 and f"{agent['name']}-agents" in out and "Your client reports: wirk-cli" in out
     assert "context_ignored" not in out
@@ -149,16 +168,19 @@ def test_status_shows_the_wirkspace_context(agent, capsys):
     assert code == 0 and "context" in out
 
 
-def test_a_proposal_is_decided_by_someone_else(agent, capsys, monkeypatch):
+def test_a_proposal_waits_for_a_person_who_decides_it(agent, capsys, monkeypatch):
     code, out, err = wirk(capsys, "write", "new", "Nightly cleanup", "kind=work")
-    item = re.search(r"created ([0-9a-f]{8})", out).group(1)
+    item = created(out)
     code, out, err = wirk(capsys, "write", "edit", f"{item}@1", "status=cancelled", "--propose", "--reason", "Idle 30 days")
     assert code == 0 and "Proposed" in out, out + err
     proposal = re.search(r"proposal ([0-9a-f]{8}) r(\d+)", out)
-    reviewer = person_with_agents(capsys, agent["tmp"] / "other", agent["workspace"], role="reviewer", person_role="editor")
-    code, out, err = wirk(capsys, "review", f"{proposal[1]}@{proposal[2]}", "accept", "--reason", "Idle indeed")
-    assert code == 0 and "accepted" in out, out + err
+    decide = (f"{proposal[1]}@{proposal[2]}", "accept", "--reason", "Idle indeed")
+    person_with_agents(capsys, agent["tmp"] / "other", agent["workspace"], role="reviewer", person_role="editor")
+    code, out, err = wirk(capsys, "review", *decide)  # another person's agents, with the reviewer role
+    assert code == 1 and "person_required" in out and "accepted" not in out, out + err  # agents never decide
     monkeypatch.setenv("WIRK_CONFIG_DIR", str(agent["dir"]))
+    code, out, err = as_person(monkeypatch, capsys, agent["name"], "review", *decide)
+    assert code == 0 and "accepted" in out, out + err
 
 
 def test_a_receipt_is_found_by_its_request_id(agent, capsys):
@@ -167,9 +189,12 @@ def test_a_receipt_is_found_by_its_request_id(agent, capsys):
     assert code == 0 and f"{agent['name']}-rcpt" in out and "nothing was applied again" in out, out + err
 
 
-def test_show_returns_a_link(agent, capsys):
+def test_show_returns_a_link_or_says_it_is_not_live(agent, capsys):
     code, out, err = wirk(capsys, "show", "status", "--no-open")
-    assert code == 0 and out.startswith("http"), out + err
+    if "views_unavailable" in out + err:  # a service with no address for views yet, as api.wirk.life is today
+        assert code == 1 and "Traceback" not in err, out + err
+    else:
+        assert code == 0 and out.startswith("http"), out + err
 
 
 def test_status_with_a_task(agent, capsys):
@@ -187,21 +212,28 @@ def test_cards_print_the_kind_agents_filter_on(agent, capsys):
     assert code == 0, out + err
 
 
-def write_context(capsys):
-    code, out, err = wirk(capsys, "write", "new", "Scratch context", "kind=context", "level=organization",
-                          "--body", "Purpose: a dependable public API.")
-    assert code == 0, out + err
-    code, out, err = wirk(capsys, "write", "new", "API hardening", "kind=context", "level=initiative",
-                          "--body", "Goal: no partner loses data.")
-    assert code == 0, out + err
-    initiative = re.search(r"created ([0-9a-f]{8})", out).group(1)
+def write_context(capsys, monkeypatch, agent):
+    """Agents propose context and a person accepts it; then work contributes to the initiative."""
+    proposals = []
+    for title, level, body in (("Scratch context", "organization", "Purpose: a dependable public API."),
+                               ("API hardening", "initiative", "Goal: no partner loses data.")):
+        code, out, err = wirk(capsys, "write", "new", title, "kind=context", f"level={level}", "--body", body)
+        assert code == 1 and "requires_review" in out, out + err  # context is added by administrators
+        code, out, err = wirk(capsys, "write", "new", title, "kind=context", f"level={level}", "--body", body,
+                              "--propose", "--reason", "Agreed with the team")
+        assert code == 0 and "Proposed" in out, out + err
+        proposals.append("{}@{}".format(*re.search(r"proposal ([0-9a-f]{8}) r(\d+)", out).groups()))
+    code, out, err = as_person(monkeypatch, capsys, agent["name"], "review", *proposals, "accept", "--reason", "Agreed")
+    assert code == 0 and out.count("accepted") >= 2, out + err
+    code, out, err = wirk(capsys, "query", "API hardening")
+    initiative = re.search(r"^([0-9a-f]{8}) · ", out, re.M).group(1)
     code, out, err = wirk(capsys, "write", "new", "Retry webhooks", "kind=work", "--link", f"contributes_to:{initiative}")
     assert code == 0, out + err
-    return re.search(r"created ([0-9a-f]{8})", out).group(1)
+    return created(out)
 
 
-def test_context_on_every_status(agent, capsys):
-    write_context(capsys)
+def test_context_on_every_status(agent, capsys, monkeypatch):
+    write_context(capsys, monkeypatch, agent)
     code, out, err = wirk(capsys, "status")
     assert re.search(r"^Scratch \w+ context · maintained by ", out, re.M) and "not written yet" not in out, out
     assert "dependable public API" in out and "API hardening" in out, out
@@ -209,7 +241,7 @@ def test_context_on_every_status(agent, capsys):
     assert code == 0 and "API hardening" in out and "· context ·" in out, out
 
 
-def test_fetched_work_carries_its_context(agent, capsys):
-    item = write_context(capsys)
+def test_fetched_work_carries_its_context(agent, capsys, monkeypatch):
+    item = write_context(capsys, monkeypatch, agent)
     code, out, err = wirk(capsys, "query", item)
     assert "Context" in out and "API hardening" in out, out
