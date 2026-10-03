@@ -783,6 +783,69 @@ Settled now from the Jira note and the rulings; it needs a Jira Cloud site the p
 
 S is the seed site of the Jira note's §7 (phase A, free plan). Its seeding tool writes only to that site, with its own token, once the person creates the site and authorizes the seeding.
 
+### 6.1 Build record: Jira issues (3 October 2026)
+
+The first Jira slice imports issues. Projects and boards as docs (with components, versions, columns and sprints) are the next slice. **No real site yet:** every answer in the tests is synthetic, shaped from the REST v3 OpenAPI and the document format the Jira note read. The person creates the seed site later. Not for release.
+
+**Built:** `src/wirk_cli/importers/jira.py` (335 lines) and `adf.py` (159), with tests in `tests/test_import_jira.py`, `test_import_adf.py` and `test_import_jira_contract.py`.
+
+- **Access.**
+  - `<config>/import/jira-key` holds `{"site", "email", "token"}` as JSON and must be owner-only.
+  - The cloudId comes from the site's `tenant_info`, asked without credentials. Every other request goes to `api.atlassian.com/ex/jira/<cloudId>` with basic auth, and the login and token go nowhere else.
+  - Reads only: GET, plus the read-only `search/jql` and `changelog/bulkfetch` POSTs.
+  - A 429 waits its `Retry-After`. A CAPTCHA lockout (`X-Seraph-LoginReason`) stops with the step that clears it. A refused token stops.
+- **Selection.** Project keys and issue keys; none means every project the token browses. The search is `project in (…) OR key in (…) ORDER BY id ASC`, paged by `nextPageToken`.
+  - An issue with a security level is skipped unless its key is named; the report lists it with the command that names it.
+  - Comments and worklogs with a visibility restriction are left out unless their issue is named. The header says how many (`Not imported: 1 restricted comment`), and they are absent from the archives.
+- **Issues** become work items keyed `Jira issue [SEED-123] · <url>`.
+  - **Status:** by category. `new` is `open`, `indeterminate` is `in_progress`, and `done` is `completed`, or `cancelled` when the resolution is Won't Do or Duplicate. The status name goes to `workflow`.
+  - **Done issues** carry Jira's own words as evidence.
+  - **Due:** the end of the due day, in UTC.
+  - **Previous keys** come from the changelog, as references (§3.9).
+- **Fields** (small current sets only):
+  - `issue_type`, `priority`, `project`, `resolution` and `label`;
+  - `component`, with `sprint` and `release` holding only active or future sprints and unreleased fix versions;
+  - `story_points` while it has at most 20 values;
+  - select, radio, checkbox and cascading custom fields (a field named Owner becomes `jira_owner`).
+
+  Every value is also a header line: labels, components, versions, every sprint with its state, story points, time tracking, watchers and votes at import, other custom fields and web links. Paragraph fields become `## <name>` sections of the body.
+- **ADF to Markdown** by the Jira note's §2.8 contract.
+  - Every line that would read as a heading, quote or list is escaped. Headings are written as text.
+  - Unknown nodes keep their text and are counted, and so are dropped styling and unresolved images. An image names its attachment when its alt text matches a file.
+  - A test checks that no text character is dropped.
+- **Links.**
+  - `parent` and sub-tasks become `contributes_to`; epic children come from the parents read.
+  - Blocks becomes `requires`, falling back to `related_to` (§3.6).
+  - Duplicate is shown as `Duplicates` and `Is duplicated by`. Other types are `related_to`, keeping Jira's phrase.
+  - Jira has no public projects, so a reference into a project not selected is counted, never shown. It is replaced in the archive, along with changelog items that name such an issue.
+- **Comments** go to the discussion doc, each headed by its author's display name; Service Management internal notes are marked `internal`.
+- **Archives.** The issue archive holds the issue without its comments, `updated`, avatars, per-viewer values and emails, plus its worklogs, changelog and web links. The comments archive holds the comments.
+- **Attachments** are downloaded with `redirect=false` from the gateway only.
+- **The map file** keys people by accountId. The template adds `names`, so a person can tell who an ID is; the importer reads `names` but never uses it.
+
+**Choices for the review:**
+1. **Stacked on the Linear work for its shared code.** The adapter registry, the census, due instants, the every-heading escape and the `previously` relation all came from #5 and #6.
+2. **Watchers and votes are counts only**, with no per-issue watcher calls.
+3. **Remote links are one call per issue.** The note's optimization, which reads the changelog first, waits for the seed site.
+4. **Attachments added in restricted comments** cannot be told apart without the media-ID mapping, so they stay on the item. They need the seed site.
+5. **The cancelled resolutions** are a constant (Won't Do, Duplicate). They are not yet in the map file.
+
+**Evidence:**
+- On fakes: 14 adapter tests and 7 converter tests.
+- The command test covers the dry run, the setup, the map template with names, the import and the help.
+- The contract test against a scratch core at `60b84ae`:
+  - the restricted issue skipped;
+  - the setup applied;
+  - a sub-task that `contributes_to` its epic, and an issue that `requires` its blocker;
+  - a completed blocked issue kept as related with its note;
+  - a comment's heading escaped;
+  - a re-run that writes nothing.
+- The whole suite: 441 passed against a scratch core, and 421 passed with 20 skipped without one.
+
+**Rows still waiting for the real site (S):**
+- J1–J14 as the table above lists, beyond the fakes and the contract test;
+- the changelog bulk fetch's exact shape, `jsdPublic`, media-ID mapping, remote-link cost, and which changes move `updated`.
+
 ## 7. Acceptance conditions
 
 Each is observed by a test or a run, not inferred. GitHub first, on the seeds and the real organization; Linear and Jira repeat A3 to A14 and A19 on their sources.
