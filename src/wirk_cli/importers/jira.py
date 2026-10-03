@@ -163,7 +163,7 @@ class Jira:
         issues = [node for node in issues if node not in restricted]
         self.skipped = {node["key"] for node in restricted} | {node["id"] for node in restricted}  # never named around them
         self.selected = set(wanted) | {key.rsplit("-", 1)[0] for key in named}
-        self.shown_projects, self.moved_from = {projects[k]["id"] for k in self.selected if k in projects}, set()
+        self.shown_projects, self.moved_from, self.kept_files = {projects[k]["id"] for k in self.selected if k in projects}, set(), set()
         histories = self.changelogs([node["id"] for node in issues])
         children = defaultdict(list)
         for node in issues:
@@ -228,7 +228,7 @@ class Jira:
             shown = {name for text in [*f.values(), *(c.get("body") for c in comments), *(w.get("comment") for w in worklogs)]
                      for name in adf.names(text)}
             attachments = [a for a in attachments if a["filename"] in shown]
-        files = {a["filename"] for a in attachments}
+        files, self.kept_files = {a["filename"] for a in attachments}, self.kept_files | {a["id"] for a in attachments}
         fields, facts, sections = self.fields_and_facts(f)
         links = self.call("GET", f"/rest/api/3/issue/{node['id']}/remotelink")
         web = [" ".join(((link.get("object") or {}).get(part) or "") for part in ("title", "url")) for link in links]
@@ -356,6 +356,8 @@ class Jira:
                 return node.get("from") not in self.shown_projects
             if node.get("field") == "Workflow" and node.get("from") in self.moved_from:
                 return True
+            if node.get("field") == "Attachment":  # a file not kept is not named in its history either
+                return (node.get("to") or node.get("from")) not in self.kept_files
             return "field" in node and any(hidden(key) for value in node.values() if isinstance(value, str)
                                            for key in ISSUE_KEY.findall(value))
         return check
