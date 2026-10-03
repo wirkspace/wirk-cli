@@ -70,7 +70,7 @@ build-backend = "hatchling.build"
 name = "wirk-mcp"
 version = "{VERSION}"
 requires-python = ">=3.12"
-dependencies = ["wirk>=0.3,<0.4"]
+dependencies = ["wirk=={VERSION}"]
 [project.scripts]
 wirk-mcp = "wirk_mcp:main"
 [tool.hatch.build.targets.wheel]
