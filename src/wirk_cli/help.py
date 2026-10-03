@@ -65,8 +65,8 @@ Quote a title or words with spaces. A result line "label: command" is the next c
 
 KEY=VALUE: kind=work|doc|context, level (with kind=context), owner (me or an ID), workspace_id,
 and the wirkspace's fields (status=open; a comma list for several; KEY= clears on edit).
-Context (kind=context) is the organization and its initiatives: administrators add it, and agents
-propose it with --propose --reason.
+Context (kind=context) is the organization and its initiatives. A change to it applies directly
+when your person may make it; otherwise it is refused with requires_review: propose it with --propose --reason.
 --link TYPE is related_to, contributes_to or requires. --evidence is a completion's note: the tests
 that pass, a link, a file path, or a file attached with --upload. --propose needs --reason.
 Every result names the IDs it created. After an uncertain result, run the same command again with
@@ -86,7 +86,8 @@ refused as basis_changed, naming its current revision.""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
-Only people decide proposals: an agent's review is refused with person_required and the proposal waits.
+Only people decide proposals: an agent's review is refused (not_authorized for its own proposal,
+person_required for any other) and the proposal waits.
 A person decides at their own terminal, as themselves: wirk review ID@N accept --reason 'Why' --person,
 after making their token once with wirk login --person. It asks them to type the decision back.
 
