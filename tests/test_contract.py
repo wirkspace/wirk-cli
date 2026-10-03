@@ -31,8 +31,10 @@ def admin(body):
     return answer
 
 
-def person_with_agents(capsys, directory, workspace, role="editor", person_role="administrator"):
-    """A person and their agents' principal; the agents' token is made by `wirk login` in `directory`."""
+def person_with_agents(capsys, directory, workspace, role="editor", person_role="administrator", rows=True):
+    """A person and their agents' principal; the agents' token is made by `wirk login` in `directory`. Without rows
+    the agents have no membership of their own and act with their person's role, like the agents `wirk login` makes
+    through browser approval."""
     name = "t" + secrets.token_hex(4)
     os.environ["WIRK_CONFIG_DIR"] = str(directory)
     assert cli.main(["login", "--url", URL]) == 0
@@ -41,21 +43,26 @@ def person_with_agents(capsys, directory, workspace, role="editor", person_role=
         {"op": "principal.create", "id": name, "kind": "person", "name": f"Tester {name}"},
         {"op": "principal.create", "id": f"{name}-agents", "kind": "agent", "name": f"Agents of {name}", "person_id": name},
         {"op": "token.add", "principal_id": f"{name}-agents", "sha256": digest, "label": "test"},
-        {"op": "member.set", "principal_id": f"{name}-agents", "role": role},
+        *([{"op": "member.set", "principal_id": f"{name}-agents", "role": role}] if rows else []),
         {"op": "member.set", "principal_id": name, "role": person_role}]})
     return name
 
 
-@pytest.fixture
-def agent(tmp_path, monkeypatch, capsys):
-    """A fresh person and agent in a fresh wirkspace, logged in through `wirk login` with a registered digest."""
+def newcomer(tmp_path, monkeypatch, capsys, rows=True):
+    """A fresh person (an administrator) and their agents in a fresh wirkspace, logged in through `wirk login`."""
     tag = secrets.token_hex(4)
     space = admin({"request_id": f"s{tag}-space", "operations": [{"op": "wirkspace.create", "name": f"Scratch {tag}"}]})
     workspace = space["data"]["results"][0]["workspace"]
     monkeypatch.setenv("WIRK_CONFIG_DIR", str(tmp_path / "wirk"))
     monkeypatch.chdir(tmp_path)
-    name = person_with_agents(capsys, tmp_path / "wirk", workspace)
+    name = person_with_agents(capsys, tmp_path / "wirk", workspace, rows=rows)
     return {"name": name, "workspace": workspace, "dir": tmp_path / "wirk", "tmp": tmp_path}
+
+
+@pytest.fixture
+def agent(tmp_path, monkeypatch, capsys):
+    """Agents with a membership row of their own (editor), so they act only through it."""
+    return newcomer(tmp_path, monkeypatch, capsys)
 
 
 def wirk(capsys, *argv):
@@ -213,12 +220,12 @@ def test_cards_print_the_kind_agents_filter_on(agent, capsys):
 
 
 def write_context(capsys, monkeypatch, agent):
-    """Agents propose context and a person accepts it; then work contributes to the initiative."""
+    """Agents with rows of their own propose context and a person accepts it; then work contributes to the initiative."""
     proposals = []
     for title, level, body in (("Scratch context", "organization", "Purpose: a dependable public API."),
                                ("API hardening", "initiative", "Goal: no partner loses data.")):
         code, out, err = wirk(capsys, "write", "new", title, "kind=context", f"level={level}", "--body", body)
-        assert code == 1 and "requires_review" in out, out + err  # context is added by administrators
+        assert code == 1 and "requires_review" in out, out + err  # an editor's agents may not add it
         code, out, err = wirk(capsys, "write", "new", title, "kind=context", f"level={level}", "--body", body,
                               "--propose", "--reason", "Agreed with the team")
         assert code == 0 and "Proposed" in out, out + err
@@ -245,3 +252,13 @@ def test_fetched_work_carries_its_context(agent, capsys, monkeypatch):
     item = write_context(capsys, monkeypatch, agent)
     code, out, err = wirk(capsys, "query", item)
     assert "Context" in out and "API hardening" in out, out
+
+
+def test_agents_acting_for_an_administrator_add_context_directly(tmp_path, monkeypatch, capsys):
+    """The agents browser approval makes have no rows of their own and act with their person's role."""
+    newcomer(tmp_path, monkeypatch, capsys, rows=False)
+    code, out, err = wirk(capsys, "write", "new", "Scratch context", "kind=context", "level=organization",
+                          "--body", "Purpose: a dependable public API.")
+    assert code == 0 and "created" in out and "Proposed" not in out, out + err
+    code, out, err = wirk(capsys, "status")
+    assert "dependable public API" in out, out

@@ -154,6 +154,7 @@ def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
 def test_review_help_says_agents_are_refused_and_how_a_person_decides(capsys):
     text = help_of(capsys, "review")
     assert "person_required" in text and "wirk login --person" in text and "--reason 'Why' --person" in text
+    assert "not_authorized for its own" in text  # an agent's own proposal is refused before its kind is
 
 
 def test_show_help_says_it_is_not_live_yet(capsys):
@@ -163,5 +164,5 @@ def test_show_help_says_it_is_not_live_yet(capsys):
 
 def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
     text = help_of(capsys, "write")
-    assert "administrators add it" in text and "--propose --reason" in text
+    assert "when your person may make it" in text and "requires_review" in text and "--propose --reason" in text
     assert "basis_changed" in text and "quotation_mismatch" in text
