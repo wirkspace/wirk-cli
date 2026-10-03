@@ -69,6 +69,16 @@ def test_an_unknown_admin_outcome_says_to_run_the_same_command_again(run, home, 
     assert "--request-id" not in err and "receipt=" not in err
 
 
+def test_admin_show_with_a_stray_request_id_fails_cleanly_when_no_answer_comes(run, home, monkeypatch):
+    """A show is a read: no outcome is uncertain, whatever words it was given."""
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda prompt: "show wirkspace")
+    write_token(home / "person-token", PERSON_TOKEN)
+    code, out, err, fake = run(["admin", "show", "wirkspace", "request_id=x"],
+                               failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and "Error service_unavailable" in err and "Traceback" not in err
+
+
 def test_an_unreachable_service_names_the_url_and_suggests_no_other_address(run):
     code, out, err, fake = run(["status"], failing(httpx.ConnectError("refused"), httpx.ConnectError("refused")))
     assert code == 1 and f"Error service_unavailable: could not reach {URL}" in err
