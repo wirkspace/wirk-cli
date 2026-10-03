@@ -134,3 +134,32 @@ Should restricted projects be left out by default? This is the release gate. Sam
 | J15 | Company- and team-managed projects; components with and without leads; versions released, archived and overdue | one doc each; dates as Jira states them; no email |
 | J16 | The sprint field on issues: every sprint with its `goal` and dates (also part of J5) | sprints on the project doc match the board's own view |
 | J17 | A narrower selection, and a project archived between runs | no `missing` for the first; `missing` for the second |
+
+## 9. Build record (3 October 2026)
+
+Built on fixtures only; there is still no Jira Cloud site.
+
+**Code.**
+- `jira.py` grows from 385 to 451 lines (+66), one over the estimate's upper bound. Splitting `Refused` from `Stop` and keeping the doc's ID apart from issue IDs (below) were not in the estimate.
+- Shared code stays at 1,260.
+
+**Found in the build: Jira's project and issue IDs meet.** They come from separate sequences that both start near 10000. The shared importer keys this run's objects by ID, so a project doc with ID `10000` would take the place of issue `10000`, links included. The doc's ID is therefore `p` followed by the project's ID (`Jira project p10000, …`), and a test imports a project and an issue that share an ID.
+
+**Acceptance 5, corrected.** A moved release date or a started sprint revises the project's doc. The issues that carry that version or sprint are revised too, by slice 1's rules: their archives keep `fixVersions` whole, and their headers show each sprint's state. This slice adds no churn of its own. The test checks the doc, and checks that an issue without the version stays current.
+
+**Evidence.**
+- Tests on fixtures, all written RED first:
+  - one doc for each project selected as a project, its allowlisted archive and no email;
+  - no doc for a named issue's project;
+  - sprints only from kept issues;
+  - a project and an issue sharing an ID;
+  - no churn when volatile fields change or issues swap sprints;
+  - revisions;
+  - a 403, 404, 400 or 500 skipping one project while the run goes on;
+  - a CAPTCHA lockout and a 401 still stopping the run, in the adapter and with exit status 2 through the command;
+  - a narrower selection, and a project no longer browsed reported `missing`.
+- Test counts:
+  - the importer command: 219 passed, 4 skipped;
+  - the full suite: 479 passed, 20 skipped;
+  - against a scratch core at `60b84ae`: 499 passed, including the Jira contract test (eight items with the SEED doc, then a re-run that writes nothing).
+- The trim's golden recorder, run from scratch on main `e930b04` and on this branch, shows no difference in any non-Jira recording (174 of 226).
