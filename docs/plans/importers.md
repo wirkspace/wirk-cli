@@ -677,7 +677,7 @@ The first Linear slice imports issues. Projects, milestones, initiatives, docume
 | L7 | F C: `contributes_to` | R: depth and cross-team parents |
 | L8 | F C: `requires` and the completed-dependent fallback | — |
 | L9 | F: duplicate, related, similar | R: whether `similar` occurs |
-| L10, L11 | — | the next slice |
+| L10, L11 | F C: projects, milestones, relations, initiatives, documents, updates (§5.2) | R: real field names and sizes |
 | L12 | F C: threads, replies, resolutions, quotes, edits, reactions, bots | R: reply depth, `reactionData`'s exact shape |
 | L13 | F: uploads with the key, link cards in the header | R: the storage host, real files |
 | L14 | F: found by UUID, `Previously:` identifiers | R: a real move |
@@ -699,6 +699,51 @@ The first Linear slice imports issues. Projects, milestones, initiatives, docume
 | Low: nested history used about 6,600 of a query's 10,000 points | `58d0633` | History is read 20 at a time, about 3,600 points a page by the published rules; the real cost waits for `X-Complexity` on a real workspace |
 | Low: the key hint used `pbpaste`; GitHub's empty Target date became `T23:59:59Z` | `490605a` | A hint for any POSIX shell; an empty date stays empty, with a regression test |
 
+
+### 5.2 Build record: Linear projects, milestones, initiatives, documents and updates (3 October 2026)
+
+The second Linear slice, stacked on the first. It uses synthetic answers too, shaped from the note's reading of the schema; nothing here has met a real workspace.
+
+**What is imported:**
+- **Projects:** any project with at least one selected team. A project is a work item.
+  - Owner: the lead.
+  - Status: by the project status's type (backlog, planned and paused are `open`, started is `in_progress`). The status's name goes to `workflow`.
+  - Fields: `team` (selected or public teams only), `priority` and `health`.
+  - Due: a target with a coarse resolution is due on the last day of its month, quarter, half or year, and the header says `Target: 2026 Q3`.
+- **Milestones** of those projects are work items titled `<project> · <milestone>`. Each `contributes_to` its project and is due on its target day. Linear's derived `done` is `completed`.
+- **Issues** `contribute_to` their milestone, or else their project. The header line that named them as text is gone.
+- **Project relations** are `requires` by §3.6, anchored to a milestone when Linear anchors them there. Both ends must be visible to the key.
+- **Initiatives become docs** (choice 16), `related_to` the projects in them.
+  - The header carries status, health, target and owner, then `Parent initiative` and `Sub-initiatives` as text.
+  - An initiative is imported when it holds an imported project, or holds none. One that holds only projects of teams not imported is left out.
+- **Documents** of an imported project, initiative or issue, and **project and initiative updates**, are docs `related_to` what they belong to. An update's header carries its health and reactions.
+- **Comments** on projects, initiatives, documents and updates come from one more list, the comments that are not on an issue. They go to each object's own discussion doc, as an issue's do.
+- **Archived and trashed** objects of every kind follow the issue rule (§5.1).
+
+**Shared changes:**
+- The importer writes the adapter's kinds. Each kind has its own key line (`Linear project [Checkout v2] · <url>`) and its own archive file, `linear-project-<id>.json`.
+- The index reads every kind.
+- Docs carry no work part and no fields.
+- `contributes_to` takes `project` and `milestone` as well as `parent`. `related_to` takes `initiative`, `includes` and `of`.
+
+**Evidence:**
+- Tests on fakes, with every kind of object: 23 Linear tests in all.
+- The contract test against a scratch core at `60b84ae`, from one synthetic workspace:
+  - 15 items, with every link written;
+  - a milestone that `contributes_to` its project, and an issue that `contributes_to` its milestone;
+  - a project that `requires` a milestone;
+  - an initiative doc `related_to` its project;
+  - the private team's project and initiative left out;
+  - a re-run that writes nothing.
+- The whole suite: 418 passed against a scratch core, and 399 passed with 19 skipped without one.
+
+**Still needs the real workspace:**
+- the names of `targetDateResolution`, a milestone's `status`, and the parent fields of Comment and Document;
+- whether `initiativeToProjects` and `projectRelations` exist as root lists.
+
+The first real dry run names any field the schema lacks.
+
+**Size.** The Linear adapter is 518 lines. Shared code is 1,271.
 
 ## 6. Jira, third
 
