@@ -824,7 +824,7 @@ The first Jira slice imports issues. Projects and boards as docs (with component
 - **The map file** keys people by accountId. The template adds `names`, so a person can tell who an ID is; the importer reads `names` but never uses it.
 
 **Choices for the review:**
-1. **Stacked on the Linear work for its shared code.** The adapter registry, the census, due instants, the every-heading escape and the `previously` relation all came from #5 and #6.
+1. **Built on main after the Linear merge, reusing its shared code.** The adapter registry, the census, due instants, the every-heading escape and the `previously` relation came with Linear; Jira added only the map file's `names`.
 2. **Watchers and votes are counts only**, with no per-issue watcher calls.
 3. **Remote links are one call per issue.** The note's optimization, which reads the changelog first, waits for the seed site.
 4. **Attachments added in restricted comments** cannot be told apart without the media-ID mapping, so they stay on the item. They need the seed site.
