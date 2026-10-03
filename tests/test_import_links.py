@@ -134,3 +134,20 @@ def test_no_write_holds_more_than_32_operations(fake):
     make(fake).run(blockers + [issue(1, relations=[("blocked_by", to(n)) for n in range(100, 140)])])
     assert all(len(w["operations"]) <= 32 and len(w.get("expect", {})) <= 64 for w in fake.writes())
     assert sum(1 for l in links(fake) if l[0] == "requires") == 40
+
+
+def test_a_requires_a_person_replaced_by_completing_the_work_is_kept_as_related_once(fake):
+    records = [issue(1), issue(2, relations=[("blocked_by", to(1))])]
+    make(fake).run(records)
+    two, gate = item_of(fake, 2), next(i for i, link in fake.links.items() if link["type"] == "requires")
+    fake.as_whom = "bob"  # Bob removes the gate and completes 2 in WIRK; the source still has 2 open and blocked
+    fake.write({"request_id": "bob-1", "operations": [{"op": "link.remove", "id": gate}]})
+    fake.write({"request_id": "bob-2", "reason": "Done", "expect": {two: 1},
+                "operations": [{"op": "item.edit", "id": two, "patch": {"fields": {"status": "completed"}}}]})
+    fake.as_whom = None
+    make(fake).run(records)
+    assert links(fake) == [("related_to", 1, 2)]
+    before = len(fake.writes())
+    make(fake).run(records)
+    make(fake).run(records)
+    assert len(fake.writes()) == before and links(fake) == [("related_to", 1, 2)]
