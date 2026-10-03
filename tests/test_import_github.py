@@ -42,6 +42,7 @@ class FakeGh:
 
     def __init__(self, repos, issues, scopes="repo, read:org", extra=None):
         self.repos, self.issues, self.scopes, self.extra, self.calls = repos, issues, scopes, extra or {}, []
+        self.cut_timelines = False
 
     def __call__(self, args, stdin=None):
         self.calls.append((args, stdin))
@@ -59,12 +60,17 @@ class FakeGh:
             start = int(variables.get("after") or 0)
             window = nodes[start:start + variables["size"]]
             more = start + variables["size"] < len(nodes)
+            if self.cut_timelines:  # what GitHub's paged query does to some issues, without saying so
+                window = [{**n, "timelineItems": page([])} for n in window]
             return 0, json.dumps({"data": {"rateLimit": limit, "repository": {**found, "page": page(
                 window, more, str(start + variables["size"]) if more else None)}}}), ""
         if "repository(owner" in query:
             name = f"{variables['owner']}/{variables['name']}"
             found = next((r for r in self.repos if r["nameWithOwner"] == name), None)
             return 0, json.dumps({"data": {"rateLimit": limit, "repository": found}}), ""
+        if "node(id" in query and "timelineItems(" in query and "page: issues" not in query:
+            issue = next(n for nodes in self.issues.values() for n in nodes if n["id"] == variables["id"])
+            return 0, json.dumps({"data": {"rateLimit": limit, "node": {"timelineItems": issue["timelineItems"]}}}), ""
         if "node(id" in query:
             key = (variables["id"], variables.get("after", "html"))
             found = self.extra[key] if key in self.extra or key[1] != "html" else {"bodyHTML": ""}
@@ -254,3 +260,15 @@ def test_only_reads_reach_github():
         assert args[0] == "api" and "-X" not in args and "--method" not in args
         if stdin:
             assert not json.loads(stdin)["query"].lstrip().startswith("mutation")
+
+
+def test_timelines_are_read_issue_by_issue():
+    """GitHub's paged query can return an issue's timeline short, totalCount included, so each is read on its own."""
+    events = page([{"__typename": "LabeledEvent", "createdAt": "2026-09-02T00:00:00Z", "actor": {"login": "ada"},
+                    "label": {"name": "bug"}}])
+    fake = FakeGh([repo("acme/web")], {"acme/web": [node(1, timelineItems=events)]})
+    fake.cut_timelines = True
+    _, _, records = read(fake)
+    assert len(records[0].raw["issue"]["timelineItems"]["nodes"]) == 1
+    query = next(json.loads(stdin)["query"] for args, stdin in fake.calls if stdin and "page: issues" in stdin)
+    assert "timelineItems(" not in query  # pages no longer ask for timelines at all
