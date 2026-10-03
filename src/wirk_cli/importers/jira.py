@@ -26,7 +26,6 @@ LABELS = {"parent": "Parent", "sub_issue": "Children", "blocked_by": "Is blocked
           "duplicate_of": "Duplicates", "duplicated_by": "Is duplicated by", "related": "Links", "previously": "Previous keys"}
 SELECTIONS = {"Workflow": "one", "Issue type": "one", "Priority": "one", "Project": "one", "Resolution": "one", "Label": "many",
               "Component": "many", "Release": "many", "Sprint": "many", "Story points": "one"}
-CANCELLED = {"Won't Do", "Duplicate"}  # resolutions of done work that mean it was not done (§6)
 STATES = {"new": "open", "indeterminate": "in_progress", "done": "completed"}
 SELECT = {"select": "one", "radiobuttons": "one", "multiselect": "many", "multicheckboxes": "many", "cascadingselect": "one"}
 STORY_POINTS, POINT_VALUES = {"Story Points", "Story point estimate"}, 20  # a field only with at most 20 values
@@ -59,6 +58,8 @@ def bare(found: dict | None) -> dict | None:
 
 class Jira:
     source, noun, unit, needs_selection = SOURCE, NOUN, "Jira requests", False
+    # resolutions of done work that mean it was not done (§6); the map file's "cancelled" replaces them
+    cancelled = {"Won't Do", "Duplicate", "Won't Fix", "Cannot Reproduce", "Declined"}
 
     def __init__(self, http=None, sleep=None, folder=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
@@ -209,7 +210,7 @@ class Jira:
         f, key = node["fields"], node["key"]
         status, resolution = f["status"] or {}, (f.get("resolution") or {}).get("name")
         category = (status.get("statusCategory") or {}).get("key", "new")
-        state = "cancelled" if category == "done" and resolution in CANCELLED else STATES.get(category, "open")
+        state = "cancelled" if category == "done" and resolution in self.cancelled else STATES.get(category, "open")
         comments = self.every(node, "comment", "comments", 100)
         worklogs = self.every(node, "worklog", "worklogs", 5000)
         hidden = [sum(1 for c in found if c.get("visibility")) * (not named) for found in (comments, worklogs)]

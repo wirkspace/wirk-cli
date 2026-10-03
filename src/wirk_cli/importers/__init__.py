@@ -91,6 +91,8 @@ class Run:
             service, registered = self.connect()
             self.mapped = mapped = self.read_map()
             adapter = self.adapter
+            if "cancelled" in mapped:  # Jira's resolutions that mean done work was not done
+                adapter.cancelled = set(mapped["cancelled"])
             adapter.check()
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
@@ -161,8 +163,8 @@ class Run:
             mapped = json.loads(path.read_text())
         except ValueError as error:
             raise Stop(f"{path} is not JSON: {error}") from None
-        if not isinstance(mapped, dict) or set(mapped) - {"users", "names", "field_limit", "status"}:
-            raise Stop(f"{path} holds users, names, field_limit and status only")
+        if not isinstance(mapped, dict) or set(mapped) - {"users", "names", "field_limit", "status", "cancelled"}:
+            raise Stop(f"{path} holds users, names, field_limit, status and cancelled only")
         return mapped
 
     def check_statuses(self, importer) -> None:
@@ -197,8 +199,9 @@ class Run:
         if not self.map_file.exists():
             users = dict(sorted({user: shown for record in records for user, shown in record.assignees}.items()))
             names = {user: shown for user, shown in users.items() if shown != f"@{user}"}  # IDs say nothing to a person
+            cancelled = {"cancelled": sorted(self.adapter.cancelled)} if hasattr(self.adapter, "cancelled") else {}
             self.map_file.write_text(json.dumps({"users": dict.fromkeys(users), **({"names": names} if names else {}),
-                                                 "field_limit": 50, "status": DEFAULT_STATUSES}, indent=1) + "\n")
+                                                 "field_limit": 50, "status": DEFAULT_STATUSES, **cancelled}, indent=1) + "\n")
         if not operations:
             return None
         self.setup_file.write_text(json.dumps({"request_id": f"{self.source}-import-setup-{secrets.token_hex(4)}",
