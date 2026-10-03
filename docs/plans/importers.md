@@ -386,9 +386,9 @@ tests/verify/   the independent REST reader (§7, A5); test code
 - **Timelines, one issue at a time** (changed in the build; build record). Each issue's timeline is read by its own query, 100 events a page, except comments and the mentioned, subscribed and unsubscribed events that comments cause, through one fragment per event type, so unknown types still arrive with their type name. On the real organization GitHub's paged query returned 141 timelines short, `totalCount` included and with no error, every time; batched `node()` reads of 10 issues lost 22 of 60, of 5 lost 1 of 60, and of one lost none.
 - **Paging.** A connection with more than a page is fetched on its own, issue by issue. A page that times out is retried at half the size. Pull requests are never read: only `pullRequests.totalCount`, for the report.
 - **Pacing and bounds.**
-  - Requests are serial. Each query asks for `rateLimit { cost remaining resetAt }` and waits for the reset when the next page would not fit.
-  - A secondary-limit refusal waits a minute and doubles, three times, then stops with exit 2 and the outcomes so far.
-  - A page of 25 issues costs about 3 points and each issue's own timeline read 1, so the real organization's 2,200 issues cost about 2,400 points a run, half an hour's budget. Revision 3 bounded a run at 1,000 points, which assumed timelines inside pages; the build record gives the measured cost.
+  - Pages are read one at a time; each page's timelines are read at most four at once (decision 80). Every reader shares one rate-limit budget: each query asks for `rateLimit { cost remaining resetAt }`, and a pause any reader sets, for the hour's reset or a secondary limit, holds them all. Writes to WIRK stay one at a time, one issue per write.
+  - A secondary-limit refusal waits a minute and doubles, three times, then stops with exit 2 and the outcomes so far. A spent hour's budget is not a refusal: every reader waits for its reset.
+  - A page of 25 issues costs about 3 points and each issue's own timeline read 1, so the real organization's 2,200 issues cost about 2,400 points a run, half an hour's budget. Revision 3 bounded a run at 1,000 points, which assumed timelines inside pages; decision 80 set the bound at the measured cost plus 20%, 2,900 points (A19).
 - **Attachments.** Rendered bodies (`bodyHTML`) are read only for issues and comments whose text holds a `user-attachments` URL. For a private repository they carry short-lived signed image URLs, downloaded at once, without any credential, within §3.7's allowlist and cap. Public attachments download directly. Anything else stays a link and is reported (GitHub note §2.6; proven or refuted on the seed, §4.6).
 
 ### 4.2 Mapping
@@ -713,10 +713,12 @@ Each is observed by a test or a run, not inferred. GitHub first, on the seeds an
 19. **A19 Time and cost bounds**, measured on this machine against a local scratch service, each a finding to report if missed:
     - seeds: import within 10 minutes, re-run within 3;
     - real organization:
-      - dry run within 15 minutes and 1,000 GraphQL points;
+      - dry run within 15 minutes and 2,900 GraphQL points;
       - import within 60 minutes;
-      - re-run within 20 minutes and 1,000 points;
+      - re-run within 20 minutes and 2,900 points;
     - the scripted-judgment run (§4.7 step 15): measured and reported, against the import's own time.
+
+    Decision 80 set both point bounds at the measured 2,411 points plus 20%. Revision 3's 1,000 points assumed timelines read inside pages, and GitHub drops events there without saying so (build record). Correctness over speed: a complete timeline is worth its query per issue.
 
 ## 8. Build order, and the person's steps
 
@@ -770,7 +772,7 @@ Settled here, simplest faithful option first. Where the root's rulings on revisi
 17. **Linear archives** are mirrored by the importer on its own items. GitHub and Jira never archive, except the importer's own stale discussion parts.
 18. **Jira switches.** `--include-restricted`, `--resume` and `--archived` are dropped; naming an issue key is the opt-in.
 19. **GitHub projects** are built on fixtures and the seed project. Agreed with the review's condition: the person grants `read:project` before VERIFY (§8), so VERIFY covers real project data.
-20. **The GitHub timeline** is read through GraphQL, with one fragment per event type. Agreed with the review's conditions: the run is bounded at 1,000 points, and the archive's timeline counts are checked against the independent REST reader (A5). **Changed in the build:** that check found GitHub returning timelines short inside paged queries, so each issue's timeline is now its own query, about 2,400 points a run for the real organization; the bound no longer holds (build record).
+20. **The GitHub timeline** is read through GraphQL, with one fragment per event type. Agreed with the review's conditions: the run is bounded at 1,000 points, and the archive's timeline counts are checked against the independent REST reader (A5). **Changed in the build:** that check found GitHub returning timelines short inside paged queries, so each issue's timeline is now its own query, about 2,400 points a run for the real organization. Decision 80 lets four timelines be read at once and sets the bound at the measured cost plus 20%, 2,900 points (A19, build record).
 21. **Discussion parts** (agreed with the review's condition) are cut by the encoded bytes of the write that carries them, at 2 MiB, and written one to a write.
 22. **Owners** come from the map only, with no automatic matching, because agents have no member list.
 23. **A second importer** (ruled): another `*-<source>-import` principal's items block their keys, and the dry run stops and explains.
@@ -812,14 +814,15 @@ The build follows revision 3. Every slice ran RED → GREEN → SIMPLIFY → VER
 | G4 command | `f238bcd` (8 failing), `37c08e7`, `beb7053` | `3a7bb57`, `ca921cd`, `27f9d24` | `8936dc2` | The map file read once per run |
 | G5 links | `c197cb1` (10 tests, 6 failing) | `4191430` | `384dcb8` | The index keeps each item's key, so link ends are a lookup, not a scan; a link refused as a cycle keeps its write's `expect` |
 | G6 attachments | `b079e78` | `2b1a7de` | reviewed, kept | Download, allowlist and cap are one short loop each |
+| Decision 80 readers | `b7ba73c`, `87e911f` | `3a2bc57`, `ffa20fd` | `7bdbbaa` | One function counts the seconds to a reset, where the pacing and the wait for a spent budget each worked it out. Kept as they are: the shared pause is one lock and one deadline, and the readers a standard thread pool over each page's issues, yielded in GitHub's order |
 | G7 verifier | — | `c458dc6`, `707dc72` | — | Test tooling: an independent REST reader; no importer code shared |
 | Contract test | — | `92ba8da` | — | Against a scratch service, as the CLI's own contract tests are |
 
 Not built: **G8 projects**. The person's `gh` login still lacks `read:project` (§8 step 1), so there is no real or seed project to verify against; the reader already leaves project timeline events out without the scope and says so in every report. Projects are the next slice once the scope is granted.
 
-**Tests.** 86 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 19, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. The whole suite passes: 338 passed and 17 skipped without a scratch service. With one, the importer's contract tests pass, and 5 of the CLI's existing contract tests fail on `main` too: core `60b84ae` changed the login wording, lets only people decide proposals, has no views address and limits who adds context. That is outside this build.
+**Tests.** 89 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 22, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. The whole suite passes: 341 passed and 17 skipped without a scratch service. With one, the importer's contract tests pass, and 5 of the CLI's existing contract tests fail on `main` too: core `60b84ae` changed the login wording, lets only people decide proposals, has no views address and limits who adds context. That is outside this build.
 
-**Size.** Shared code is 1,156 lines (`__init__` 235, `render` 360, `wirk` 561) against the plan's budget of 1,000; the GitHub adapter is 445 against 450. Most of the overrun is the link pass and the stale-link and stale-part rules that the review added (§3.6), and the report. The simplify passes are listed above; the overrun is for the reviewer to judge.
+**Size.** Shared code is 1,156 lines (`__init__` 235, `render` 360, `wirk` 561) against the plan's budget of 1,000; the GitHub adapter is 497 against 450, after decision 80's four readers, their shared pause and the wait for a spent budget added 52 lines. Most of the overrun is the link pass and the stale-link and stale-part rules that the review added (§3.6), and the report. The simplify passes are listed above; the overrun is for the reviewer to judge.
 
 ### A finding that changed the build: timelines inside paged queries
 
@@ -832,9 +835,27 @@ Comments and labels in the same pages were complete: the REST reader matched all
 
 A re-run with the fix updated exactly those 141 issues and left the other 4,142 current. The REST reader then found **zero differences** over 2,200 issues, 14,080 comments and 28,757 timeline events.
 
-The fix costs a query per issue: about 2,400 GraphQL points a run for the real organization, and a run of about 25 minutes. Before, it was 206 points and 6 minutes.
+The fix costs a query per issue: about 2,400 GraphQL points a run for the real organization, and a run of about 25 minutes. Before, it was 206 points and 6 minutes. Decision 80 brought the time back down (below).
 
 **What the earlier, short timelines had cost.** Those 141 issues' archives lacked events. Where the missing events were cross-references or the closing event, their headers lacked mentions, and evidence could lack the closer. The re-run repaired both, through the normal update path.
+
+### Decision 80: timelines four at a time
+
+The root ruled that timelines may be read at most four at once, sharing one rate-limit budget with backoff on secondary limits, while writes stay one at a time, one issue per write (RED `b7ba73c`, GREEN `3a2bc57`). The first real measurement then spent the hour's budget, which GitHub reports as "API rate limit already exceeded" rather than as a secondary limit, and the run stopped. A spent budget now holds every reader until its reset and does not count as a refusal (RED `87e911f`, GREEN `ffa20fd`, SIMPLIFY `7bdbbaa`).
+
+Measured on this machine against fresh scratch cores at `60b84ae`, each real run started with a full hour's budget:
+
+| Run | Timelines inside pages (short) | One timeline at a time | Four at a time | Bound (A19) |
+|---|---|---|---|---|
+| Seeds: import, re-run | | | 31 s and 28 s; 175 points | 10 and 3 minutes |
+| Real: dry run | 314 s, 206 points | about 25 minutes, 2,411 points | **516 s, 2,411 points** | 15 minutes, 2,900 points |
+| Real: import | 344 s, 206 points | | **584 s, 2,411 points** | 60 minutes |
+| Real: re-run | 296 s, 206 points | 1,530 s, 2,411 points | **564 s, 2,411 points** | 20 minutes, 2,900 points |
+
+- **Correct while parallel.** The import created all 4,283 items from 2,200 writes. The REST reader found **zero differences** over 2,200 issues, 14,080 comments and 28,757 timeline events, both after the import and after the re-run. The seeds also showed zero differences.
+- **The re-run** found all 4,283 items current, with no receipt and no stored object added.
+- **The bounds.** Every time is now within its bound. The points stay at 2,411, because reading in parallel changes when the queries run, not how many there are. Decision 80 set the point bounds at the measured cost plus 20%, 2,900 points. Revision 3's 1,000 assumed timelines inside pages, which GitHub returns short: correctness over speed.
+- **Not measured:** the backoff on a secondary limit is shown on fakes only. The report does not count pauses, so the real runs cannot show whether one happened. The scripted-judgment run below came before decision 80, with timelines inside pages.
 
 ### Evidence, by the matrix of §4.5
 
@@ -870,9 +891,9 @@ The fix costs a query per issue: about 2,400 GraphQL points a run for the real o
 | A2 | Met: the setup applied by `wirk admin --request` at a terminal, rows before the token; the importer an editor in that wirkspace only |
 | A3 | Met: exact counts, zero errors, nothing about comments on work items |
 | A4 | Met: statuses and evidence as §4.2, checked on every seed and every real issue |
-| A5 | Met, after the timeline fix: zero differences on the seeds and the real organization |
+| A5 | Met, after the timeline fix and again with four readers: zero differences on the seeds and the real organization |
 | A6 | Met for every issue, not a sample |
-| A7 | Met on the seeds and the real organization: the final real re-run found all 4,283 items current, with no write and no upload (1,530 s, 2,411 points) |
+| A7 | Met on the seeds and the real organization: the real re-run with four readers found all 4,283 items current, with no write and no upload (564 s, 2,411 points) |
 | A8 | Met on the seeds |
 | A9, A11 | Met on the seeds, against real core |
 | A10 | Met at the three points on the seeds, and by a real kill |
@@ -883,7 +904,7 @@ The fix costs a query per issue: about 2,400 GraphQL points a run for the real o
 | A16 | Met on fakes and in the runs |
 | A17 | Not yet: the blind trial follows the independent review (§8) |
 | A18 | For the reviewer: shared code over its budget, as above |
-| A19 | Seeds within their bounds. Real organization: the import (about 6 minutes plus the timeline reads) is within 60 minutes. The dry run and the re-run take about 25 minutes and 2,400 points with timelines read alone, over the 15 and 20 minutes and 1,000 points revision 3 set. A finding for the root |
+| A19 | Met against the bounds decision 80 set. With four readers the real dry run took 516 s, the import 584 s and the re-run 564 s, each 2,411 points; the point bounds are now 2,900, the measured cost plus 20% |
 
 ### Still to do, and what needs the person
 
