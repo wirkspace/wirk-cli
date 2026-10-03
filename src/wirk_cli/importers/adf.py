@@ -20,6 +20,16 @@ def markdown(document: dict | None, counts, files=frozenset()) -> str:
     return Writer(counts, files).blocks((document or {}).get("content") or [])
 
 
+def names(document) -> set:
+    """The file names a document's media point at, by their alt text."""
+    if isinstance(document, list):
+        return set().union(*map(names, document)) if document else set()
+    if not isinstance(document, dict):
+        return set()
+    own = {document["attrs"]["alt"]} if document.get("type") in ("media", "mediaInline") and (document.get("attrs") or {}).get("alt") else set()
+    return own | names(document.get("content") or [])
+
+
 class Writer:
     def __init__(self, counts, files):
         self.counts, self.files = counts, files

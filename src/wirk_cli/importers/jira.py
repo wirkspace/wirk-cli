@@ -213,14 +213,20 @@ class Jira:
         worklogs = self.every(node, "worklog", "worklogs", 5000)
         hidden = [sum(1 for c in found if c.get("visibility")) * (not named) for found in (comments, worklogs)]
         comments, worklogs = ([c for c in found if named or not c.get("visibility")] for found in (comments, worklogs))
-        files = {a["filename"] for a in f.get("attachment") or []}
+        attachments = f.get("attachment") or []
+        if any(hidden):  # what a comment or worklog left out may hold: only files the text still shown references stay
+            shown = {name for text in [*f.values(), *(c.get("body") for c in comments), *(w.get("comment") for w in worklogs)]
+                     for name in adf.names(text)}
+            attachments = [a for a in attachments if a["filename"] in shown]
+        files = {a["filename"] for a in attachments}
         fields, facts, sections = self.fields_and_facts(f)
         links = self.call("GET", f"/rest/api/3/issue/{node['id']}/remotelink")
         web = [" ".join(((link.get("object") or {}).get(part) or "") for part in ("title", "url")) for link in links]
-        gone = [f"{n} restricted {word}{'s' if n != 1 else ''}" for n, word in zip(hidden, ("comment", "worklog")) if n]
+        gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
+            hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
         kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
-        kept.update(parent=bare(f.get("parent")), subtasks=[bare(s) for s in f.get("subtasks") or []],
+        kept.update(attachment=attachments, parent=bare(f.get("parent")), subtasks=[bare(s) for s in f.get("subtasks") or []],
                     issuelinks=[{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
                                 for link in f.get("issuelinks") or []])
         raw = {"issue": clean({**node, "fields": kept}), "worklogs": clean(worklogs), "changelog": clean(history),
@@ -237,7 +243,7 @@ class Jira:
                             adf.markdown(c.get("body"), self.counts, files), "", None, c.get("updated", c["created"]),
                             ("internal",) if c.get("jsdPublic") is False else ()) for c in comments],
             [render.Attachment(render.attachment_name(SOURCE, a["id"], a["filename"]), f"{self.base}/rest/api/3/attachment/content/{a['id']}",
-                               False) for a in f.get("attachment") or []],
+                               False) for a in attachments],
             raw, clean(comments))
 
     def relations(self, f: dict, history: list, children: list) -> list:
