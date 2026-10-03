@@ -340,3 +340,18 @@ def test_a_spent_hourly_budget_waits_for_its_reset():
     adapter.check()
     census, records = adapter.read(["acme"])
     assert len(records) == 1 and refused and slept and 1700 < max(slept) <= 1810
+
+
+def test_a_pause_extended_while_a_reader_sleeps_holds_it_again():
+    now, slept = [0.0], []
+    gate = github.Gate(clock=lambda: now[0])
+
+    def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+        if len(slept) == 1:
+            gate.hold(30)  # another reader meets a limit meanwhile
+    gate.sleep = sleep
+    gate.hold(10)
+    gate.wait()
+    assert slept == [10, 30]
