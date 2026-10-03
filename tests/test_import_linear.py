@@ -50,8 +50,9 @@ def issue(n, team_key="ENG", **changes):
 
 def comment(n, issue_n, body, **changes):
     base = {"id": f"c-{n}", "body": body, "createdAt": f"2026-09-02T11:00:{n:02d}.000Z", "editedAt": None, "quotedText": None,
-            "resolvedAt": None, "parent": None, "issue": {"id": uid(issue_n)}, "user": {"id": "u-ben"}, "resolvingUser": None,
-            "botActor": None, "externalUser": None, "reactionData": []}
+            "resolvedAt": None, "parent": None, "issue": {"id": uid(issue_n)} if issue_n else None, "project": None,
+            "initiative": None, "projectUpdate": None, "initiativeUpdate": None, "documentContent": None, "user": {"id": "u-ben"},
+            "resolvingUser": None, "botActor": None, "externalUser": None, "reactionData": []}
     base.update(changes)
     return base
 
@@ -68,8 +69,57 @@ LABELS = [{"id": "l-bug", "name": "Bug", "isGroup": False, "parent": None},
           {"id": "l-front", "name": "Frontend", "isGroup": False, "parent": {"id": "l-area"}},
           {"id": "l-back", "name": "Backend", "isGroup": False, "parent": {"id": "l-area"}}]
 CYCLES = [{"id": "cy-42", "number": 42, "name": None, "team": {"id": "team-ENG"}}]
-PROJECTS = [{"id": "p-1", "name": "Checkout v2"}]
-MILESTONES = [{"id": "m-1", "name": "Beta"}]
+def project(n, name, teams, status=("Started", "started"), **changes):
+    base = {"id": f"p-{n}", "name": name, "description": f"{name} in a line.", "content": f"The plan for {name}.",
+            "url": f"https://linear.app/acme/project/p-{n}", "status": {"id": f"ps-{status[1]}", "name": status[0], "type": status[1]},
+            "priority": 0, "lead": None, "teams": page([{"id": f"team-{key}"} for key in teams]), "startDate": None,
+            "targetDate": None, "targetDateResolution": None, "health": None, "createdAt": "2026-08-01T00:00:00.000Z",
+            "updatedAt": "2026-09-30T00:00:00.000Z", "completedAt": None, "canceledAt": None, "archivedAt": None, "trashed": None}
+    base.update(changes)
+    return base
+
+
+def doc(n, title, **changes):
+    base = {"id": f"d-{n}", "title": title, "content": f"{title} text.", "url": f"https://linear.app/acme/document/d-{n}",
+            "creator": {"id": "u-ada"}, "createdAt": "2026-09-10T00:00:00.000Z", "updatedAt": "2026-09-11T00:00:00.000Z",
+            "project": None, "initiative": None, "issue": None, "archivedAt": None, "trashed": None}
+    base.update(changes)
+    return base
+
+
+def initiative(n, name, status="Active", **changes):
+    base = {"id": f"i-{n}", "name": name, "description": f"{name}, briefly.", "content": f"All of {name}.",
+            "url": f"https://linear.app/acme/initiative/i-{n}", "status": status, "owner": None, "targetDate": None,
+            "health": None, "parentInitiative": None, "createdAt": "2026-07-01T00:00:00.000Z",
+            "updatedAt": "2026-09-01T00:00:00.000Z", "archivedAt": None, "trashed": None}
+    base.update(changes)
+    return base
+
+
+def update(n, parent, kind="project", **changes):
+    base = {"id": f"{kind[0]}u-{n}", "body": f"Update {n}.", "health": "onTrack", "url": f"https://linear.app/acme/update/{n}",
+            "createdAt": "2026-09-20T09:00:00.000Z", "editedAt": None, "user": {"id": "u-ben"}, kind: {"id": parent},
+            "reactionData": []}
+    base.update(changes)
+    return base
+
+
+PROJECTS = [project(1, "Checkout v2", ["ENG", "OPS"], lead={"id": "u-ada"}, targetDate="2026-07-01", targetDateResolution="quarter",
+                    health="atRisk", priority=2),
+            project(2, "Data retention", ["ENG"], status=("On hold", "paused")), project(3, "Secret thing", ["SEC"])]
+MILESTONES = [{"id": "m-1", "name": "Beta", "description": "The beta.", "targetDate": "2026-08-15", "status": "next",
+               "project": {"id": "p-1"}},
+              {"id": "m-2", "name": "GA", "description": None, "targetDate": None, "status": "done", "project": {"id": "p-1"}}]
+PROJECT_RELATIONS = [{"id": "pr-1", "type": "blocks", "project": {"id": "p-1"}, "relatedProject": {"id": "p-2"},
+                      "projectMilestone": {"id": "m-1"}, "relatedProjectMilestone": None}]
+INITIATIVES = [initiative(1, "Reliability 2026", owner={"id": "u-ada"}, targetDate="2026-12-31", health="onTrack"),
+               initiative(2, "Self-serve", "Planned", parentInitiative={"id": "i-1"}), initiative(3, "Secret plan", "Proposed")]
+IN_INITIATIVES = [{"id": f"ip-{i}{p}", "initiative": {"id": f"i-{i}"}, "project": {"id": f"p-{p}"}} for i, p in ((1, 1), (1, 2), (2, 1), (3, 3))]
+DOCUMENTS = [doc(1, "Checkout spec", project={"id": "p-1"}, content="See ![flow](https://uploads.linear.app/acme/d1/flow.png)"),
+             doc(2, "Old notes", project={"id": "p-1"}, archivedAt="2026-09-29T00:00:00.000Z", trashed=True),
+             doc(3, "Secret doc", project={"id": "p-3"})]
+UPDATES = [update(1, "p-1")]
+INITIATIVE_UPDATES = [update(2, "i-1", "initiative", health="atRisk")]
 
 
 class FakeLinear:
@@ -78,6 +128,8 @@ class FakeLinear:
     def __init__(self, issues, relations=(), comments=(), teams=TEAMS, files=None):
         self.lists = {"teams": list(teams), "workflowStates": STATES, "users": USERS, "issueLabels": LABELS, "cycles": CYCLES,
                       "projects": PROJECTS, "projectMilestones": MILESTONES, "issueRelations": list(relations),
+                      "projectRelations": PROJECT_RELATIONS, "initiatives": INITIATIVES, "initiativeToProjects": IN_INITIATIVES,
+                      "documents": DOCUMENTS, "projectUpdates": UPDATES, "initiativeUpdates": INITIATIVE_UPDATES,
                       "comments": list(comments), "issues": list(issues)}
         self.files, self.requests, self.limited, self.complexity, self.nested, self.errors = files or {}, [], 0, 50, {}, []
 
@@ -114,7 +166,9 @@ class FakeLinear:
                 nodes = [n for n in nodes if n["team"]["id"] in variables["teams"]]
             elif name == "comments":
                 teams = {n["id"]: n["team"]["id"] for n in self.lists["issues"]}
-                nodes = [n for n in nodes if teams.get(n["issue"]["id"]) in variables["teams"]]
+                nodes = [n for n in nodes if n["issue"] and teams.get(n["issue"]["id"]) in variables["teams"]]
+        elif name == "comments" and "null: true" in query:  # the comments on anything but an issue
+            nodes = [n for n in nodes if not n["issue"]]
         return {name: self.window(nodes, variables)}
 
     @staticmethod
@@ -144,7 +198,7 @@ def read(fake, folder, selection=()):
 
 
 def by_key(records):
-    return {record.key: record for record in records}
+    return {record.key: record for record in records if record.kind == "issue"}
 
 
 # ---------------------------------------------------------------- the key and the selection
@@ -205,12 +259,12 @@ def test_an_issue_maps_to_a_record(folder):
     header = "\n".join(record.opened + record.facts)
     for line in ["Opened by @ada 2026-09-01T10:00:00.000Z · started 2026-09-03T15:02:10.000Z",
                  "Team: Engineering (ENG) · Status: In Review (started) · Priority: High · Estimate: 3 (fibonacci)",
-                 "Due: 2026-03-08 (America/Los_Angeles)", "Cycle: ENG cycle 42", "Project: Checkout v2 · Milestone: Beta",
+                 "Due: 2026-03-08 (America/Los_Angeles)", "Cycle: ENG cycle 42",
                  "Labels: Bug · Area: Frontend", "Reactions: +1 2",
                  'Attachment: github "Keep next= through SSO" #412 open https://github.com/acme/web/pull/412']:
         assert line in header
     assert record.raw["issue"]["identifier"] == "ENG-7" and "updatedAt" not in record.raw["issue"]
-    assert ("previously", "OPS-45") in [(kind, ref.key) for kind, ref in record.relations]  # rendered under the reference rule
+    assert [(kind, ref.key) for kind, ref in record.relations] == [("milestone", "Checkout v2 · Beta"), ("previously", "OPS-45")]
 
 
 @pytest.mark.parametrize("name, meaning", [("Triage", "open"), ("Todo", "open"), ("In Review", "in_progress"), ("Done", "completed"),
@@ -295,7 +349,7 @@ def test_pages_and_long_nested_connections_are_followed(folder):
     fake = FakeLinear([issue(n) for n in range(1, 60)] + [issue(60, history=page(history[:50], True, "50"))])
     fake.nested[(uid(60), "history")] = history
     records = read(fake, folder)[2]
-    assert len(records) == 60 and len(by_key(records)["ENG-60"].raw["issue"]["history"]["nodes"]) == 70
+    assert len(by_key(records)) == 60 and len(by_key(records)["ENG-60"].raw["issue"]["history"]["nodes"]) == 70
 
 
 def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
@@ -305,7 +359,7 @@ def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
     found = adapter(fake, folder, slept)
     found.check()
     census, records = found.read([])
-    assert len(records) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
+    assert len(by_key(records)) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
     assert census.points == 50 * (len(fake.requests) - 1)  # every answered query, the check included
 
 
@@ -350,3 +404,51 @@ def test_history_is_read_in_pages_small_enough_for_the_query_budget(folder):
     read(fake, folder)
     query = next(json.loads(r.content)["query"] for r in fake.requests if r.method == "POST" and "issues(" in r.content.decode())
     assert re.search(r"history\(first: (\d+)\)", query)[1] == "20"
+
+# ---------------------------------------------------------------- projects, milestones, initiatives, documents and updates
+
+def test_projects_milestones_initiatives_documents_and_updates_of_the_selected_teams(folder):
+    comments = [comment(10, None, "On the update", projectUpdate={"id": "pu-1"}), comment(11, None, "On the plan", project={"id": "p-1"}),
+                comment(12, None, "On the spec", documentContent={"document": {"id": "d-1"}})]
+    found, census, records = read(FakeLinear([issue(1, project={"id": "p-1"})], comments=comments), folder)
+    kinds = {(record.kind, record.key) for record in records}
+    assert kinds == {("issue", "ENG-1"), ("project", "Checkout v2"), ("project", "Data retention"), ("milestone", "Checkout v2 · Beta"),
+                     ("milestone", "Checkout v2 · GA"), ("initiative", "Reliability 2026"), ("initiative", "Self-serve"),
+                     ("document", "Checkout spec"), ("document", "Old notes"), ("update", "Checkout v2 update 2026-09-20"),
+                     ("update", "Reliability 2026 update 2026-09-20")}  # nothing of the private team's
+    assert "also read: 2 projects · 2 milestones · 2 initiatives · 2 documents · 2 updates" in census.notes
+    by = {(record.kind, record.key): record for record in records}
+    links = lambda kind, key: [(relation, ref.key) for relation, ref in by[(kind, key)].relations]
+    plan = by[("project", "Checkout v2")]
+    assert plan.state == "in_progress" and plan.assignees == [("ada", "@ada")] and plan.due == "2026-09-30T23:59:59Z"
+    assert plan.fields == {"Team": ["ENG", "OPS"], "Workflow": ["Started"], "Priority": ["High"], "Health": ["At risk"]}
+    assert "Target: 2026 Q3" in plan.facts and plan.body == "Checkout v2 in a line.\n\nThe plan for Checkout v2."
+    assert [c.body for c in plan.comments] == ["On the plan"]
+    assert ("initiative", "Reliability 2026") in links("project", "Checkout v2") and ("initiative", "Self-serve") in links("project", "Checkout v2")
+    assert links("milestone", "Checkout v2 · Beta") == [("project", "Checkout v2"), ("blocking", "Data retention")]
+    assert ("blocked_by", "Checkout v2 · Beta") in links("project", "Data retention")
+    assert by[("milestone", "Checkout v2 · GA")].state == "completed" and by[("milestone", "Checkout v2 · Beta")].due == "2026-08-15T23:59:59Z"
+    assert links("issue", "ENG-1") == [("project", "Checkout v2")]
+    reliability = by[("initiative", "Reliability 2026")]
+    assert links("initiative", "Reliability 2026") == [("includes", "Checkout v2"), ("includes", "Data retention"), ("sub_initiative", "Self-serve")]
+    assert links("initiative", "Self-serve") == [("includes", "Checkout v2"), ("parent_initiative", "Reliability 2026")]
+    assert "Status: Active · Health: On track · Target: 2026-12-31 · Owner: @ada" in reliability.facts
+    assert reliability.body == "Reliability 2026, briefly.\n\nAll of Reliability 2026." and reliability.fields == {}
+    spec = by[("document", "Checkout spec")]
+    assert links("document", "Checkout spec") == [("of", "Checkout v2")] and spec.attachments[0].name.endswith("-flow.png")
+    assert [c.body for c in spec.comments] == ["On the spec"] and by[("document", "Old notes")].archived.startswith("In Linear's trash")
+    weekly = by[("update", "Checkout v2 update 2026-09-20")]
+    assert links("update", "Checkout v2 update 2026-09-20") == [("of", "Checkout v2")] and "Health: On track" in weekly.facts
+    assert [c.body for c in weekly.comments] == ["On the update"]
+    ctx = found.context(census.selected)
+    assert ctx.docs == {"initiative", "document", "update"} and set(ctx.kinds) >= {"issue", "project", "milestone"}
+
+
+def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):
+    fake = FakeLinear([issue(1)])
+    fake.lists["projectRelations"] = PROJECT_RELATIONS + [{"id": "pr-2", "type": "blocks", "project": {"id": "p-unseen"},
+                                                           "relatedProject": {"id": "p-2"}, "projectMilestone": None,
+                                                           "relatedProjectMilestone": None}]
+    records = read(fake, folder)[2]
+    retention = next(r for r in records if r.key == "Data retention")
+    assert [(kind, ref.key) for kind, ref in retention.relations if kind == "blocked_by"] == [("blocked_by", "Checkout v2 · Beta")]

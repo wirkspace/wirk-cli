@@ -37,8 +37,9 @@ ADDRESS = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]+(?:\
 HEADING = re.compile(r"^([ \t]*)(#{1,6}[ \t])", re.M)  # any heading: imported text never makes structure; one line, one pass
 EMAIL_KEY = re.compile(r"e-?mail", re.I)
 SPAM = {"spam", "abuse"}
-RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "duplicated_by", "related", "transferred_from",
-             "mentioned", "previously")
+RELATIONS = ("parent", "sub_issue", "project", "milestone", "of", "initiative", "includes", "parent_initiative", "sub_initiative",
+             "blocked_by", "blocking", "duplicate_of", "duplicated_by", "related", "transferred_from", "mentioned",
+             "previously")
 
 
 class Stop(Exception):
@@ -117,6 +118,8 @@ class Context:
     selected: frozenset
     noun: tuple  # the scope's name, one and many: ("repository", "repositories")
     labels: dict  # relation -> header label
+    kinds: tuple = ("issue",)  # what the adapter writes, besides discussions
+    docs: frozenset = frozenset()  # the kinds written as docs, not work
 
     def shown(self, ref: Ref) -> bool:
         return ref.public or ref.scope in self.selected
@@ -219,7 +222,7 @@ def work_item(ctx: Context, record: Record, users: dict, notes: dict) -> Rendere
         header.append(f"Redacted: {counts['redacted']} possible credential{'s' if counts['redacted'] != 1 else ''}")
     work = {**({"owner_id": owner} if owner else {}), **({"due_at": record.due} if record.due else {})}
     lines = [line1(ctx.source, record.kind, record.ident, record.version, "0" * 12),
-             f"{ctx.source} issue [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
+             f"{ctx.source} {record.kind} [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
     return Rendered(record.kind, title, "\n".join(lines) + ("\n\n" + body if body else ""), work, counts)
 
 

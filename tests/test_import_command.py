@@ -247,7 +247,7 @@ def test_linear_public_teams_by_default_then_the_import_as_its_own_importer(line
     fake.tokens[token] = "alice-linear-import"
     code, out, err = run()
     assert code == 0, out + err
-    assert "created: 2" in out and "find one: wirk query text='Linear issue [ENG-1]'" in out
+    assert "created: 12" in out and "find one: wirk query text='Linear issue [ENG-1]'" in out  # 2 issues, 10 around them
     code, out, err = run("ENG", "SEC")
     assert code == 0 and "warning: SEC is private on Linear: everyone in the wirkspace will read its 1 issues" in out
     assert KEY not in out + err
