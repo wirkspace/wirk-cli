@@ -67,6 +67,22 @@ def test_an_unknown_outcome_of_a_request_file_says_to_run_the_same_command_again
     assert f"wirk query receipt={body['request_id']}" in err and "--request-id" not in err
 
 
+@pytest.mark.parametrize("verb, body", [
+    ("write", {"request_id": "w-9", "operations": [{"op": "item.create", "data": {"title": "T"}}]}),
+    ("review", {"request_id": "r-9", "decisions": [{"id": "c4a1e902", "revision": 1, "action": "accept", "reason": "Fine"}]}),
+    ("admin", {"request_id": "a-1", "operations": [{"op": "principal.create", "id": "bob", "kind": "person", "name": "Bob"}]})])
+def test_the_retry_of_a_request_file_keeps_json(run, home, monkeypatch, verb, body):
+    """A retry printed without --json would answer in text to an agent that asked for JSON."""
+    if verb == "admin":
+        monkeypatch.setattr(cli, "at_terminal", lambda: None)
+        monkeypatch.setattr("builtins.input", lambda prompt: "admin a-1")
+        write_token(home / "person-token", PERSON_TOKEN)
+    (home.parent / "body.json").write_text(json.dumps(body))
+    code, out, err, fake = run([verb, "--request", "body.json", "--json"],
+                               failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and f"Run the same command again: wirk {verb} --request body.json --json" in out
+
+
 def test_an_unknown_admin_outcome_says_to_run_the_same_command_again(run, home, monkeypatch):
     """wirk admin takes its request ID from the file and has no --request-id; resending the file replays the receipt,
     while query receipt= finds only writes, reviews and uploads."""
