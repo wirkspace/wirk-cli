@@ -371,7 +371,7 @@ class Importer:
         attachments = [a for a in record.attachments if not a.comment]
         fields = self.fields_of(record)
         plans = [self.seal(made, record, fields, made.work, [archive], attachments)]
-        for number, part in enumerate(render.discussion(self.ctx, record), 1):
+        for number, part in enumerate(render.discussion(self.ctx, record, made), 1):
             self.counts.update(part.counts)
             files = [(f"{self.prefix}-comments-{record.ident}.json", render.archive(record.raw_comments, self.withheld, self.counts))] \
                 if number == 1 else []
