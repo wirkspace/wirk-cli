@@ -36,8 +36,10 @@ PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
 # ---------------------------------------------------------------- the queries
 
 REF = "id identifier team { id key private }"
+# An issue page of 25 asks about 3,600 of the 10,000 points one query may cost (by Linear's published rules: 0.1 a
+# property, 1 an object, children times their page size); the real cost is read from X-Complexity on a real workspace.
 NESTED = {"labels": ("first: 20", "id"), "attachments": ("first: 20", "id title subtitle url sourceType"),
-          "history": ("first: 50", "id createdAt actorId fromStateId toStateId fromAssigneeId toAssigneeId fromPriority "
+          "history": ("first: 20", "id createdAt actorId fromStateId toStateId fromAssigneeId toAssigneeId fromPriority "
                       "toPriority fromEstimate toEstimate fromDueDate toDueDate fromCycleId toCycleId fromProjectId toProjectId "
                       "fromParentId toParentId fromTeamId toTeamId fromTitle toTitle addedLabelIds removedLabelIds archived "
                       "trashed autoArchived autoClosed updatedDescription")}
