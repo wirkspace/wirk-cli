@@ -244,8 +244,8 @@ class Linear:
             [("sub_issue", self.reference(child)) for child in children] + \
             sorted(((kind, self.reference(other)) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
         # an identifier from before a move names its team: shown, and kept in the archive, only as any reference is (§3.9)
-        previous = [{"identifier": key, "team": {"key": key.rsplit("-", 1)[0], "private": key.rsplit("-", 1)[0] not in self.keys
-                                                 or self.keys[key.rsplit("-", 1)[0]]["private"]}} for key in node["previousIdentifiers"]]
+        previous = [{"identifier": key, "team": {"key": prefix, "private": self.keys.get(prefix, {"private": True})["private"]}}
+                    for key in node["previousIdentifiers"] for prefix in [key.rsplit("-", 1)[0]]]
         relations += [("previously", render.Ref(p["identifier"], p["team"]["key"], not p["team"]["private"])) for p in previous]
         raw = {"team": team["key"], "relations": [relation for _, _, relation in related],
                "issue": {**{key: value for key, value in node.items() if key != "updatedAt"}, "previousIdentifiers": previous}}
