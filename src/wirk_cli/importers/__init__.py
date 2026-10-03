@@ -193,7 +193,7 @@ class Run:
                    "skipped_not_public": census.skipped, "named_not_public": census.named_private, "issues": census.issues, "comments": census.comments,
                    "pull_requests_skipped": census.pulls, "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts),
                    "header_only": large, "missing_options": {k: sorted(v) for k, v in importer.missing.items()},
-                   "fields_not_set_up": sorted(importer.unset), "forged_lines_ignored": importer.index.forged,
+                   "fields_not_set_up": sorted(importer.unset), "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None}
         error = {"code": getattr(stopped, "code", "stopped"), "message": str(stopped), "hint": getattr(stopped, "fix", None) or getattr(stopped, "hint", None) or ""}
         if self.json:
@@ -217,6 +217,9 @@ class Run:
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
         if fields:
             lines.append("fields: " + " · ".join(fields))
+        if importer.not_members:
+            lines.append(f"owners: {', '.join(sorted(importer.not_members))} not in this wirkspace, so their issues have no owner; "
+                         f"add them, or change {self.map_file}")
         planned = getattr(importer, "planned", set())
         lines.append(f"links: {len(planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
                      f"{importer.counts['linked']} written this run")

@@ -20,6 +20,14 @@ class WirkError(Exception):
         self.code, self.problem = problem.get("code", "error"), problem
 
 
+class NotMember(Exception):
+    """WIRK refused an owner: the issue is planned again without them."""
+
+    def __init__(self, owner: str):
+        super().__init__(owner)
+        self.owner = owner
+
+
 @dataclass
 class Outcome:
     key: str
@@ -177,6 +185,7 @@ class Importer:
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
+        self.not_members = set()  # owners WIRK refused this run: their issues are planned without an owner
         self.outcomes, self.notes, self.index, self.progress = [], {}, None, progress or (lambda done, total: None)
 
     # ---------------------------------------------------------------- the run
@@ -196,13 +205,22 @@ class Importer:
         self.keys = {record.ident: record.key for record in records}
         self.plan_links(records)
         for done, record in enumerate(records, 1):
-            self.outcomes += self.guarded(record.key, "issue", self.one, record)
+            self.outcomes += self.guarded(record.key, "issue", self.attempt, record)
             self.progress(done, len(records))
         if not self.dry_run:
             self.outcomes += self.link_pass()
         if complete:
             self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
+
+    def attempt(self, record: render.Record) -> list:
+        counts = self.counts.copy()
+        try:
+            return self.one(record)
+        except NotMember as refused:  # nothing of this issue was written: plan it again, without that owner
+            self.counts = counts
+            self.not_members.add(refused.owner)
+            return self.attempt(record)
 
     def guarded(self, key: str, kind: str, work, *args) -> list:
         """One issue's outcomes; WIRK's refusal, or a write whose outcome stays unknown, is an error for that issue only."""
@@ -346,7 +364,8 @@ class Importer:
         return {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
 
     def plans(self, record: render.Record) -> list:
-        made = render.work_item(self.ctx, record, self.users, self.notes)
+        users = {user: wirk_id for user, wirk_id in self.users.items() if wirk_id not in self.not_members}
+        made = render.work_item(self.ctx, record, users, self.notes)
         self.counts.update(made.counts)
         archive = (f"{self.prefix}-issue-{record.ident}.json", render.archive(record.raw, self.withheld, self.counts))
         attachments = [a for a in record.attachments if not a.comment]
@@ -482,6 +501,10 @@ class Importer:
             if answer["ok"]:
                 break
             problem = answer["errors"][0]
+            operation = body["operations"][problem.get("input_index", 0)]
+            owner = ((operation.get("data") or operation.get("patch") or {}).get("work") or {}).get("owner_id")
+            if problem["code"] == "unknown_owner" and owner and owner not in self.not_members:
+                raise NotMember(owner)
             if problem["code"] == "prerequisite_incomplete":
                 return each("skipped", "completing it needs its prerequisites completed first (a link made in WIRK)")
             fixed = self.fix(record, body, problem)
@@ -505,9 +528,6 @@ class Importer:
         """Change the refused write so it can go through, and say what changed; None when it cannot."""
         operation = body["operations"][problem.get("input_index", 0)]
         part = operation.get("data") or operation.get("patch") or {}
-        if problem["code"] == "unknown_owner" and operation["op"] in ("item.create", "item.edit"):
-            owner = (part.get("work") or {}).pop("owner_id", None)
-            return f"owner {owner} is not a member, so the issue has no owner"
         if problem["code"] == "likely_duplicate" and operation["op"] == "item.create":
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
             # an item the importer made is kept separate only when the index knows it as another issue's work

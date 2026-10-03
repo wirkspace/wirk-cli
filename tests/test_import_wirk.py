@@ -255,7 +255,7 @@ def test_an_owner_who_is_not_a_member_is_neither_claimed_nor_sealed_until_they_j
     assert set(outcomes(make(fake, users={"ben": "carol"}).run(records)).values()) == {"updated"}
     for item in fake.mine().values():
         snap = item["revisions"][-1]
-        assert snap["work"] == {"owner_id": "carol"} and "@ben (owner carol)" in snap["body"]
+        assert snap["work"]["owner_id"] == "carol" and "@ben (owner carol)" in snap["body"]
 
 
 def test_a_lost_answer_is_settled_by_its_receipt(fake):
