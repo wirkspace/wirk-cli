@@ -252,8 +252,8 @@ def test_an_issue_maps_to_a_record_with_fields_only_for_small_current_sets(folde
     text = json.dumps(record.raw)
     assert "emailAddress" not in text and "avatarUrls" not in text and "lastViewed" not in text and "isWatching" not in text
     assert "hasVoted" not in text and '"updated"' not in json.dumps(record.raw["issue"]["fields"])
-    assert "Watchers" not in header and "Time:" not in header  # counts that move without the issue: the archive only
-    assert record.raw["issue"]["fields"]["watches"]["watchCount"] == 3 and record.raw["issue"]["fields"]["timespent"] == 8400
+    assert "Watchers" not in header and "Time:" not in header  # counts that churn without the issue changing: kept nowhere
+    assert not {"watches", "votes", "timespent", "timeestimate", "timeoriginalestimate"} & set(record.raw["issue"]["fields"])
 
 
 @pytest.mark.parametrize("category, resolution, meaning", [("new", None, "open"), ("indeterminate", None, "in_progress"),
@@ -391,3 +391,20 @@ def test_a_site_whose_cloud_id_cannot_be_read_stops_cleanly(answer, folder):
     with pytest.raises(Stop) as stop:
         adapter(fake, folder).check()
     assert "cloud" in str(stop.value).lower() and "cloud_id" in stop.value.fix and TOKEN not in str(stop.value) + stop.value.fix
+
+
+
+def test_a_watch_or_vote_alone_leaves_the_work_item_current(folder):
+    from import_fakes import FakeWirk
+    from test_import_wirk import make, outcomes
+    store = FakeWirk(fields={})
+    node = issue(1, watches={"watchCount": 1, "isWatching": False}, votes={"votes": 0, "hasVoted": False}, timespent=60,
+                 aggregatetimespent=60, timetracking={"timeSpent": "1m", "timeSpentSeconds": 60})
+    found, census, records = read(FakeJira([node]), folder)
+    assert set(outcomes(make(store, ctx=found.context(census.selected)).run(records)).values()) == {"created"}
+    node["fields"].update(watches={"watchCount": 5, "isWatching": True}, votes={"votes": 3, "hasVoted": True}, timespent=120,
+                          aggregatetimespent=120, timetracking={"timeSpent": "2m", "timeSpentSeconds": 120})
+    found, census, records = read(FakeJira([node]), folder)
+    before = len(store.writes())
+    assert set(outcomes(make(store, ctx=found.context(census.selected)).run(records)).values()) == {"current"}
+    assert len(store.writes()) == before
