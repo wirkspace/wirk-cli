@@ -255,12 +255,13 @@ class Linear:
                 holds[link["initiative"]["id"]].append(self.projects[link["project"]["id"]])
         initiatives = [i for i in lists["initiatives"] if not holds[i["id"]] or {p["id"] for p in holds[i["id"]]} & ids]
         ids |= {node["id"] for node in milestones + initiatives}
-        related = defaultdict(list)
+        related, known = defaultdict(list), {**self.projects, **self.milestones}
         for found in lists["projectRelations"]:  # anchored to a milestone when it names one
             blocker, blocked = found["projectMilestone"] or found["project"], found["relatedProjectMilestone"] or found["relatedProject"]
-            kinds = ("blocking", "blocked_by") if found["type"] == "blocks" else ("related", "related")
-            related[blocker["id"]].append((kinds[0], self.part(blocked["id"])))
-            related[blocked["id"]].append((kinds[1], self.part(blocker["id"])))
+            if blocker["id"] in known and blocked["id"] in known:
+                kinds = ("blocking", "blocked_by") if found["type"] == "blocks" else ("related", "related")
+                related[blocker["id"]].append((kinds[0], self.part(blocked["id"])))
+                related[blocked["id"]].append((kinds[1], self.part(blocker["id"])))
         for initiative in initiatives:
             for project in sorted(holds[initiative["id"]], key=lambda p: p["name"]):
                 related[project["id"]].append(("initiative", self.part(initiative["id"])))
