@@ -66,7 +66,7 @@ Quote a title or words with spaces. A result line "label: command" is the next c
 KEY=VALUE: kind=work|doc|context, level (with kind=context), owner (me or an ID), workspace_id,
 and the wirkspace's fields (status=open; a comma list for several; KEY= clears on edit).
 Context (kind=context) is the organization and its initiatives. A change to it applies directly
-when your person may make it; otherwise it is refused with requires_review: propose it with --propose --reason.
+when you may make it; otherwise it is refused with requires_review: propose it with --propose --reason.
 --link TYPE is related_to, contributes_to or requires. --evidence is a completion's note: the tests
 that pass, a link, a file path, or a file attached with --upload. --propose needs --reason.
 Every result names the IDs it created. After an uncertain result, run the same command again with

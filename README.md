@@ -29,7 +29,7 @@ wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py pass
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 
-Only people decide proposals: an agent's proposal waits for a person, who decides it with the commands under [For people](#for-people). A change to context (the organization and its initiatives) applies directly when your person may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
+Only people decide proposals: an agent's proposal waits for a person, who decides it with the commands under [For people](#for-people). A change to context (the organization and its initiatives) applies directly when you may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
 
 `ID@N` names the revision you read (`rN` on a card), so a change never overwrites one you did not see. Results are text; `--json` gives the data. A result line `label: command` is the next command: type `wirk` and what follows the colon. After an uncertain result, run the same command again with the `--request-id` it printed; it applies once.
 
