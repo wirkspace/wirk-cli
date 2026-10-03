@@ -107,7 +107,10 @@ PENDING_TEXT = ("Approve this machine: https://app.wirk.life/device?code=BDFG-HJ
                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\nafter approving: login")
 
 
-def device(states, *, text_logged_in="Logged in as alice-agents · agent of alice · account Acme"):
+LOGGED_IN = "Logged in as alice-agents · agent of alice · account Acme\nnext: status"  # the service's words
+
+
+def device(states, *, text_logged_in=LOGGED_IN):
     """A service whose /v2/login answers pending until `states` runs out, then logged in."""
     queue = list(states)
 
@@ -182,3 +185,8 @@ def test_without_web_sign_in_the_digest_flow_stays(fresh, capsys, clock, missing
     code, out, err, requests = login([], answer, capsys)
     token = (fresh / "agent-token").read_text()
     assert code == 0 and hashlib.sha256(token.encode()).hexdigest() in out and token not in out + err
+
+
+def test_the_services_next_line_is_the_only_one(fresh, capsys, clock):
+    code, out, err, requests = login([], device([]), capsys)
+    assert code == 0 and out == LOGGED_IN + "\n"
