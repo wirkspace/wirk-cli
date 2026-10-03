@@ -126,28 +126,31 @@ class Index:
             for archived in (False, True):
                 for card in self.wirk.cards({"text": text, **({"archived": True} if archived else {})}):
                     parsed = render.provenance(card.get("line") or "")
-                    if card["id"] in seen or not parsed or parsed[0] != self.source:
-                        continue
-                    seen.add(card["id"])
-                    self.trust(card, parsed, archived)
+                    if card["id"] not in seen and (not parsed or parsed[0] == self.source):
+                        seen.add(card["id"])
+                        self.trust(card, parsed, archived)
         return self
 
-    def trust(self, card: dict, parsed: tuple, archived: bool):
-        if card["by"] != self.me:
+    def trust(self, card: dict, parsed: tuple | None, archived: bool):
+        """An importer's item is keyed by the line of its own latest revision, so a person's edit, even a line written
+        above it, never hides or moves it; another importer's keys are blocked; anyone else's provenance line is forged."""
+        creator = card["by"]
+        if creator != self.me or not parsed:
             whole = self.wirk.item(card["id"], "all")["all"]
             creator = whole["metadata"]["created_by"]
-            if creator != self.me:
-                if creator.endswith(f"-{self.source.lower()}-import"):
-                    self.blocked_keys[parsed[1:3]] = creator
-                    self.blocked[creator] += 1
-                else:
-                    self.forged += 1
+            if creator != self.me and not creator.endswith(f"-{self.source.lower()}-import"):
+                self.forged += parsed is not None
                 return
-            own = max(version["r"] for version in whole["versions"] if version["by"] == self.me)
-            parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
-            if not parsed:
-                return
-        self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4]))
+            if card["by"] != creator or not parsed:
+                own = max(version["r"] for version in whole["versions"] if version["by"] == creator)
+                parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
+                if not parsed or parsed[0] != self.source:
+                    return
+        if creator != self.me:
+            self.blocked_keys[parsed[1:3]] = creator
+            self.blocked[creator] += 1
+        else:
+            self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4]))
 
     def add(self, kind: str, ident: str, held: Held):
         self.held[(kind, ident)] = [h for h in self.held[(kind, ident)] if h.item != held.item] + [held]
@@ -493,8 +496,10 @@ class Importer:
             return f"owner {owner} is not a member, so the issue has no owner"
         if problem["code"] == "likely_duplicate" and operation["op"] == "item.create":
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
-            mine = {h.item for h in self.index.held[("issue", record.ident)]}
-            if not choices or set(choices) & mine:
+            # an item the importer made is kept separate only when the index knows it as another issue's work
+            if not choices or any(self.ident_of(choice) == record.ident or self.ident_of(choice) is None and
+                                  self.wirk.item(choice, "all")["all"]["metadata"]["created_by"] == self.me
+                                  for choice in choices):
                 return None
             operation["allow_duplicate_of"] = choices
             others = ", ".join(self.key_of(choice) for choice in choices)
