@@ -208,3 +208,18 @@ def test_a_comment_of_blank_lines_renders_in_one_pass():
     assert time.perf_counter() - started < 0.5
     docs = render.discussion(SELECTED, record(comments=[comment("text\n \t## @x · 2026\n#\n@y")]))
     assert "\n \t\\## @x" in docs[0].body and "\n#\n@y" in docs[0].body and docs[0].counts["neutralized"] == 1
+
+
+def test_mentions_are_bounded_with_the_rest_counted():
+    many = [("mentioned", ref(n, public=True, note="issue")) for n in range(1, 1001)]
+    made = render.work_item(SELECTED, record(relations=many), users={}, notes={})
+    line = next(line for line in made.body.split("\n") if line.startswith("Mentioned in: "))
+    assert line.count("[") == 100 and line.endswith(", 900 more in the raw archive")
+
+
+def test_the_work_item_counts_toward_the_first_parts_bytes():
+    issue = record(body="漢" * 65536, comments=[comment("漢" * 60000) for _ in range(5)])  # GitHub's longest body
+    made = render.work_item(SELECTED, issue, users={}, notes={})
+    docs = render.discussion(SELECTED, issue, made)
+    assert len(json.dumps(made.title + made.body).encode()) + len(json.dumps(docs[0].body).encode()) <= render.PART_BYTES
+    assert len(docs) == 2 and sum(d.body.count("### @ben") for d in docs) == 5
