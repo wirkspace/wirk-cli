@@ -166,7 +166,7 @@ def test_readme_has_a_section_for_people_and_login_help_describes_approval(capsy
     assert "## For people" in readme and "--person" in readme.split("## For people", 1)[1]
     assert cli.main(["login", "--help"]) == 0
     text = capsys.readouterr().out
-    assert "approve" in text and "--person" not in text
+    assert "approve" in text and "login --person" in text  # the main and review help send people here
 
 
 # 9. Simpler: one connection per download, the time zone read once, and --request alone.

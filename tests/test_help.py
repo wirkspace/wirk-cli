@@ -171,3 +171,39 @@ def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
 def test_the_readme_says_what_this_release_changed():
     changes = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
     assert f"### {__version__}" in changes and "wirk import github" in changes.split("\n### ", 2)[1]
+
+
+ALL = [*COMMANDS, "import"]
+
+
+def test_ranking_by_meaning_always_names_pro(capsys):
+    """Free and Team rank by words (decision 65); help never promises meaning ranking without the plan."""
+    for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
+        for line in text.split("\n"):
+            assert "by meaning" not in line or "Pro" in line, line
+
+
+def test_budgets_state_their_range(capsys):
+    assert "max_bytes (1024–65536)" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
+    assert "1024–65536" in help_of(capsys, "status")
+
+
+def test_download_says_file_is_a_file_id(capsys):
+    assert "file ID" in help_of(capsys, "download") and "file ID" in help_of(capsys)
+
+
+def test_write_help_retries_and_parent_revisions(capsys):
+    text = help_of(capsys, "write")
+    assert "contributes_to" in text and "TO@N" in text
+    assert "--request-id it printed" not in text  # --request takes no --request-id; the hint prints the retry
+    assert not [line for line in text.split("\n") if "kind=context" in line and "--propose" in line]
+
+
+def test_the_admin_example_gives_the_person_the_membership(capsys):
+    text = help_of(capsys, "admin")
+    assert '"member.set", "principal_id": "alice", "role"' in text and '"principal_id": "alice-agents", "role"' not in text
+
+
+def test_help_lines_stay_narrow(capsys):
+    for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
+        assert max(len(line) for line in text.split("\n")) <= 120

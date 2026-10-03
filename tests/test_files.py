@@ -75,6 +75,13 @@ def test_storage_refusing_the_bytes_is_reported_without_the_link(run, tmp_path):
     assert code == 1 and "storage_failed" in err and "--request-id u-9" in err and "storage.test" not in out + err
 
 
+def test_the_retry_after_a_storage_refusal_keeps_json(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    answer, state = files_service(put_status=403)
+    code, out, err, fake = run(["upload", "a.txt", "--request-id", "u-9", "--json"], answer)
+    assert code == 1 and "storage_failed" in out and "wirk upload a.txt --request-id u-9 --json" in out
+
+
 def test_the_json_answer_leaves_the_links_out(run, tmp_path):
     (tmp_path / "a.txt").write_text("x")
     answer, state = files_service()
