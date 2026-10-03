@@ -199,3 +199,12 @@ def test_long_runs_of_text_render_in_one_pass():
     for text in ("漢" * 600000, "a" * 600000):
         render.work_item(SELECTED, record(body=text), users={}, notes={})
     assert time.perf_counter() - started < 2
+
+
+def test_a_comment_of_blank_lines_renders_in_one_pass():
+    import time
+    started = time.perf_counter()
+    render.discussion(SELECTED, record(comments=[comment(" \n" * 32768 + "no heading")]))  # 64 KB
+    assert time.perf_counter() - started < 0.5
+    docs = render.discussion(SELECTED, record(comments=[comment("text\n \t## @x · 2026\n#\n@y")]))
+    assert "\n \t\\## @x" in docs[0].body and "\n#\n@y" in docs[0].body and docs[0].counts["neutralized"] == 1
