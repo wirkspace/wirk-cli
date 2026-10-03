@@ -523,7 +523,8 @@ class Importer:
             notes.append(f"confirmed by its receipt {body['request_id']}")
         outcomes = []
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
-            self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, False, plan.digest))
+            self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
+                                                         plan.digest))
             message = "; ".join(filter(None, [(said or {}).get(plan.kind, ""), *notes]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
