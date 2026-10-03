@@ -154,6 +154,7 @@ class Jira:
         issues = [node for node in issues if node not in restricted]
         self.skipped = {node["key"] for node in restricted} | {node["id"] for node in restricted}  # never named around them
         self.selected = set(wanted) | {key.rsplit("-", 1)[0] for key in named}
+        self.shown_projects, self.moved_from = {projects[k]["id"] for k in self.selected if k in projects}, set()
         histories = self.changelogs([node["id"] for node in issues])
         children = defaultdict(list)
         for node in issues:
@@ -225,6 +226,9 @@ class Jira:
         gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
             hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
+        for entry in history:  # a move from a project not selected: its project and workflow stay unnamed (§3.9)
+            if any(i.get("field") == "project" and i.get("from") not in self.shown_projects for i in entry.get("items", [])):
+                self.moved_from |= {i.get("from") for i in entry["items"] if i.get("field") == "Workflow"}
         kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
         kept.update(attachment=attachments, parent=bare(f.get("parent")), subtasks=[bare(s) for s in f.get("subtasks") or []],
                     issuelinks=[{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
@@ -338,6 +342,10 @@ class Jira:
         def check(node: dict) -> bool:
             if isinstance(node.get("key"), str) and ISSUE_KEY.fullmatch(node["key"]):
                 return hidden(node["key"])
+            if node.get("field") == "project":
+                return node.get("from") not in self.shown_projects
+            if node.get("field") == "Workflow" and node.get("from") in self.moved_from:
+                return True
             return "field" in node and any(hidden(key) for value in node.values() if isinstance(value, str)
                                            for key in ISSUE_KEY.findall(value))
         return check
