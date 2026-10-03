@@ -2,7 +2,6 @@
 GETs only. It never reads gh's token and never writes to GitHub; pull requests are counted, never read."""
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import re
@@ -131,19 +130,6 @@ def more_query(name: str, projects: bool) -> str:
             f"{{ pageInfo {{ hasNextPage endCursor }} {nodes} }} }} }} }}")
 
 
-@dataclass
-class Census:
-    selected: list = field(default_factory=list)
-    skipped: list = field(default_factory=list)  # (repository, issues) not public and not named
-    named_private: list = field(default_factory=list)  # (repository, visibility, issues) not public, named (§3.9)
-    pulls: int = 0
-    issues: int = 0
-    comments: int = 0
-    external_images: int = 0
-    points: int = 0  # GraphQL points the read cost
-    notes: list = field(default_factory=list)
-
-
 def gh(args: list, stdin: str | None = None) -> tuple[int, str, str]:
     try:
         done = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True)
@@ -196,7 +182,7 @@ class Gate:
 
 
 class GitHub:
-    source = SOURCE
+    source, noun, unit, needs_selection = SOURCE, NOUN, "GraphQL points", True
 
     def __init__(self, run=None, sleep=None, http=None):
         self.run, self.scopes, self.projects, self.http = run or gh, set(), False, http
@@ -259,7 +245,7 @@ class GitHub:
     def context(self, selected: list) -> render.Context:
         return render.Context(SOURCE, frozenset(selected), NOUN, LABELS)
 
-    def repositories(self, selection: list, census: Census) -> list:
+    def repositories(self, selection: list, census: render.Census) -> list:
         named = [word for word in selection if "/" in word]
         owners = [word for word in selection if "/" not in word]
         found = {}
@@ -291,8 +277,8 @@ class GitHub:
         census.pulls = sum(repo["pullRequests"]["totalCount"] for repo in found.values())
         return [found[name] for name in census.selected]
 
-    def read(self, selection: list) -> tuple[Census, list]:
-        census = Census()
+    def read(self, selection: list) -> tuple[render.Census, list]:
+        census = render.Census()
         if not self.projects:
             census.notes.append("projects not read: this gh login lacks read:project; to include them: "
                                 "gh auth refresh -s read:project")
@@ -421,7 +407,7 @@ class GitHub:
             elif value["__typename"] == "IssueFieldMultiSelectValue":
                 fields[name] = [option["name"] for option in value["options"]]
             elif name == "Target date":
-                due = day(value["value"])
+                due = f"{day(value['value'])}T23:59:59Z"
             values.append(f"{name} {', '.join(fields[name]) if name in fields else value['value']}")
         when = ", ".join([*([f"due {day(milestone['dueOn'])}"] if milestone and milestone["dueOn"] else []),
                           *([milestone["state"].lower()] if milestone else [])])

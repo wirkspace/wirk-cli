@@ -2,9 +2,10 @@
 decision for each object, one issue per write, refusals, receipts and files. WIRK's index is the only state."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import io
+import re
 import secrets
 
 from ..client import Failure
@@ -259,7 +260,7 @@ class Importer:
                     else:
                         requires[dependent].add(blocker)
                         self.planned.add(("requires", dependent, blocker))
-                elif relation in ("duplicate_of", "related"):
+                elif relation in ("duplicate_of", "duplicated_by", "related"):
                     self.planned.add(normal("related_to", record.ident, ref.ident))
 
     def single(self, ident: str) -> Held | None:
@@ -376,7 +377,7 @@ class Importer:
                     files, attachments, digest)
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
-        active = [h for h in held if not h.archived]
+        active = [h for h in held if not h.archived or h.by == self.me]  # an archive the importer made is its own to undo
         if len(active) > 1:
             return "ambiguous", None, ", ".join(h.item[5:13] for h in active) + " all claim it"
         if not active:
@@ -409,7 +410,7 @@ class Importer:
         if self.dry_run:  # what --overwrite would replace says who changed it
             return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
                                for plan, action, held, message in decided if action in ("create", "update")] + \
-                self.stale(record, len(plans) - 1)
+                self.stale(record, len(plans) - 1) + self.mirror(record, plans)
         # the work item and the discussion's first part go in one write; later parts one to a write (§3.5)
         together = [entry for entry in acting if entry[0].kind in ("issue", "comments")]
         work = held.item if held else None
@@ -419,7 +420,25 @@ class Importer:
         for entry in acting:
             if entry not in together:
                 outcomes += self.send(record, [entry], work, said)
-        return outcomes + self.stale(record, len(plans) - 1)
+        return outcomes + self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+
+    def mirror(self, record, plans) -> list:
+        """Archive what the source archived, and restore what the importer archived once the source restores it; an archive
+        or an edit someone else made is theirs."""
+        want = record.archived is not None
+        found = [(plan.kind, h) for plan in plans for h in self.index.held.get((plan.kind, record.ident), [])
+                 if h.archived != want and h.by == self.me]
+        word = "archive" if want else "restore"
+        if not found or self.dry_run:
+            return [Outcome(record.key, kind, f"would {word}", item=h.item) for kind, h in found]
+        answer = self.wirk.write({"request_id": self.rid(record), "reason": record.archived or f"Active again in {self.ctx.source}",
+                                  "expect": {h.item: h.r for _, h in found},
+                                  "operations": [{"op": f"item.{word}", "id": h.item} for _, h in found]})
+        if not answer["ok"]:
+            return [Outcome(record.key, "issue", "error", f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}")]
+        for (kind, h), result in zip(found, answer["data"]["results"]):
+            self.index.add(kind, record.ident, replace(h, r=result["revision"], archived=want))
+        return [Outcome(record.key, kind, f"{word}d", item=h.item) for kind, h in found]
 
     def operations(self, record, acting, work):
         operations, expect = [], {}
@@ -580,8 +599,9 @@ class Importer:
     def missing_one(self, ident: str, found: Held) -> list:
         lines = self.wirk.item(found.item, "full")["body"].split("\n")
         key = next((line.split("[", 1)[1].split("]", 1)[0] for line in lines if line.startswith(f"{self.ctx.source} issue [")), ident)
+        scope = re.sub(r"[#-][0-9]+$", "", key)  # acme/api#12 is in acme/api, ENG-12 in ENG
         return [Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; "
-                                                 "nothing was archived", found.item)] if key.split("#")[0] in self.ctx.selected else []
+                                                 "nothing was archived", found.item)] if scope in self.ctx.selected else []
 
 
 def normal(kind: str, source: str, target: str) -> tuple:

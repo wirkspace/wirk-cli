@@ -330,7 +330,8 @@ def test_what_the_source_archived_is_archived_after_its_write_and_restored_with_
     assert set(outcomes(make(fake).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])).values()) == {"current"}
     assert len(fake.writes()) == before
     result = make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)])
-    assert [(o.kind, o.outcome) for o in result if o.key == "acme/api#1"] == [("issue", "restored"), ("comments", "restored")]
+    assert [(o.kind, o.outcome) for o in result if o.key == "acme/api#1"] == [
+        ("issue", "current"), ("comments", "current"), ("issue", "restored"), ("comments", "restored")]
     assert not fake.items[one]["archived"]
     two = item_of_issue(fake, 2)
     fake.as_whom = "bob"  # an archive made by a person is theirs

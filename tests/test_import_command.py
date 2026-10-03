@@ -10,6 +10,7 @@ import pytest
 
 from import_fakes import FakeWirk, refusal
 from test_import_github import FakeGh, node, page, ref, repo
+from test_import_linear import KEY
 from wirk_cli import cli
 from wirk_cli.importers import github, render
 
@@ -213,7 +214,7 @@ def test_a_blocked_dry_run_prints_one_json_answer(world):
 @pytest.fixture
 def linear_world(home, monkeypatch, capsys):
     """The same CLI configuration, with Linear answered by synthetic pages and the key saved owner-only."""
-    from test_import_linear import KEY, FakeLinear, issue
+    from test_import_linear import FakeLinear, issue
     from wirk_cli.importers import linear
     fake = FakeWirk(principal="alice-linear-import", person="alice", fields={})
     fake.tokens = {AGENT: "alice-agents"}

@@ -142,7 +142,7 @@ def test_an_issue_maps_to_a_record():
     assert record.assignees == [("ben", "@ben"), ("ada", "@ada")]
     assert record.fields == {"Repository": ["acme/web"], "Label": ["alpha", "zeta"], "Milestone": ["v1.0"], "Issue type": ["Bug"],
                              "Priority": ["High"]}
-    assert record.due == "2026-11-30"
+    assert record.due == "2026-11-30T23:59:59Z"  # the end of the day, in UTC
     kinds = [(kind, ref.key, ref.public, ref.note) for kind, ref in record.relations]
     assert ("closed_by", "acme/web#9", True, "pull request, merged") in kinds
     assert ("mentioned", "acme/web#9", True, "pull request") in kinds

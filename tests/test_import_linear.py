@@ -133,7 +133,7 @@ def folder(tmp_path):
 
 
 def adapter(fake, folder, slept=None):
-    return linear.Linear(http=httpx.Client(transport=httpx.MockTransport(fake)), sleep=(slept or []).append, folder=folder)
+    return linear.Linear(http=httpx.Client(transport=httpx.MockTransport(fake)), sleep=(slept if slept is not None else []).append, folder=folder)
 
 
 def read(fake, folder, selection=()):
