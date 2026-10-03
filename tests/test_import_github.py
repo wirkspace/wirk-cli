@@ -355,3 +355,23 @@ def test_a_pause_extended_while_a_reader_sleeps_holds_it_again():
     gate.hold(10)
     gate.wait()
     assert slept == [10, 30]
+
+
+@pytest.mark.parametrize("refusals, read_through", [(4, True), (5, False)])
+def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_through):
+    fake = FakeGh([repo("acme/web")], {"acme/web": [node(1)]})
+    slept, tries = [], []
+
+    def limited(args, stdin=None):
+        if stdin and "page: issues" in stdin and len(tries) < refusals:
+            tries.append(1)
+            return 1, json.dumps({"message": "You have exceeded a secondary rate limit"}), "gh: HTTP 403"
+        return fake(args, stdin)
+
+    adapter = github.GitHub(run=limited, sleep=slept.append)
+    adapter.check()
+    if read_through:
+        assert len(adapter.read(["acme"])[1]) == 1 and [round(s) for s in slept] == [60, 120, 240, 480]
+    else:
+        with pytest.raises(github.Stop):
+            adapter.read(["acme"])
