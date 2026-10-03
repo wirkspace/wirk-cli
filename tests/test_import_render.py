@@ -223,3 +223,15 @@ def test_the_work_item_counts_toward_the_first_parts_bytes():
     docs = render.discussion(SELECTED, issue, made)
     assert len(json.dumps(made.title + made.body).encode()) + len(json.dumps(docs[0].body).encode()) <= render.PART_BYTES
     assert len(docs) == 2 and sum(d.body.count("### @ben") for d in docs) == 5
+
+
+def test_comment_marks_follow_the_heading_and_the_source_names_itself():
+    ctx = Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"), labels=SELECTED.labels)
+    docs = render.discussion(ctx, record(comments=[comment("A reply.", marks=("reply to @ada",)), comment("Old", hidden="outdated")]))
+    assert "### @ben · 2026-09-02T11:00:00Z · reply to @ada" in docs[0].body
+    assert "hidden on Linear as outdated" in docs[0].body and "GitHub" not in docs[0].body.split("\n", 3)[3]
+
+
+def test_a_due_instant_is_written_as_the_adapter_gives_it():
+    made = render.work_item(SELECTED, record(due="2026-03-09T06:59:59Z"), users={}, notes={})
+    assert made.work == {"due_at": "2026-03-09T06:59:59Z"}

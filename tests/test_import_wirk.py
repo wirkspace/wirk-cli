@@ -217,8 +217,10 @@ def test_another_importers_items_block_their_keys(fake):
 def test_archived_skipped_ambiguous_and_missing(fake):
     make(fake).run([issue(1), issue(2), issue(3)])
     items = {item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]: i for i, item in fake.mine().items()}
+    fake.as_whom = "bob"  # a person archives it
     fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {items["3000000001"]: 1},
                 "operations": [{"op": "item.archive", "id": items["3000000001"]}]})
+    fake.as_whom = None
     twin = fake.items[items["3000000002"]]["revisions"][-1]
     fake.write({"request_id": "t-1", "operations": [{"op": "item.create", "data": {"title": "Twin", "body": twin["body"], "work": {}}}]})
     before = len(fake.writes())
@@ -304,8 +306,10 @@ def test_parts_go_one_to_a_write_and_stale_parts_are_archived(fake):
 def test_an_issue_whose_work_item_is_archived_or_ambiguous_gets_no_new_discussion(fake):
     make(fake).run([issue(1), issue(2)])
     items = {item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]: i for i, item in fake.mine().items()}
+    fake.as_whom = "bob"  # a person archives it
     fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {items["3000000001"]: 1},
                 "operations": [{"op": "item.archive", "id": items["3000000001"]}]})
+    fake.as_whom = None
     twin = fake.items[items["3000000002"]]["revisions"][-1]
     fake.write({"request_id": "t-1", "operations": [{"op": "item.create", "data": {"title": "Twin", "body": twin["body"], "work": {}}}]})
     before = len(fake.writes())
@@ -313,3 +317,25 @@ def test_an_issue_whose_work_item_is_archived_or_ambiguous_gets_no_new_discussio
     assert result == {("acme/api#1", "issue"): "skipped", ("acme/api#1", "comments"): "skipped",
                       ("acme/api#2", "issue"): "ambiguous", ("acme/api#2", "comments"): "ambiguous"}
     assert len(fake.writes()) == before
+
+
+def test_what_the_source_archived_is_archived_after_its_write_and_restored_with_it(fake):
+    gone = "Archived in Linear on 2026-03-01"
+    first = make(fake).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])
+    assert [(o.kind, o.outcome) for o in first if o.key == "acme/api#1"] == [
+        ("issue", "created"), ("comments", "created"), ("issue", "archived"), ("comments", "archived")]
+    one = item_of_issue(fake, 1)
+    assert fake.items[one]["archived"] and fake.writes()[1]["reason"] == gone
+    before = len(fake.writes())
+    assert set(outcomes(make(fake).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])).values()) == {"current"}
+    assert len(fake.writes()) == before
+    result = make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)])
+    assert [(o.kind, o.outcome) for o in result if o.key == "acme/api#1"] == [("issue", "restored"), ("comments", "restored")]
+    assert not fake.items[one]["archived"]
+    two = item_of_issue(fake, 2)
+    fake.as_whom = "bob"  # an archive made by a person is theirs
+    fake.write({"request_id": "bob-a", "reason": "Not ours", "expect": {two: 1}, "operations": [{"op": "item.archive", "id": two}]})
+    fake.as_whom = None
+    assert outcomes(make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)]))[("acme/api#2", "issue")] == "skipped"
+    dry = make(fake, dry_run=True).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])
+    assert ("issue", "would archive") in [(o.kind, o.outcome) for o in dry if o.key == "acme/api#1"]

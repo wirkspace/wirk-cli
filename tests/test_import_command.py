@@ -208,3 +208,45 @@ def test_a_blocked_dry_run_prints_one_json_answer(world):
     code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
     answer = json.loads(out)  # one document
     assert code == 2 and not answer["ok"] and "bob-github-import" in answer["errors"][0]["message"]
+
+
+@pytest.fixture
+def linear_world(home, monkeypatch, capsys):
+    """The same CLI configuration, with Linear answered by synthetic pages and the key saved owner-only."""
+    from test_import_linear import KEY, FakeLinear, issue
+    from wirk_cli.importers import linear
+    fake = FakeWirk(principal="alice-linear-import", person="alice", fields={})
+    fake.tokens = {AGENT: "alice-agents"}
+    source = FakeLinear([issue(1, labels={"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [{"id": "l-bug"}]}),
+                         issue(2, "OPS"), issue(3, "SEC")])
+    monkeypatch.setattr(linear, "TRANSPORT", httpx.MockTransport(source))
+    monkeypatch.setattr(linear.time, "sleep", lambda seconds: None)
+    (home / "import").mkdir(mode=0o700)
+    (home / "import" / "linear-key").write_text(KEY)
+    os.chmod(home / "import" / "linear-key", 0o600)
+
+    def run(*argv):
+        code = cli.main(["import", "linear", *argv], transport=httpx.MockTransport(fake))
+        out = capsys.readouterr()
+        return code, out.out, out.err
+
+    return {"fake": fake, "linear": source, "run": run, "home": home}
+
+
+def test_linear_public_teams_by_default_then_the_import_as_its_own_importer(linear_world):
+    run, fake = linear_world["run"], linear_world["fake"]
+    code, out, err = run("--dry-run")
+    assert code == 0, out + err
+    assert "selection: 2 teams · 2 issues" in out and "skipped, not public: SEC." in out
+    assert "wirk import linear ENG OPS SEC --dry-run" in out and "complexity points" in out and "pull requests" not in out
+    setup = json.loads((linear_world["home"] / "import" / "linear-setup.json").read_text())
+    assert setup["operations"][0]["id"] == "alice-linear-import" and setup["operations"][0]["name"] == "Linear importer"
+    assert {"team", "label", "workflow"} <= {op["field"]["key"] for op in setup["operations"] if op["op"] == "field.create"}
+    token = (linear_world["home"] / "import" / "wirk-token-linear-import").read_text().strip()
+    fake.tokens[token] = "alice-linear-import"
+    code, out, err = run()
+    assert code == 0, out + err
+    assert "created: 2" in out and "find one: wirk query text='Linear issue [ENG-1]'" in out
+    code, out, err = run("ENG", "SEC")
+    assert code == 0 and "warning: SEC is private on Linear: everyone in the wirkspace will read its 1 issues" in out
+    assert KEY not in out + err
