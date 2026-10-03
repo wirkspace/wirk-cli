@@ -11,7 +11,7 @@
 # runs wirk login. It never uses sudo, and running it again is safe.
 set -eu
 
-VERSION="${WIRK_VERSION:-0.3.0}"
+VERSION="${WIRK_VERSION:-0.3.1}"
 BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the releases live; a mirror or a test may change it
 DRY=0
 YES=0
