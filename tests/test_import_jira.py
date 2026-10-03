@@ -129,7 +129,7 @@ class FakeJira:
 def folder(tmp_path):
     path = tmp_path / "import"
     path.mkdir(mode=0o700)
-    (path / "jira-key").write_text(json.dumps({"site": "acme.atlassian.net", "email": "admin@acme.example", "token": TOKEN}))
+    (path / "jira-key").write_text(json.dumps({"site": "acme.atlassian.net", "email": "admin@example.com", "token": TOKEN}))
     os.chmod(path / "jira-key", 0o600)
     return path
 
@@ -154,7 +154,7 @@ def by_key(records):
 def test_the_key_file_holds_site_login_and_token_owner_only_and_only_atlassian_hears_them(folder):
     fake = FakeJira([issue(1)])
     read(fake, folder)
-    expected = "Basic " + base64.b64encode(f"admin@acme.example:{TOKEN}".encode()).decode()
+    expected = "Basic " + base64.b64encode(f"admin@example.com:{TOKEN}".encode()).decode()
     for request in fake.requests:
         if request.url.path == "/_edge/tenant_info":
             assert request.url.host == "acme.atlassian.net" and "authorization" not in request.headers
