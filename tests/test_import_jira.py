@@ -14,7 +14,8 @@ from wirk_cli.importers import jira, render
 from wirk_cli.importers.render import Stop
 
 TOKEN = "ATATT3x" + "T" * 40
-BASE = "https://api.atlassian.com/ex/jira/cloud-1"
+CLOUD = "4a1b2c3d-0000-4000-8000-00000000c10d"
+BASE = f"https://api.atlassian.com/ex/jira/{CLOUD}"
 
 
 def adf(*paragraphs):
@@ -76,18 +77,19 @@ class FakeJira:
     def __init__(self, issues, changelogs=None, remote=None, comments=None, files=None):
         self.issues, self.changelogs, self.remote = list(issues), changelogs or {}, remote or {}
         self.more_comments, self.files, self.requests, self.limited, self.captcha = comments or {}, files or {}, [], 0, False
+        self.tenant = None  # tenant_info's answer, when a test needs another
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         url = urlsplit(str(request.url))
         if url.path == "/_edge/tenant_info":
-            return httpx.Response(200, json={"cloudId": "cloud-1"})
+            return self.tenant if self.tenant is not None else httpx.Response(200, json={"cloudId": CLOUD})
         if self.captcha:
             return httpx.Response(401, headers={"X-Seraph-LoginReason": "AUTHENTICATION_DENIED"})
         if self.limited:
             self.limited -= 1
             return httpx.Response(429, headers={"Retry-After": "7", "RateLimit-Reason": "jira-burst-based"})
-        path, query = url.path.removeprefix("/ex/jira/cloud-1"), parse_qs(url.query)
+        path, query = url.path.removeprefix(f"/ex/jira/{CLOUD}"), parse_qs(url.query)
         if path == "/rest/api/3/myself":
             return httpx.Response(200, json=ADA)
         if path == "/rest/api/3/project/search":
@@ -242,7 +244,6 @@ def test_an_issue_maps_to_a_record_with_fields_only_for_small_current_sets(folde
                  "Type: Task · Status: In Review (indeterminate) · Resolution: none · Priority: High · Project: SEED (Seed project)",
                  "Labels: alpha, ünïcødé · Components: API, Web · Fix versions: 1.2, 1.0 · Affects versions: 1.1",
                  "Sprints: Sprint 41 (closed), Sprint 42 (active) · Story points: 5 · Due: 2026-10-15",
-                 "Time: estimate 3h, remaining 1h, logged 2h 20m", "Watchers at import: 3 · Votes: 2",
                  "Customer tier: Gold · Owner: Team A · Region: EMEA › Germany · Build: build-77", "Web links: Runbook https://example.com/runbook"]:
         assert line in header
     assert record.body == "\\## Steps\n\n@Ada Example knows.\n\n## Acceptance notes\n\nMust not double charge."
@@ -251,6 +252,8 @@ def test_an_issue_maps_to_a_record_with_fields_only_for_small_current_sets(folde
     text = json.dumps(record.raw)
     assert "emailAddress" not in text and "avatarUrls" not in text and "lastViewed" not in text and "isWatching" not in text
     assert "hasVoted" not in text and '"updated"' not in json.dumps(record.raw["issue"]["fields"])
+    assert "Watchers" not in header and "Time:" not in header  # counts that move without the issue: the archive only
+    assert record.raw["issue"]["fields"]["watches"]["watchCount"] == 3 and record.raw["issue"]["fields"]["timespent"] == 8400
 
 
 @pytest.mark.parametrize("category, resolution, meaning", [("new", None, "open"), ("indeterminate", None, "in_progress"),
@@ -319,3 +322,72 @@ def test_attachments_are_files_fetched_without_redirects_and_images_name_them(fo
     record = records[0]
     assert record.body == "[attached: shot.png]" and record.attachments[0].name.endswith("-shot.png")
     assert found.download(record.attachments[0]) == b"PNG"
+
+
+
+# ---------------------------------------------------------------- the review's findings
+
+def test_a_skipped_restricted_issue_is_never_named_nor_titled_by_the_issues_around_it(folder):
+    breach = issue(2, security={"name": "Staff only"}, summary="Breach of the payment vault")
+    visible = issue(1, parent=ref("SEED-2", "20002", "Breach of the payment vault"), subtasks=[ref("SEED-2", "20002", "Breach of the payment vault")],
+                    issuelinks=[{"id": "600", "type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+                                 "outwardIssue": ref("SEED-2", "20002", "Breach of the payment vault")},
+                                {"id": "601", "type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+                                 "outwardIssue": ref("SEED-3", "20003", "A visible title")}])
+    history = {"20001": [{"id": "9", "author": ADA, "created": "2026-09-03T00:00:00.000+0000",
+                          "items": [{"field": "Link", "fieldtype": "jira", "to": "SEED-2", "toString": "This issue blocks SEED-2"}]}]}
+    found, census, records = read(FakeJira([visible, breach, issue(3)], history), folder)
+    record = by_key(records)["SEED-1"]
+    ctx = found.context(census.selected)
+    made = render.work_item(ctx, record, {}, {})
+    assert "SEED-2" not in made.body and "Breach" not in made.body
+    assert not [r for _, r in record.relations if r.key == "SEED-2" and ctx.shown(r)]
+    archive = render.archive(record.raw, found.withheld(ctx), {})
+    assert b"SEED-2" not in archive and b"Breach" not in archive and b"A visible title" not in archive and b"SEED-3" in archive
+
+
+def test_attachments_of_comments_left_out_are_neither_fetched_nor_named(folder):
+    media = lambda name: {"version": 1, "type": "doc", "content": [{"type": "mediaSingle", "content": [
+        {"type": "media", "attrs": {"id": f"m-{name}", "alt": name}}]}]}
+    files = [{"id": f"1001{n}", "filename": name, "mimeType": "image/png", "size": 3, "author": ADA, "created": "2026-09-02T00:00:00.000+0000",
+              "content": f"{BASE}/rest/api/3/attachment/content/1001{n}"} for n, name in enumerate(["seen.png", "secret.png", "loose.png"])]
+    shown, hidden = comment(1, ""), comment(2, "", visibility={"type": "role", "value": "Managers"})
+    shown["body"], hidden["body"] = media("seen.png"), media("secret.png")
+    node = issue(1, attachment=files, comment={"comments": [shown, hidden], "total": 2, "startAt": 0, "maxResults": 100})
+    found, census, records = read(FakeJira([node], files={"10010": b"A", "10011": b"B", "10012": b"C"}), folder)
+    record = records[0]
+    assert [a.name.rsplit("-", 1)[-1] for a in record.attachments] == ["seen.png"]
+    assert "Not imported: 1 restricted comment, 2 attachments" in record.facts
+    text = json.dumps(record.raw) + json.dumps(record.raw_comments)
+    assert "secret.png" not in text and "loose.png" not in text
+
+
+def test_a_move_from_a_project_not_selected_keeps_its_name_out_of_the_history(folder):
+    moved = {"20005": [{"id": "1", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [
+        {"field": "Key", "fieldtype": "jira", "fromString": "OPS-3", "toString": "SEED-5"},
+        {"field": "project", "fieldtype": "jira", "from": "10001", "fromString": "Operations", "to": "10000", "toString": "Seed project"},
+        {"field": "Workflow", "fieldtype": "jira", "from": "30001", "fromString": "OPS ops workflow", "to": "30000", "toString": "SEED workflow"}]}]}
+    found, census, records = read(FakeJira([issue(5)], moved), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Operations" not in archive and b"OPS ops workflow" not in archive and b"OPS-3" not in archive
+    assert b"Seed project" in archive or b"withheld" in archive
+
+
+def test_cancelled_resolutions_come_from_the_map_with_broad_defaults(folder):
+    done = lambda n, why: issue(n, status={"name": "Done", "statusCategory": {"key": "done"}}, resolution={"name": why})
+    nodes = [done(1, "Declined"), done(2, "Cannot Reproduce"), done(3, "Fixed")]
+    states = {r.key: r.state for r in read(FakeJira(nodes), folder)[2]}
+    assert states == {"SEED-1": "cancelled", "SEED-2": "cancelled", "SEED-3": "completed"}
+    found = adapter(FakeJira(nodes), folder)
+    found.cancelled = {"Fixed"}
+    found.check()
+    assert {r.key: r.state for r in found.read([])[1]}["SEED-3"] == "cancelled"
+
+
+@pytest.mark.parametrize("answer", [httpx.Response(200, text="<html>not json</html>"), httpx.Response(200, json={"cloudId": "../evil"})])
+def test_a_site_whose_cloud_id_cannot_be_read_stops_cleanly(answer, folder):
+    fake = FakeJira([issue(1)])
+    fake.tenant = answer
+    with pytest.raises(Stop) as stop:
+        adapter(fake, folder).check()
+    assert "cloud" in str(stop.value).lower() and "cloud_id" in stop.value.fix and TOKEN not in str(stop.value) + stop.value.fix

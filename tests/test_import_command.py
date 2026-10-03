@@ -292,6 +292,7 @@ def test_jira_every_project_with_restricted_issues_named_then_the_import(jira_wo
                                                                            if op["op"] == "field.create"}
     template = json.loads((home / "import" / "jira-map.json").read_text())
     assert template["users"] == {"acc-ben": None} and template["names"] == {"acc-ben": "Ben Sample"}
+    assert template["cancelled"] == ["Cannot Reproduce", "Declined", "Duplicate", "Won't Do", "Won't Fix"]  # read back by the run below
     fake.tokens[(home / "import" / "wirk-token-jira-import").read_text().strip()] = "alice-jira-import"
     code, out, err = run()
     assert code == 0 and "created: 2" in out and "find one: wirk query text='Jira issue [SEED-1]'" in out, out + err
