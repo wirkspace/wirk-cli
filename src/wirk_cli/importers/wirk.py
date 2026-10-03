@@ -379,6 +379,7 @@ class Importer:
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
                     for plan, action, held, message in decided if action not in ("create", "update")]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ("create", "update")]
+        said = {plan.kind: message for plan, _, _, message in decided}
         if self.dry_run:  # what --overwrite would replace says who changed it
             return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
                                for plan, action, held, message in decided if action in ("create", "update")] + \
@@ -387,11 +388,11 @@ class Importer:
         together = [entry for entry in acting if entry[0].kind in ("issue", "comments")]
         work = held.item if held else None
         if together:
-            outcomes += self.send(record, together, work)
+            outcomes += self.send(record, together, work, said)
             work = work or next((o.item for o in outcomes if o.kind == "issue" and o.item), None)
         for entry in acting:
             if entry not in together:
-                outcomes += self.send(record, [entry], work)
+                outcomes += self.send(record, [entry], work, said)
         return outcomes + self.stale(record, len(plans) - 1)
 
     def operations(self, record, acting, work):
@@ -450,7 +451,7 @@ class Importer:
             return render.evidence(self.ctx, record)
         return f"Imported from {self.ctx.source} {record.key} by wirk import {self.prefix}"
 
-    def send(self, record, acting, work) -> list:
+    def send(self, record, acting, work, said: dict | None = None) -> list:
         operations, expect = self.operations(record, acting, work)
         body = {"request_id": self.rid(record), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
@@ -479,8 +480,8 @@ class Importer:
         outcomes = []
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, False, plan.digest))
-            outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", "; ".join(notes),
-                                    result["id"]))
+            message = "; ".join(filter(None, [(said or {}).get(plan.kind, ""), *notes]))
+            outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
     def fix(self, record, body, problem) -> str | None:
