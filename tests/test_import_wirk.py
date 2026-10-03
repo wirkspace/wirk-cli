@@ -161,6 +161,32 @@ def test_a_retargeted_item_keeps_the_key_the_importer_wrote(fake):
     assert result[("acme/api#2", "issue")] == "current"
 
 
+def edit_as(fake, who, item, body):
+    fake.as_whom = who
+    fake.write({"request_id": f"{who}-{len(fake.receipts)}", "expect": {item: len(fake.items[item]["revisions"])},
+                "operations": [{"op": "item.edit", "id": item, "patch": {"body": body}}]})
+    fake.as_whom = None
+
+
+def test_a_line_a_person_writes_above_the_first_keeps_the_item_the_importers(fake):
+    make(fake).run([issue(1)])
+    item = next(iter(fake.mine()))
+    edit_as(fake, "bob", item, "Triage note from Bob.\n" + fake.items[item]["revisions"][-1]["body"])
+    assert outcomes(make(fake).run([issue(1)])) == {("acme/api#1", "issue"): "current"}
+    assert outcomes(make(fake).run([issue(1, body="Changed.")])) == {("acme/api#1", "issue"): "skipped"}
+    assert len(fake.mine()) == 1
+
+
+def test_a_duplicate_choice_the_importer_made_is_never_overridden(fake):
+    make(fake).run([issue(1, title="Same words")])
+    item = next(iter(fake.mine()))
+    edit_as(fake, "bob", item, "Bob rewrote all of it.")  # no line of the importer's left to find it by
+    fake.duplicates["Same words"] = item
+    result = make(fake).run([issue(1, title="Same words")])
+    assert result[0].outcome == "error" and "likely_duplicate" in result[0].message
+    assert len(fake.mine()) == 1 and "allow_duplicate_of" not in str(fake.writes())
+
+
 def test_another_importers_items_block_their_keys(fake):
     fake.as_whom = "bob-github-import"
     make(fake).run([issue(1)])
