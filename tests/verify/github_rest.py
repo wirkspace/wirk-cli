@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -24,7 +25,12 @@ PROJECT = {"added_to_project", "moved_columns_in_project", "removed_from_project
 
 
 def rest(path: str):
-    done = subprocess.run(["gh", "api", "--paginate", "--slurp", path], capture_output=True, text=True)
+    for _ in range(3):
+        done = subprocess.run(["gh", "api", "--paginate", "--slurp", path], capture_output=True, text=True)
+        if "rate limit exceeded" not in done.stderr:
+            break
+        reset = json.loads(subprocess.run(["gh", "api", "rate_limit"], capture_output=True, text=True).stdout)
+        time.sleep(max(1, reset["resources"]["core"]["reset"] - time.time() + 5))  # the hour's REST budget is spent
     if done.returncode:
         raise RuntimeError(f"gh api {path}: {done.stderr.strip()[:200]}")
     pages = json.loads(done.stdout)
