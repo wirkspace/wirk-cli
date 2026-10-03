@@ -155,7 +155,7 @@ Markdown conversion and pacing belong to the adapter.
   - **Nothing about comments** is on the work item: no count, no comment, no comment's raw form. The discussion doc is found through the `related_to` link. A new comment therefore never revises the work item.
 - **One discussion doc**, when the issue has comments.
   - Title `<key> discussion: <issue title>`, cut to 200. Its body is its own provenance line, its key line (`GitHub comments on [Acme/api#123] · <url>`), the content notice, then every comment in order: a heading `### @ada · 2026-03-02T11:00:00Z · edited`, the comment, its reactions.
-  - **Forged headings are neutralized.** A line inside a comment that starts like a heading of this doc (`### @`) is written with a backslash, `\### @…`, so it reads as text and cannot pose as another comment; the report counts them.
+  - **Headings in comments are neutralized.** Every line inside a comment that starts as a Markdown heading (one to six `#` and a space) is written with a backslash, `\### …`, so it reads as text: no author's text can pose as another comment, a bot's or an external user's included, or add structure to the doc. The report counts them. A comment with no heading line is written exactly as before; a discussion whose comments hold heading lines changes once.
   - It is `related_to` the work item. Its files are the comments' archive and the attachments the comments reference.
   - **Parts.** When the encoded JSON of the write that carries a part (the request body exactly as sent, escapes included) would pass 2 MiB, the discussion continues in parts (`… discussion (2)`, first-line kind `comments-2`), each `related_to` the work item. Parts are cut between comments; a source's longest comment always fits in a part of its own. The first part goes in one write with the work item, so the work item's bytes count toward it. Parts after the first go one to a write. So no write nears the 4 MiB request limit, whatever the script or emoji in the text.
   - **Stale parts.** A part the discussion no longer needs (comments deleted, or shorter after a redaction) is archived by the importer with the reason `No longer needed: the discussion of [Acme/api#123] now fits in 1 part`, when the importer made its latest revision; otherwise it is reported.
@@ -687,6 +687,18 @@ The first Linear slice imports issues. Projects, milestones, initiatives, docume
 | L18 | F C: the shared rules, run on GitHub's evidence | R |
 
 **Budget.** The Linear adapter is 359 lines. Shared code grew by 41 lines, to 1,266: 13 of them are the census, moved from the GitHub adapter, which shrank to 485; the rest are mostly the archive mirror.
+
+**The review of `7d0735d`** said fix. It accepted all six choices above, and found no regression on GitHub. Its findings, fixed RED (`3fbb969`), then GREEN, then a SIMPLIFY pass (`f5532e7`):
+
+| Finding | GREEN | What changed |
+|---|---|---|
+| Medium: an issue moved from a private team showed `Previously: [SEC-12]`, and the archive kept it | `1dfcf45` | An earlier identifier is a reference under §3.9. It is shown when its team is selected or public. Otherwise it is counted, and in the archive it is replaced like any withheld node |
+| Medium: bot and external-user headings have no `@`, so their forged headings passed | `15db4b2` | Every heading line in imported comment text is neutralized, for every source (§3.2). GitHub's seeds are unchanged: zero differences, and the same one neutralized heading |
+| Low: `reactionData` may list each reaction | `f93c909` | Reactions are counted one by one in either shape |
+| Low: relations lacked `includeArchived`, and one into an unreadable team could fail the whole read | `fc41a3b` | Archived relations are read too. A partial answer is accepted for relations only, and the left-out relations are counted in the report |
+| Low: nested history used about 6,600 of a query's 10,000 points | `58d0633` | History is read 20 at a time, about 3,600 points a page by the published rules; the real cost waits for `X-Complexity` on a real workspace |
+| Low: the key hint used `pbpaste`; GitHub's empty Target date became `T23:59:59Z` | `490605a` | A hint for any POSIX shell; an empty date stays empty, with a regression test |
+
 
 ## 6. Jira, third
 
