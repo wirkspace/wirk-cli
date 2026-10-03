@@ -3,7 +3,7 @@
 It reads GitHub through the REST API, never GraphQL, and WIRK over plain HTTP, and shares no code with the importer:
 every rule it applies is written here again from the plan. It prints every difference and exits 1 when there is one.
 
-    python tests/verify/github_rest.py WIRK_CONFIG_DIR OWNER/REPO… [--manifest FILE] [--public-only] [--sentinel TEXT]
+    python tests/verify/github_rest.py WIRK_CONFIG_DIR OWNER/REPO… [--manifest FILE [--stage N]] [--public-only] [--sentinel TEXT]
 """
 
 from collections import Counter
@@ -109,6 +109,9 @@ class Check:
 
     def run(self):
         for repo in self.repos:
+            self.thread = {}  # one listing of the repository's comments, by issue, instead of a call per issue
+            for comment in rest(f"repos/{repo}/issues/comments?per_page=100"):
+                self.thread.setdefault(comment["issue_url"].rsplit("/", 1)[1], []).append(comment)
             for issue in rest(f"repos/{repo}/issues?state=all&per_page=100"):
                 if "pull_request" not in issue:
                     self.issue(repo, issue)
@@ -144,7 +147,7 @@ class Check:
         self.timeline(key, repo, issue, view)
 
     def comments(self, key, issue):
-        github = rest(f"{issue['comments_url'].split('api.github.com/')[1]}?per_page=100") if issue["comments"] else []
+        github = sorted(self.thread.get(str(issue["number"]), []), key=lambda c: (c["created_at"], c["id"]))
         docs = sorted((c for c in self.wirk.cards({"text": f"GitHub comments on [{key}]"})),
                       key=lambda c: int(re.search(r"comments(?:-(\d+))? ", c["line"]).group(1) or 1))
         self.counted["comments"] += len(github)
@@ -215,8 +218,15 @@ def manifest_check(check: Check, manifest: dict):
             if marker:
                 numbers[marker[1]] = f"{full}#{issue['number']}"
     expand = lambda text: re.sub(r"\{key:(\w+)\}", lambda m: numbers.get(m[1], "?"), text)
+    changed = {}
+    for change in manifest["changes"]:  # applied changes override what their seed expects
+        if change["stage"] <= check.stage and change.get("expect"):
+            base = changed.setdefault(change["seed"], {})
+            base.update({**change["expect"], "public": {**base.get("public", {}), **change["expect"].get("public", {})}})
     for spec in manifest["issues"]:
-        expect = {**spec["expect"], **(spec["expect"].get("public", {}) if check.public_only else {})}
+        override = changed.get(spec["seed"], {})
+        expect = {**spec["expect"], **override, "public": {**spec["expect"].get("public", {}), **override.get("public", {})}}
+        expect = {**expect, **(expect["public"] if check.public_only else {})}
         key = numbers.get(spec["seed"])
         private = manifest["repos"][spec["repo"]]["private"]
         cards = check.work_of(key) if key else []
@@ -278,10 +288,11 @@ def slug(name: str) -> str:
 
 
 def main(argv):
-    values = {argv[i + 1] for i, word in enumerate(argv[:-1]) if word in ("--manifest", "--sentinel")}
+    values = {argv[i + 1] for i, word in enumerate(argv[:-1]) if word in ("--manifest", "--sentinel", "--stage")}
     folder, repos = Path(argv[0]), [word for word in argv[1:] if "/" in word and word not in values]
     sentinel = argv[argv.index("--sentinel") + 1] if "--sentinel" in argv else None
     check = Check(folder, repos, "--public-only" in argv, sentinel)
+    check.stage = int(argv[argv.index("--stage") + 1]) if "--stage" in argv else 0
     check.run()
     if "--manifest" in argv:
         manifest_check(check, json.loads(Path(argv[argv.index("--manifest") + 1]).read_text()))
