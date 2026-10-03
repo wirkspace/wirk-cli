@@ -166,6 +166,10 @@ def person(actor: dict | None) -> str:
     return f"@{actor['login']}" + (" (mannequin)" if actor.get("__typename") == "Mannequin" else "")
 
 
+def seconds_until(moment: str) -> float:
+    return max(1.0, (datetime.fromisoformat(moment.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds())
+
+
 def day(moment: str | None) -> str:
     return (moment or "")[:10]
 
@@ -239,18 +243,16 @@ class GitHub:
         """Seconds until the hour's GraphQL budget resets; GitHub answers this query even when the budget is spent."""
         code, out, _ = self.run(["api", "graphql", "--input", "-"], json.dumps({"query": RESET, "variables": {}}))
         try:
-            reset = datetime.fromisoformat(json.loads(out)["data"]["rateLimit"]["resetAt"].replace("Z", "+00:00"))
+            return seconds_until(json.loads(out)["data"]["rateLimit"]["resetAt"])
         except (ValueError, KeyError, TypeError):
             return 60.0
-        return max(1.0, (reset - datetime.now(timezone.utc)).total_seconds())
 
     def pace(self, limit: dict | None) -> None:
         """Wait for the reset when the hour's points run low, so a long read never fails halfway."""
         with self.counting:
             self.points += (limit or {}).get("cost", 0)
         if limit and limit["remaining"] < max(50, 2 * limit["cost"] * READERS):
-            reset = datetime.fromisoformat(limit["resetAt"].replace("Z", "+00:00"))
-            self.gate.hold(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds()) + 1)
+            self.gate.hold(seconds_until(limit["resetAt"]) + 1)
 
     # ---------------------------------------------------------------- what to read
 
