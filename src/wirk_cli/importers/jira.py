@@ -221,8 +221,7 @@ class Jira:
         status, resolution = f["status"] or {}, (f.get("resolution") or {}).get("name")
         category = (status.get("statusCategory") or {}).get("key", "new")
         state = "cancelled" if category == "done" and resolution in self.cancelled else STATES.get(category, "open")
-        comments = self.every(node, "comment", "comments", 100)
-        worklogs = self.every(node, "worklog", "worklogs", 5000)
+        comments, worklogs = self.every(node, "comment", "comments", 100), self.every(node, "worklog", "worklogs", 5000)
         hidden = [sum(1 for c in found if c.get("visibility")) * (not named) for found in (comments, worklogs)]
         comments, worklogs = ([c for c in found if named or not c.get("visibility")] for found in (comments, worklogs))
         attachments = f.get("attachment") or []
