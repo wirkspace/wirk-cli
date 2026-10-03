@@ -369,8 +369,7 @@ class Importer:
     def seal(self, made, record, fields, work, files, attachments) -> Plan:
         names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
-        version = record.version if made.kind == record.kind else max(c.version for c in record.comments)
-        return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, version, digest), fields, work,
+        return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
                     files, attachments, digest)
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:

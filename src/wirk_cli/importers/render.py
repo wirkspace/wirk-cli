@@ -131,6 +131,7 @@ class Rendered:
     kind: str
     title: str
     body: str  # its first line is provisional until sealed
+    version: str  # the source's version its first line carries
     work: dict = field(default_factory=dict)
     counts: Counter = field(default_factory=Counter)
 
@@ -224,7 +225,7 @@ def work_item(ctx: Context, record: Record, users: dict, notes: dict) -> Rendere
     work = {**({"owner_id": owner} if owner else {}), **({"due_at": record.due} if record.due else {})}
     lines = [line1(ctx.source, record.kind, record.ident, record.version, "0" * 12),
              f"{ctx.source} {record.kind} [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
-    return Rendered(record.kind, title, "\n".join(lines) + ("\n\n" + body if body else ""), work, counts)
+    return Rendered(record.kind, title, "\n".join(lines) + ("\n\n" + body if body else ""), record.version, work, counts)
 
 
 def evidence(ctx: Context, record: Record) -> str:
@@ -279,7 +280,7 @@ def discussion(ctx: Context, record: Record, work_item: Rendered | None = None) 
         current.append(block)
     parts.append(current)
     return [Rendered(part_kind(number), cut(f"{record.key} discussion{f' ({number})' if number > 1 else ''}: {title}", TITLE_LIMIT),
-                     body(part, number), counts=counts if number == 1 else Counter())
+                     body(part, number), version, counts=counts if number == 1 else Counter())
             for number, part in enumerate(parts, 1)]
 
 
@@ -314,9 +315,9 @@ def digest(title: str, body: str, fields: dict, work: dict, files: list) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:12]
 
 
-def sealed(rendered: Rendered, source: str, ident: str, version: str, digest_: str) -> str:
+def sealed(rendered: Rendered, source: str, ident: str, digest_: str) -> str:
     """The body with its real first line."""
-    return line1(source, rendered.kind, ident, version, digest_) + "\n" + rendered.body.split("\n", 1)[1]
+    return line1(source, rendered.kind, ident, rendered.version, digest_) + "\n" + rendered.body.split("\n", 1)[1]
 
 
 # ---------------------------------------------------------------- fields and file names
