@@ -34,7 +34,7 @@ MARKER = re.compile(r"\[(github )", re.I)
 # typed in text: kept as written, counted (choice 10); tried only where a run of such characters starts, so a long
 # run without an @ costs one pass, not one per character
 ADDRESS = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-HEADING = re.compile(r"^(\s*)(#{1,6}\s+@)", re.M)
+HEADING = re.compile(r"^([ \t]*)(#{1,6}[ \t]+@)", re.M)  # within one line, so blank runs cost one pass
 EMAIL_KEY = re.compile(r"e-?mail", re.I)
 SPAM = {"spam", "abuse"}
 RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "related", "transferred_from", "mentioned")
