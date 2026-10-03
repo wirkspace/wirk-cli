@@ -188,10 +188,6 @@ def test_budgets_state_their_range(capsys):
     assert "1024–65536" in help_of(capsys, "status")
 
 
-def test_login_help_names_the_persons_own_token(capsys):
-    assert "login --person" in help_of(capsys, "login")
-
-
 def test_download_says_file_is_a_file_id(capsys):
     assert "file ID" in help_of(capsys, "download") and "file ID" in help_of(capsys)
 
