@@ -820,7 +820,7 @@ The build follows revision 3. Every slice ran RED → GREEN → SIMPLIFY → VER
 
 Not built: **G8 projects**. The person's `gh` login still lacks `read:project` (§8 step 1), so there is no real or seed project to verify against; the reader already leaves project timeline events out without the scope and says so in every report. Projects are the next slice once the scope is granted.
 
-**Tests.** 89 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 22, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. The whole suite passes: 341 passed and 17 skipped without a scratch service. With one, the importer's contract tests pass, and 5 of the CLI's existing contract tests fail on `main` too: core `60b84ae` changed the login wording, lets only people decide proposals, has no views address and limits who adds context. That is outside this build.
+**Tests.** 89 importer tests on fakes (render 18, WIRK side 18, links 10, GitHub reader 22, command 8, attachments 7, seed tool 6), and 2 contract tests against a scratch core at `60b84ae`. After merging `main` at wirk 0.3.1 (`fb23db5`), which matched the CLI's help and contract tests to core `60b84ae`, the whole suite passes: 348 passed and 18 skipped without a scratch service, and all 366 passed against a scratch core at `60b84ae` with its loopback file store.
 
 **Size.** Shared code is 1,156 lines (`__init__` 235, `render` 360, `wirk` 561) against the plan's budget of 1,000; the GitHub adapter is 497 against 450, after decision 80's four readers, their shared pause and the wait for a spent budget added 52 lines. Most of the overrun is the link pass and the stale-link and stale-part rules that the review added (§3.6), and the report. The simplify passes are listed above; the overrun is for the reviewer to judge.
 
@@ -913,4 +913,3 @@ Measured on this machine against fresh scratch cores at `60b84ae`, each real run
 - **Second-account cases:** several assignees, a deleted user.
 - **Hand deletions:** a deleted issue, and a conversion to a discussion.
 - **The independent review and the blind trial.**
-- **The CLI's own contract tests** need updating for core `60b84ae`: 5 fail there on `main` too.
