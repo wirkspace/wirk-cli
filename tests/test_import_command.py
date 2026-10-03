@@ -256,3 +256,53 @@ def test_linear_public_teams_by_default_then_the_import_as_its_own_importer(line
 def test_the_help_shows_linear_its_teams_and_where_its_key_lives(world):
     text = world["run"]()[1]
     assert "wirk import linear [TEAM…]" in text and "import/linear-key" in text and "every public team" in text
+
+
+@pytest.fixture
+def jira_world(home, monkeypatch, capsys):
+    """The CLI configuration, with Jira Cloud answered by synthetic REST v3 pages and the key saved owner-only."""
+    from test_import_jira import BEN, TOKEN, FakeJira, issue as jira_issue
+    from wirk_cli.importers import jira
+    fake = FakeWirk(principal="alice-jira-import", person="alice", fields={})
+    fake.tokens = {AGENT: "alice-agents"}
+    source = FakeJira([jira_issue(1, assignee=BEN, labels=["bug"]), jira_issue(2, "OPS"), jira_issue(9, security={"name": "Staff"})])
+    monkeypatch.setattr(jira, "TRANSPORT", httpx.MockTransport(source))
+    monkeypatch.setattr(jira.time, "sleep", lambda seconds: None)
+    (home / "import").mkdir(mode=0o700)
+    (home / "import" / "jira-key").write_text(json.dumps({"site": "acme.atlassian.net", "email": "admin@example.com", "token": TOKEN}))
+    os.chmod(home / "import" / "jira-key", 0o600)
+
+    def run(*argv):
+        code = cli.main(["import", "jira", *argv], transport=httpx.MockTransport(fake))
+        out = capsys.readouterr()
+        return code, out.out, out.err
+
+    return {"fake": fake, "run": run, "home": home, "token": TOKEN}
+
+
+def test_jira_every_project_with_restricted_issues_named_then_the_import(jira_world):
+    run, fake, home = jira_world["run"], jira_world["fake"], jira_world["home"]
+    code, out, err = run("--dry-run")
+    assert code == 0, out + err
+    assert "selection: 3 projects · 2 issues" in out and "skipped, not public: SEED-9." in out
+    assert "wirk import jira OPS OUT SEED SEED-9 --dry-run" in out and "Jira requests" in out
+    setup = json.loads((home / "import" / "jira-setup.json").read_text())
+    assert setup["operations"][0]["id"] == "alice-jira-import" and setup["operations"][0]["name"] == "Jira importer"
+    assert {"workflow", "issue_type", "project", "priority", "label"} <= {op["field"]["key"] for op in setup["operations"]
+                                                                           if op["op"] == "field.create"}
+    template = json.loads((home / "import" / "jira-map.json").read_text())
+    assert template["users"] == {"acc-ben": None} and template["names"] == {"acc-ben": "Ben Sample"}
+    assert template["cancelled"] == ["Cannot Reproduce", "Declined", "Duplicate", "Won't Do", "Won't Fix"]  # read back by the run below
+    fake.tokens[(home / "import" / "wirk-token-jira-import").read_text().strip()] = "alice-jira-import"
+    code, out, err = run()
+    assert code == 0 and "created: 2" in out and "find one: wirk query text='Jira issue [SEED-1]'" in out, out + err
+    assert jira_world["token"] not in out + err
+    from wirk_cli.help import HELP
+    assert "wirk import jira [PROJECT|ISSUE_KEY…]" in HELP["import"] and "import/jira-key" in HELP["import"]
+
+
+
+def test_a_map_whose_cancelled_is_not_a_list_of_names_stops_with_the_shape_it_wants(jira_world):
+    (jira_world["home"] / "import" / "jira-map.json").write_text(json.dumps({"cancelled": "Won't Do"}))
+    code, out, err = jira_world["run"]("--dry-run")
+    assert code == 2 and "cancelled" in err and "list" in err

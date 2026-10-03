@@ -463,3 +463,12 @@ def test_update_keys_are_unique_and_a_bracket_in_a_name_is_escaped_in_its_key(fo
         "Checkout v2 update 2026-09-20 (pu-1)", "Checkout v2 update 2026-09-20 (pu-3)"}
     odd = next(r for r in records if r.ident == "p-4")
     assert odd.key == "Odd \\] name" and odd.title == "Odd ] name"
+
+
+
+def test_archived_milestones_and_updates_are_read_so_they_are_mirrored_not_missing(folder):
+    fake = FakeLinear([issue(1)])
+    read(fake, folder)
+    queries = [json.loads(r.content)["query"] for r in fake.requests if r.method == "POST"]
+    for name in ("projectMilestones", "projectUpdates", "initiativeUpdates"):
+        assert any(f"{name}(first: $first, after: $after, includeArchived: true" in q for q in queries), name
