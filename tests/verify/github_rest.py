@@ -7,6 +7,7 @@ every rule it applies is written here again from the plan. It prints every diffe
 """
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 import subprocess
@@ -112,9 +113,9 @@ class Check:
             self.thread = {}  # one listing of the repository's comments, by issue, instead of a call per issue
             for comment in rest(f"repos/{repo}/issues/comments?per_page=100"):
                 self.thread.setdefault(comment["issue_url"].rsplit("/", 1)[1], []).append(comment)
-            for issue in rest(f"repos/{repo}/issues?state=all&per_page=100"):
-                if "pull_request" not in issue:
-                    self.issue(repo, issue)
+            issues = [issue for issue in rest(f"repos/{repo}/issues?state=all&per_page=100") if "pull_request" not in issue]
+            with ThreadPoolExecutor(max_workers=6) as pool:  # independent issues, read side by side
+                list(pool.map(lambda issue: self.issue(repo, issue), issues))
         if self.sentinel:
             self.scan()
         return self.differences
