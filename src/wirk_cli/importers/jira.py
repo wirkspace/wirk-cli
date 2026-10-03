@@ -52,6 +52,11 @@ def number(value) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
+def bare(found: dict | None) -> dict | None:
+    """An issue as another issue embeds it, without its title: a title is never kept for an issue not imported here."""
+    return found and {**found, "fields": {key: value for key, value in (found.get("fields") or {}).items() if key != "summary"}}
+
+
 class Jira:
     source, noun, unit, needs_selection = SOURCE, NOUN, "Jira requests", False
 
@@ -147,6 +152,7 @@ class Jira:
                 break
         restricted = [node for node in issues if node["fields"].get("security") and node["key"] not in named]
         issues = [node for node in issues if node not in restricted]
+        self.skipped = {node["key"] for node in restricted} | {node["id"] for node in restricted}  # never named around them
         self.selected = set(wanted) | {key.rsplit("-", 1)[0] for key in named}
         histories = self.changelogs([node["id"] for node in issues])
         children = defaultdict(list)
@@ -187,7 +193,9 @@ class Jira:
     # ---------------------------------------------------------------- one issue as a record
 
     def reference(self, found: dict, note: str = "") -> render.Ref:
-        return render.Ref(found["key"], found["key"].rsplit("-", 1)[0], False, found["id"], note)
+        """Jira has no public projects: shown when its project is selected, never when it is a skipped restricted issue."""
+        scope = "" if {found["id"], found["key"]} & self.skipped else found["key"].rsplit("-", 1)[0]
+        return render.Ref(found["key"], scope, False, found["id"], note)
 
     @staticmethod
     def name(user: dict | None) -> str:
@@ -211,8 +219,12 @@ class Jira:
         web = [" ".join(((link.get("object") or {}).get(part) or "") for part in ("title", "url")) for link in links]
         gone = [f"{n} restricted {word}{'s' if n != 1 else ''}" for n, word in zip(hidden, ("comment", "worklog")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        raw = {"issue": clean({**node, "fields": {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}}),
-               "worklogs": clean(worklogs), "changelog": clean(history), "remotelinks": clean(links)}
+        kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
+        kept.update(parent=bare(f.get("parent")), subtasks=[bare(s) for s in f.get("subtasks") or []],
+                    issuelinks=[{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
+                                for link in f.get("issuelinks") or []])
+        raw = {"issue": clean({**node, "fields": kept}), "worklogs": clean(worklogs), "changelog": clean(history),
+               "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)
         assignee = f.get("assignee")
         return render.Record(
@@ -315,7 +327,7 @@ class Jira:
     def withheld(self, ctx: render.Context):
         """Whether a node of the raw JSON is, or names, an issue in a project not selected: Jira has no public projects."""
         def hidden(key: str) -> bool:
-            return not ctx.shown(render.Ref("", key.rsplit("-", 1)[0], False))
+            return key in self.skipped or not ctx.shown(render.Ref("", key.rsplit("-", 1)[0], False))
 
         def check(node: dict) -> bool:
             if isinstance(node.get("key"), str) and ISSUE_KEY.fullmatch(node["key"]):
