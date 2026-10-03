@@ -142,7 +142,7 @@ def test_an_issue_maps_to_a_record():
     assert record.assignees == [("ben", "@ben"), ("ada", "@ada")]
     assert record.fields == {"Repository": ["acme/web"], "Label": ["alpha", "zeta"], "Milestone": ["v1.0"], "Issue type": ["Bug"],
                              "Priority": ["High"]}
-    assert record.due == "2026-11-30"
+    assert record.due == "2026-11-30T23:59:59Z"  # the end of the day, in UTC
     kinds = [(kind, ref.key, ref.public, ref.note) for kind, ref in record.relations]
     assert ("closed_by", "acme/web#9", True, "pull request, merged") in kinds
     assert ("mentioned", "acme/web#9", True, "pull request") in kinds
@@ -375,3 +375,9 @@ def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_t
     else:
         with pytest.raises(github.Stop):
             adapter.read(["acme"])
+
+
+
+def test_an_empty_target_date_stays_empty():
+    issue = node(6, issueFieldValues={"nodes": [{"__typename": "IssueFieldDateValue", "value": None, "field": {"name": "Target date"}}]})
+    assert read(FakeGh([repo("acme/web")], {"acme/web": [issue]}))[2][0].due is None

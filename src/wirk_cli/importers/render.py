@@ -34,10 +34,12 @@ MARKER = re.compile(r"\[(github )", re.I)
 # typed in text: kept as written, counted (choice 10); tried only where a run of such characters starts, so a long
 # run without an @ costs one pass, not one per character
 ADDRESS = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
-HEADING = re.compile(r"^([ \t]*)(#{1,6}[ \t]+@)", re.M)  # within one line, so blank runs cost one pass
+HEADING = re.compile(r"^([ \t]*)(#{1,6}[ \t])", re.M)  # any heading: imported text never makes structure; one line, one pass
 EMAIL_KEY = re.compile(r"e-?mail", re.I)
 SPAM = {"spam", "abuse"}
-RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "related", "transferred_from", "mentioned")
+RELATIONS = ("parent", "sub_issue", "project", "milestone", "of", "initiative", "includes", "parent_initiative", "sub_initiative",
+             "blocked_by", "blocking", "duplicate_of", "duplicated_by", "related", "transferred_from", "mentioned",
+             "previously")
 
 
 class Stop(Exception):
@@ -67,6 +69,7 @@ class Comment:
     reactions: str
     hidden: str | None  # why the source hides it: outdated, spam …
     version: str
+    marks: tuple = ()  # more of its heading: "reply to @ada", "resolved by @ben at …"
 
 
 @dataclass
@@ -86,12 +89,27 @@ class Record:
     facts: list  # header lines after them
     assignees: list  # (source user, as shown)
     fields: dict  # field name -> option names
-    due: str | None  # a calendar day
+    due: str | None  # the instant it is due, by the source's rule
     relations: list  # (relation, Ref), in source order
     comments: list
     attachments: list
     raw: dict
     raw_comments: list
+    archived: str | None = None  # why the source archived it, the reason the importer archives it with
+
+
+@dataclass
+class Census:
+    """What a read found: the selection, what it skipped and why, its counts and what it cost."""
+    selected: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)  # (scope, its issues or None): not public and not named
+    named_private: list = field(default_factory=list)  # (scope, visibility, issues): not public, named (§3.9)
+    pulls: int | None = None  # pull requests, counted and skipped (GitHub)
+    issues: int = 0
+    comments: int = 0
+    external_images: int = 0
+    points: int = 0  # what the read cost, in the source's own unit
+    notes: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -100,6 +118,8 @@ class Context:
     selected: frozenset
     noun: tuple  # the scope's name, one and many: ("repository", "repositories")
     labels: dict  # relation -> header label
+    kinds: tuple = ("issue",)  # what the adapter writes, besides discussions
+    docs: frozenset = frozenset()  # the kinds written as docs, not work
 
     def shown(self, ref: Ref) -> bool:
         return ref.public or ref.scope in self.selected
@@ -200,9 +220,9 @@ def work_item(ctx: Context, record: Record, users: dict, notes: dict) -> Rendere
               *([f"Full title: {full}"] if title != full else [])]
     if counts["redacted"]:
         header.append(f"Redacted: {counts['redacted']} possible credential{'s' if counts['redacted'] != 1 else ''}")
-    work = {**({"owner_id": owner} if owner else {}), **({"due_at": f"{record.due}T23:59:59Z"} if record.due else {})}
+    work = {**({"owner_id": owner} if owner else {}), **({"due_at": record.due} if record.due else {})}
     lines = [line1(ctx.source, record.kind, record.ident, record.version, "0" * 12),
-             f"{ctx.source} issue [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
+             f"{ctx.source} {record.kind} [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
     return Rendered(record.kind, title, "\n".join(lines) + ("\n\n" + body if body else ""), work, counts)
 
 
@@ -233,7 +253,7 @@ def discussion(ctx: Context, record: Record, work_item: Rendered | None = None) 
         text, found = HEADING.subn(r"\1\\\2", clean.text(comment.body).strip("\n"))
         counts["neutralized"] += found
         heading = " · ".join([f"### {comment.author}", comment.created, *(["edited"] if comment.edited else []),
-                              *([f"hidden on GitHub as {comment.hidden}"] if comment.hidden else [])])
+                              *([f"hidden on {ctx.source} as {comment.hidden}"] if comment.hidden else []), *comment.marks])
         blocks.append("\n\n".join([heading, *([text] if text else []),
                                    *([f"Reactions: {comment.reactions}"] if comment.reactions else [])]))
     key = f"{ctx.source} comments on [{record.key}] · {record.url}" + (

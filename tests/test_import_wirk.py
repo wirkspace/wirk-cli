@@ -35,7 +35,8 @@ def make(fake, **options):
     plan = render.plan_fields([], {"Repository": "one"}, "GitHub")
     defaults = dict(users={}, statuses=LABELS, plan=plan, withheld=lambda node: False, download=lambda attachment: b"",
                     dry_run=False, overwrite=False)
-    importer = wirk.Importer(wirk.Wirk(service), CTX, **{**defaults, **options})
+    ctx = options.pop("ctx", CTX)
+    importer = wirk.Importer(wirk.Wirk(service), ctx, **{**defaults, **options})
     importer.start()
     return importer
 
@@ -217,8 +218,10 @@ def test_another_importers_items_block_their_keys(fake):
 def test_archived_skipped_ambiguous_and_missing(fake):
     make(fake).run([issue(1), issue(2), issue(3)])
     items = {item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]: i for i, item in fake.mine().items()}
+    fake.as_whom = "bob"  # a person archives it
     fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {items["3000000001"]: 1},
                 "operations": [{"op": "item.archive", "id": items["3000000001"]}]})
+    fake.as_whom = None
     twin = fake.items[items["3000000002"]]["revisions"][-1]
     fake.write({"request_id": "t-1", "operations": [{"op": "item.create", "data": {"title": "Twin", "body": twin["body"], "work": {}}}]})
     before = len(fake.writes())
@@ -304,12 +307,74 @@ def test_parts_go_one_to_a_write_and_stale_parts_are_archived(fake):
 def test_an_issue_whose_work_item_is_archived_or_ambiguous_gets_no_new_discussion(fake):
     make(fake).run([issue(1), issue(2)])
     items = {item["revisions"][-1]["body"].split("\n")[0].split(" ")[2][:-1]: i for i, item in fake.mine().items()}
+    fake.as_whom = "bob"  # a person archives it
     fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {items["3000000001"]: 1},
                 "operations": [{"op": "item.archive", "id": items["3000000001"]}]})
+    fake.as_whom = None
     twin = fake.items[items["3000000002"]]["revisions"][-1]
     fake.write({"request_id": "t-1", "operations": [{"op": "item.create", "data": {"title": "Twin", "body": twin["body"], "work": {}}}]})
     before = len(fake.writes())
     result = outcomes(make(fake).run([issue(1, comments=[said("Hi.")]), issue(2, comments=[said("Hi.")])]))
     assert result == {("acme/api#1", "issue"): "skipped", ("acme/api#1", "comments"): "skipped",
                       ("acme/api#2", "issue"): "ambiguous", ("acme/api#2", "comments"): "ambiguous"}
+    assert len(fake.writes()) == before
+
+
+def test_what_the_source_archived_is_archived_after_its_write_and_restored_with_it(fake):
+    gone = "Archived in Linear on 2026-03-01"
+    first = make(fake).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])
+    assert [(o.kind, o.outcome) for o in first if o.key == "acme/api#1"] == [
+        ("issue", "created"), ("comments", "created"), ("issue", "archived"), ("comments", "archived")]
+    one = item_of_issue(fake, 1)
+    assert fake.items[one]["archived"] and fake.writes()[1]["reason"] == gone
+    before = len(fake.writes())
+    assert set(outcomes(make(fake).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])).values()) == {"current"}
+    assert len(fake.writes()) == before
+    result = make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)])
+    assert [(o.kind, o.outcome) for o in result if o.key == "acme/api#1"] == [
+        ("issue", "current"), ("comments", "current"), ("issue", "restored"), ("comments", "restored")]
+    assert not fake.items[one]["archived"]
+    two = item_of_issue(fake, 2)
+    fake.as_whom = "bob"  # an archive made by a person is theirs
+    fake.write({"request_id": "bob-a", "reason": "Not ours", "expect": {two: 1}, "operations": [{"op": "item.archive", "id": two}]})
+    fake.as_whom = None
+    assert outcomes(make(fake).run([issue(1, comments=[said("Hi.")]), issue(2)]))[("acme/api#2", "issue")] == "skipped"
+    dry = make(fake, dry_run=True).run([issue(1, archived=gone, comments=[said("Hi.")]), issue(2)])
+    assert ("issue", "would archive") in [(o.kind, o.outcome) for o in dry if o.key == "acme/api#1"]
+
+
+def test_an_item_updated_while_archived_is_still_restored_when_the_source_restores_it(fake):
+    make(fake).run([issue(1, archived="Archived in Linear on 2026-03-01")])
+    result = make(fake).run([issue(1, body="Changed when it came back.")])
+    assert [(o.kind, o.outcome) for o in result] == [("issue", "updated"), ("issue", "restored")]
+    assert not fake.items[item_of_issue(fake, 1)]["archived"]
+
+
+
+def linearish():
+    return Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"),
+                   labels={**CTX.labels, "project": "Project", "milestone": "Milestone", "includes": "Projects",
+                           "initiative": "Initiatives"},
+                   kinds=("issue", "project", "milestone", "initiative"), docs=frozenset({"initiative"}))
+
+
+def test_projects_milestones_and_initiative_docs_are_written_and_linked_by_their_kinds(fake):
+    LINEARISH = linearish()
+    to = lambda key, ident: Ref(key=key, scope="ENG", public=True, ident=ident)
+    records = [issue(1, source="Linear", kind="project", ident="p-1", key="Checkout v2", relations=[("initiative", to("Reliability", "i-1"))]),
+               issue(2, source="Linear", kind="milestone", ident="m-1", key="Checkout v2 · Beta", relations=[("project", to("Checkout v2", "p-1"))]),
+               issue(3, source="Linear", ident="u-3", key="ENG-3", relations=[("milestone", to("Checkout v2 · Beta", "m-1"))]),
+               issue(4, source="Linear", kind="initiative", ident="i-1", key="Reliability", relations=[("includes", to("Checkout v2", "p-1"))])]
+    assert set(outcomes(make(fake, ctx=LINEARISH).run(records)).values()) == {"created"}
+    items = {item["revisions"][-1]["body"].split("\n")[0].split(",")[0]: (i, item) for i, item in fake.items.items()}
+    initiative = items["Linear initiative i-1"][1]["revisions"][-1]
+    assert initiative["work"] is None and initiative["fields"] == {}
+    assert initiative["body"].split("\n")[1] == "Linear initiative [Reliability] · https://github.com/acme/api/issues/4"
+    assert items["Linear project p-1"][1]["revisions"][-1]["work"] is not None
+    ids = {name.split(" ")[2]: item_id for name, (item_id, _) in items.items()}
+    live = {(l["type"], l["from"], l["to"]) for l in fake.links.values() if not l["removed"]}
+    assert ("contributes_to", ids["m-1"], ids["p-1"]) in live and ("contributes_to", ids["u-3"], ids["m-1"]) in live
+    assert {("related_to", ids["p-1"], ids["i-1"]), ("related_to", ids["i-1"], ids["p-1"])} & live
+    before = len(fake.writes())
+    assert set(outcomes(make(fake, ctx=LINEARISH).run(records)).values()) == {"current"}
     assert len(fake.writes()) == before

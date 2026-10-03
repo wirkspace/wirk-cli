@@ -18,12 +18,12 @@ from .. import grammar
 from ..client import Failure, Service, config_dir, digest, new_token, read_token, saved_url
 from ..grammar import UsageError, command
 from ..help import HELP
-from . import github, render, wirk
+from . import github, linear, render, wirk
 from .render import Stop
 
-SOURCES = {"github": github}
+SOURCES = {"github": github.GitHub, "linear": linear.Linear}
 DEFAULT_STATUSES = {"open": "open", "in_progress": "in_progress", "completed": "completed", "cancelled": "cancelled"}
-ATTENTION = {"skipped", "blocked", "ambiguous", "missing", "error", "would archive", "archived"}
+ATTENTION = {"skipped", "blocked", "ambiguous", "missing", "error"}
 PERSON_STEP = "a person who administers the account applies it, at their own terminal after wirk login --person (an agent cannot)"
 CODED = re.compile(r"([a-z][a-z_]*): (.*)", re.S)  # an error outcome's message: WIRK's code, then its words
 
@@ -66,13 +66,13 @@ class Run:
     def __init__(self, words: list, options: dict, transport):
         source, rest = words[0], words[1:]
         if source not in SOURCES:
-            raise UsageError(f"import takes {', '.join(SOURCES)}; Linear and Jira come later")
+            raise UsageError(f"import takes {', '.join(SOURCES)}; Jira comes later")
         selection, pairs = grammar.split(rest)
         if set(pairs) - {"workspace_id", "map"}:
             raise UsageError(f"import takes workspace_id= and map=, not {', '.join(sorted(set(pairs) - {'workspace_id', 'map'}))}")
-        if not selection:
+        self.source, self.adapter, self.selection, self.pairs = source, SOURCES[source](), selection, pairs
+        if not selection and self.adapter.needs_selection:
             raise UsageError(f"import {source} needs what to bring: an owner, or owner/repo")
-        self.source, self.module, self.selection, self.pairs = source, SOURCES[source], selection, pairs
         self.options, self.transport = options, transport
         self.dry_run, self.json = bool(options.get("--dry-run")), bool(options.get("--json"))
         self.folder = config_dir() / "import"
@@ -90,7 +90,7 @@ class Run:
                 raise Stop(f"another wirk import {self.source} is running on this machine; wait for it to finish") from None
             service, registered = self.connect()
             self.mapped = mapped = self.read_map()
-            adapter = self.module.GitHub()
+            adapter = self.adapter
             adapter.check()
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
@@ -190,7 +190,7 @@ class Run:
             if not self.token_file.exists():
                 new_token(self.token_file)
             token = read_token(self.token_file)
-            operations = [{"op": "principal.create", "id": self.principal, "kind": "agent", "name": f"{self.module.SOURCE} importer",
+            operations = [{"op": "principal.create", "id": self.principal, "kind": "agent", "name": f"{self.adapter.source} importer",
                            "person_id": self.principal.rsplit(f"-{self.source}-import", 1)[0]},
                           {"op": "member.set", "principal_id": self.principal, "role": "editor"}, *fields,
                           {"op": "token.add", "principal_id": self.principal, "sha256": digest(token), "label": f"{self.source} import"}]
@@ -211,7 +211,7 @@ class Run:
         attention = [o for o in outcomes if o.outcome in ATTENTION or o.message]
         limit = self.mapped.get("field_limit", 50)
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
-        summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run,
+        summary = {"source": self.adapter.source, "principal": self.principal, "dry_run": self.dry_run,
                    "selected": census.selected, "skipped_not_public": census.skipped, "named_not_public": census.named_private,
                    "issues": census.issues, "comments": census.comments, "pull_requests_skipped": census.pulls,
                    "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts), "header_only": large,
@@ -226,16 +226,18 @@ class Run:
                               "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
             return
         space = you["wirkspace"]
-        lines = [f"{self.module.SOURCE} {' '.join(self.selection)} → wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}) "
+        lines = [f"{self.adapter.source} {' '.join(self.selection)} → wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}) "
                  f"as {self.principal}" + (" · dry run, nothing written" if self.dry_run else ""),
-                 f"selection: {len(census.selected)} repositories · {census.issues} issues · {census.comments} comments · "
-                 f"pull requests skipped: {census.pulls}"]
-        lines += [f"warning: {name} is {visibility} on {self.module.SOURCE}: everyone in the wirkspace will read its {count} issues"
+                 f"selection: {len(census.selected)} {self.adapter.noun[1]} · {census.issues} issues · {census.comments} comments"
+                 + (f" · pull requests skipped: {census.pulls}" if census.pulls is not None else "")]
+        lines += [f"warning: {name} is {visibility} on {self.adapter.source}: everyone in the wirkspace will read its {count} issues"
                   for name, visibility, count in census.named_private]
         if census.skipped:
-            lines += [f"skipped, not public: " + ", ".join(f"{name} ({count} issues)" for name, count in census.skipped)
+            lines += ["skipped, not public: " + ", ".join(name + (f" ({count} issues)" if count is not None else "")
+                                                          for name, count in census.skipped)
                       + ". Everyone in the wirkspace would read them. To include them, name them:",
-                      "  " + command("wirk", "import", self.source, *self.selection, *(name for name, _ in census.skipped), "--dry-run")]
+                      "  " + command("wirk", "import", self.source, *(self.selection or census.selected),
+                                     *(name for name, _ in census.skipped), "--dry-run")]
         lines.append("items: " + (" · ".join(f"{outcome}: {count}" for outcome, count in sorted(counts.items())) or "none"))
         lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in failed]
         fields = [f"header only: {key} ({count} values, over the limit of {limit})" for key, count in large.items()]
@@ -254,7 +256,8 @@ class Run:
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
                      f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld · "
                      f"{text['addresses']} email addresses typed in text, kept as written")
-        lines.append(f"cost: {census.points} GraphQL points · {self.module.SOURCE} read and WIRK {'checked' if self.dry_run else 'written'}")
+        lines.append(f"cost: {census.points} {self.adapter.unit} · {self.adapter.source} read and WIRK "
+                     f"{'checked' if self.dry_run else 'written'}")
         lines += [f"note: {note}" for note in census.notes]
         if importer.index.forged:
             lines.append(f"ignored: {importer.index.forged} items with a provenance line the importer did not write")
@@ -263,7 +266,7 @@ class Run:
         if outcomes:
             first = next((o.key for o in outcomes if o.kind == "issue"), None)
             if first:
-                lines.append(f"find one: wirk query text='{self.module.SOURCE} issue [{first}]'")
+                lines.append(f"find one: wirk query text='{self.adapter.source} issue [{first}]'")
         for outcome in attention[:50]:
             lines.append("  " + outcome.line())
         if len(attention) > 50:
