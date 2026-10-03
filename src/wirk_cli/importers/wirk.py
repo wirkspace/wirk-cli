@@ -11,6 +11,7 @@ from ..client import Failure
 from . import render
 
 PAGE = {"limit": 100, "max_bytes": 65536}
+UNSETTLED = {"outcome_unknown", "storage_failed", "storage_mismatch"}  # failures of one issue's write or file
 
 
 class WirkError(Exception):
@@ -195,13 +196,22 @@ class Importer:
         self.keys = {record.ident: record.key for record in records}
         self.plan_links(records)
         for done, record in enumerate(records, 1):
-            self.outcomes += self.one(record)
+            self.outcomes += self.guarded(record.key, "issue", self.one, record)
             self.progress(done, len(records))
         if not self.dry_run:
             self.outcomes += self.link_pass()
         if complete:
             self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
+
+    def guarded(self, key: str, kind: str, work, *args) -> list:
+        """One issue's outcomes; WIRK's refusal, or a write whose outcome stays unknown, is an error for that issue only."""
+        try:
+            return work(*args)
+        except (WirkError, Failure) as error:
+            if isinstance(error, Failure) and error.code not in UNSETTLED:
+                raise
+            return [Outcome(key, kind, "error", f"{error.code}: {error}")]
 
     # ---------------------------------------------------------------- links (§3.6)
 
@@ -276,18 +286,21 @@ class Importer:
         for link in sorted(self.planned):
             by_source[link[1]].append(link)
         for ident, wanted in by_source.items():
-            source = self.single(ident)
-            targets = [(link, self.single(link[2])) for link in wanted]
-            targets = [(link, target) for link, target in targets if target and not target.archived]
-            if not source or source.archived or not targets:
-                continue
-            view = self.wirk.item(source.item, "full")
-            have = self.existing(view)  # a related_to meets a requires: it is what WIRK kept when it refused the gate
-            missing = [(link, target) for link, target in targets
-                       if link not in have and not (link[0] == "requires" and normal("related_to", *link[1:]) in have)]
-            for start in range(0, len(missing), 31):
-                outcomes += self.write_links(ident, source.item, view["r"], missing[start:start + 31])
+            outcomes += self.guarded(self.keys[ident], "links", self.links_of, ident, wanted)
         return outcomes
+
+    def links_of(self, ident: str, wanted: list) -> list:
+        source = self.single(ident)
+        targets = [(link, self.single(link[2])) for link in wanted]
+        targets = [(link, target) for link, target in targets if target and not target.archived]
+        if not source or source.archived or not targets:
+            return []
+        view = self.wirk.item(source.item, "full")
+        have = self.existing(view)  # a related_to meets a requires: it is what WIRK kept when it refused the gate
+        missing = [(link, target) for link, target in targets
+                   if link not in have and not (link[0] == "requires" and normal("related_to", *link[1:]) in have)]
+        return [outcome for start in range(0, len(missing), 31)
+                for outcome in self.write_links(ident, source.item, view["r"], missing[start:start + 31])]
 
     def write_links(self, ident, item, revision, chunk) -> list:
         operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}} for link, target in chunk]
@@ -552,14 +565,15 @@ class Importer:
             if kind != "issue" or ident in present:
                 continue
             for found in held:
-                if found.archived:
-                    continue
-                key_line = self.wirk.item(found.item, "full")["body"].split("\n")[1]
-                key = key_line.split("[", 1)[1].split("]", 1)[0] if "[" in key_line else ident
-                if key.split("#")[0] in self.ctx.selected:
-                    outcomes.append(Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in "
-                                                                       f"{self.ctx.source}; nothing was archived", found.item))
+                if not found.archived:
+                    outcomes += self.guarded(ident, "issue", self.missing_one, ident, found)
         return outcomes
+
+    def missing_one(self, ident: str, found: Held) -> list:
+        key_line = self.wirk.item(found.item, "full")["body"].split("\n")[1]
+        key = key_line.split("[", 1)[1].split("]", 1)[0] if "[" in key_line else ident
+        return [Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; "
+                                                 "nothing was archived", found.item)] if key.split("#")[0] in self.ctx.selected else []
 
 
 def normal(kind: str, source: str, target: str) -> tuple:

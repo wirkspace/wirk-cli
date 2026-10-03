@@ -148,4 +148,8 @@ def test_a_run_that_stops_still_prints_what_it_did(world):
         return write(body)
     fake.write = write_until_the_service_goes
     code, out, err = world["run"]("github", "acme")
-    assert code == 1 and "created: 1" in out and "service_unavailable" in err
+    assert code == 2 and "created: 1" in out and "service_unavailable" in err
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    assert code == 2 and not answer["ok"] and answer["errors"][0]["code"] == "service_unavailable"
+    assert answer["data"]["outcomes"][0]["outcome"] == "current"

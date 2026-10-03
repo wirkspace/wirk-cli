@@ -39,6 +39,9 @@ def main(words: list, options: dict, transport=None) -> int:
     except (Stop, github.Stop) as stop:
         print(f"Error import: {stop}" + (f"\n  {stop.fix}" if stop.fix else ""), file=sys.stderr)
         return 2
+    except wirk.WirkError as error:
+        print(f"Error import: {error.code}: {error}", file=sys.stderr)
+        return 2
 
 
 class Run:
@@ -81,7 +84,11 @@ class Run:
                                      overwrite=bool(self.options.get("--overwrite")), progress=self.progress)
             you = importer.start(me=self.principal)
             self.check_statuses(importer)
-            outcomes = importer.run(records)
+            try:
+                outcomes = importer.run(records)
+            except (Stop, github.Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
+                self.report(census, importer, importer.outcomes, you, setup=None, stopped=stop)
+                return 2
             if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
                 self.report(census, importer, outcomes, you, setup=None)
                 raise Stop("another importer for this source already holds some of these issues: " + ", ".join(
@@ -177,7 +184,7 @@ class Run:
 
     # ---------------------------------------------------------------- the report
 
-    def report(self, census, importer, outcomes: list, you: dict, setup: Path | None) -> None:
+    def report(self, census, importer, outcomes: list, you: dict, setup: Path | None, stopped=None) -> None:
         counts = Counter(o.outcome for o in outcomes)
         attention = [o for o in outcomes if o.outcome in ATTENTION or o.message]
         limit = self.mapped.get("field_limit", 50)
@@ -188,9 +195,10 @@ class Run:
                    "header_only": large, "missing_options": {k: sorted(v) for k, v in importer.missing.items()},
                    "fields_not_set_up": sorted(importer.unset), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None}
+        error = {"code": getattr(stopped, "code", "stopped"), "message": str(stopped), "hint": getattr(stopped, "fix", None) or getattr(stopped, "hint", None) or ""}
         if self.json:
-            print(json.dumps({"ok": not counts["error"], "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]},
-                              "errors": []}, ensure_ascii=False))
+            print(json.dumps({"ok": not counts["error"] and not stopped, "errors": [error] if stopped else [],
+                              "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
             return
         space = you["wirkspace"]
         lines = [f"{self.module.SOURCE} {' '.join(self.selection)} → wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}) "
@@ -234,4 +242,6 @@ class Run:
         if len(attention) > 50:
             lines.append(f"  {len(attention) - 50} more: add --json for every outcome")
         print("\n".join(lines))
+        if stopped:
+            print(f"Error import: {error['code']}: {stopped}" + (f"\n  {error['hint']}" if error["hint"] else ""), file=sys.stderr)
 
