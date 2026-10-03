@@ -330,7 +330,7 @@ def approve(service: Service, request: dict, person: bool, answer: dict) -> int:
             return emit(answer, {})
         data = answer["data"]
         if data["state"] == "logged_in":
-            print(login_text(service, request) + "\nNext: wirk status", flush=True)
+            print(login_text(service, request), flush=True)  # the service's words end with what to run next
             return 0
         if not shown:
             page = data["url"].split("?")[0] if person else data["url"]  # a person types the code; no link carries it
@@ -397,6 +397,9 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     if command and command not in COMMANDS:
         print(f"wirk: unknown command {command}; see wirk --help", file=sys.stderr)
         return 2
+    if words == ["--version"] and not command:
+        print(f"wirk {__version__}")
+        return 0
     if not command or "--help" in words or "-h" in words:
         print(HELP[command])
         return 0

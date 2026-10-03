@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from wirk_cli import cli
+from wirk_cli import __version__, cli
 
 ROOT = Path(__file__).parent.parent
 COMMANDS = ["status", "query", "write", "review", "show", "upload", "download", "login", "admin"]
@@ -132,3 +132,37 @@ def test_the_history_scan_reads_authors_and_messages(tmp_path):
     text = history(tmp_path)
     assert "Add a test" in text and "@pytest.fixture" not in text
     assert not [pattern for pattern in PRIVATE if re.search(pattern, text)]
+
+
+def test_version_prints_the_version(capsys):
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out == f"wirk {__version__}\n"
+
+
+def test_one_version_everywhere():
+    project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    assert project == __version__ == "0.3.1"
+
+
+def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
+    text = help_of(capsys)
+    assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
+    assert "only people decide proposals" in text.lower()
+    assert "wirk review ID@N accept --reason 'Why' --person" in text  # what your person runs at their own terminal
+
+
+def test_review_help_says_agents_are_refused_and_how_a_person_decides(capsys):
+    text = help_of(capsys, "review")
+    assert "person_required" in text and "wirk login --person" in text and "--reason 'Why' --person" in text
+    assert "not_authorized for its own" in text  # an agent's own proposal is refused before its kind is
+
+
+def test_show_help_says_it_is_not_live_yet(capsys):
+    text = help_of(capsys, "show")
+    assert "Not live yet" in text and "views_unavailable" in text
+
+
+def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
+    text = help_of(capsys, "write")
+    assert "when you may make it" in text and "your person may" not in text and "requires_review" in text and "--propose --reason" in text
+    assert "basis_changed" in text and "quotation_mismatch" in text
