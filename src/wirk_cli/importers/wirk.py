@@ -74,7 +74,7 @@ class Wirk:
                 return
             body = {**body, "cursor": answer["page"]["next_cursor"]}
 
-    def item(self, ref, depth: str = "full") -> dict:
+    def item(self, ref, depth: str) -> dict:
         """One item, its body read whole through the continuation."""
         body = {"fetch": [ref], "depth": depth, "max_bytes": 65536}
         answer = self.ok("/v2/query", body)
@@ -494,7 +494,7 @@ class Importer:
             return render.evidence(self.ctx, record)
         return f"Imported from {self.ctx.source} {record.key} by wirk import {self.prefix}"
 
-    def send(self, record, acting, work, said: dict | None = None) -> list:
+    def send(self, record, acting, work, said: dict) -> list:
         operations, expect = self.operations(record, acting, work)
         body = {"request_id": self.rid(record.ident), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
@@ -524,7 +524,7 @@ class Importer:
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
                                                          plan.digest))
-            message = "; ".join(filter(None, [(said or {}).get(plan.kind, ""), *notes]))
+            message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
