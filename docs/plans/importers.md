@@ -845,7 +845,10 @@ The first Jira slice imports issues. Projects and boards as docs (with component
 **The review of `b2e2fb5`** said fix. It found these held: requests only to the gateway, no token in any error, fidelity to the REST v3 fixtures, and no regression on GitHub. Its findings were fixed RED first (`f12eb08`), one GREEN commit each:
 - **High: a skipped restricted issue's title leaked through the issues around it** (`1e72288`). Each skipped issue's key and ID are now collected, and every reference to one is withheld: header, link, archive and history alike. No issue embedded in another's archive (parent, sub-task or link) keeps its title.
 - **Medium: files of comments or worklogs left out were still imported** (`7f500b9`). When a comment or worklog is left out, only the files the description, paragraph fields or shown comments reference (media by their alt text) are imported. The rest are neither fetched nor named, and the header counts them (`Not imported: 1 restricted comment, 2 attachments`).
-- **Medium-low: a moved issue's history named the project it left** (`cecaacc`). For a move from a project not selected, that project's `project` and `Workflow` changelog items are withheld, as its `Key` item was.
+- **Medium-low: a moved issue's history named the project it left** (`cecaacc`, then made general in `d22e54b`). The changelog is walked in time order, tracking which project the issue was in; it began in the first move's `from`, or in its current project if it never moved. Every entry made in, into or out of a project not selected is withheld whole, round trips included.
+- **The recheck's leaks:**
+  - An `Attachment` history item is withheld unless its file was kept (`760b798`).
+  - A map file whose `cancelled` is not a list of names stops, and says the shape it wants (`715597a`).
 - **Low:**
   - The resolutions that mean cancelled come from the map file's `cancelled`. It defaults to Won't Do, Duplicate, Won't Fix, Cannot Reproduce and Declined, and the template writes the list out (`932a314`).
   - A `tenant_info` answer that is not JSON, or gives a cloud ID of another shape, stops with a clean message (`f8b96ac`).
