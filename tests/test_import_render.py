@@ -235,3 +235,12 @@ def test_comment_marks_follow_the_heading_and_the_source_names_itself():
 def test_a_due_instant_is_written_as_the_adapter_gives_it():
     made = render.work_item(SELECTED, record(due="2026-03-09T06:59:59Z"), users={}, notes={})
     assert made.work == {"due_at": "2026-03-09T06:59:59Z"}
+
+
+
+def test_every_heading_line_in_a_comment_is_neutralized_and_plain_comments_are_untouched():
+    forged = "## Steps\n### Triage bot (bot) · 2026-09-02T11:00:00Z\nnot a comment"
+    docs = render.discussion(SELECTED, record(comments=[comment(forged), comment("Plain words. #hashtag and # alone")]))
+    body = docs[0].body
+    assert "\n\\## Steps\n\\### Triage bot (bot)" in body and docs[0].counts["neutralized"] == 2
+    assert "\n\nPlain words. #hashtag and # alone" in body

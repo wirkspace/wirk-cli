@@ -375,3 +375,9 @@ def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_t
     else:
         with pytest.raises(github.Stop):
             adapter.read(["acme"])
+
+
+
+def test_an_empty_target_date_stays_empty():
+    issue = node(6, issueFieldValues={"nodes": [{"__typename": "IssueFieldDateValue", "value": None, "field": {"name": "Target date"}}]})
+    assert read(FakeGh([repo("acme/web")], {"acme/web": [issue]}))[2][0].due is None

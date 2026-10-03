@@ -79,7 +79,7 @@ class FakeLinear:
         self.lists = {"teams": list(teams), "workflowStates": STATES, "users": USERS, "issueLabels": LABELS, "cycles": CYCLES,
                       "projects": PROJECTS, "projectMilestones": MILESTONES, "issueRelations": list(relations),
                       "comments": list(comments), "issues": list(issues)}
-        self.files, self.requests, self.limited, self.complexity, self.nested = files or {}, [], 0, 50, {}
+        self.files, self.requests, self.limited, self.complexity, self.nested, self.errors = files or {}, [], 0, 50, {}, []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -97,7 +97,8 @@ class FakeLinear:
                 "errors": [{"message": "Rate limit exceeded", "extensions": {"code": "RATELIMITED"}}]})
         headers = {"X-Complexity": str(self.complexity), "X-RateLimit-Requests-Remaining": "2400",
                    "X-RateLimit-Complexity-Remaining": "2900000", "X-RateLimit-Requests-Reset": reset}
-        return httpx.Response(200, headers=headers, json={"data": self.answer(query, variables)})
+        data, self.errors = self.answer(query, variables), []
+        return httpx.Response(200, headers=headers, json={"data": data, **({"errors": self.errors} if self.errors else {})})
 
     def answer(self, query, variables):
         if "viewer" in query:
@@ -157,6 +158,7 @@ def test_the_key_is_an_owner_only_file_and_only_ever_sent_to_linear(folder):
     with pytest.raises(Stop) as stop:
         adapter(FakeLinear([]), folder).check()
     assert "Read" in stop.value.fix and "linear-key" in stop.value.fix and KEY not in str(stop.value) + stop.value.fix
+    assert "umask 077" in stop.value.fix and "pbpaste" not in stop.value.fix  # works on any POSIX shell
     (folder / "linear-key").write_text("not a key")
     os.chmod(folder / "linear-key", 0o600)
     with pytest.raises(Stop):
@@ -304,3 +306,46 @@ def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
     census, records = found.read([])
     assert len(records) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
     assert census.points == 50 * (len(fake.requests) - 1)  # every answered query, the check included
+
+
+
+# ---------------------------------------------------------------- the review's findings
+
+def test_earlier_identifiers_in_teams_not_shown_are_counted_never_named(folder):
+    found, census, records = read(FakeLinear([issue(1, previousIdentifiers=["SEC-12", "OPS-3", "GONE-7"])]), folder)
+    record = by_key(records)["ENG-1"]
+    ctx = found.context(census.selected)
+    made = render.work_item(ctx, record, {}, {})
+    assert "Previously: [OPS-3], 2 in teams not imported" in made.body and "SEC" not in made.body and "GONE" not in made.body
+    archive = render.archive(record.raw, found.withheld(ctx), {})
+    assert b"OPS-3" in archive and b"SEC-12" not in archive and b"GONE-7" not in archive
+
+
+def test_reactions_count_each_reaction_in_either_shape(folder):
+    shapes = [{"emoji": "+1", "reactions": [{"userId": "u-ada"}, {"userId": "u-ben"}]}, {"emoji": "eyes", "userIds": ["u-ada"]}]
+    record = by_key(read(FakeLinear([issue(1, reactionData=shapes)]), folder)[2])["ENG-1"]
+    assert "Reactions: +1 2 · eyes 1" in record.facts
+
+
+def test_a_relation_into_a_team_the_key_cannot_read_is_left_out_not_fatal(folder):
+    fake = FakeLinear([issue(1), issue(2)], relations=[{"id": "r-1", "type": "blocks", "issue": ref(1), "relatedIssue": ref(2)},
+                                                       {"id": "r-2", "type": "related", "issue": ref(1), "relatedIssue": None}])
+    answer = fake.answer
+
+    def partly(query, variables):
+        if "issueRelations(" in query:
+            assert "includeArchived: true" in query
+            fake.errors = [{"message": "Entity not found", "path": ["issueRelations", "nodes", 1, "relatedIssue"],
+                            "extensions": {"code": "FORBIDDEN"}}]
+        return answer(query, variables)
+    fake.answer = partly
+    _, census, records = read(fake, folder)
+    assert [(kind, r.key) for kind, r in by_key(records)["ENG-1"].relations] == [("blocking", "ENG-2")]
+    assert "relations this key cannot read, left out: 1" in census.notes
+
+
+def test_history_is_read_in_pages_small_enough_for_the_query_budget(folder):
+    fake = FakeLinear([issue(1)])
+    read(fake, folder)
+    query = next(json.loads(r.content)["query"] for r in fake.requests if r.method == "POST" and "issues(" in r.content.decode())
+    assert re.search(r"history\(first: (\d+)\)", query)[1] == "20"
