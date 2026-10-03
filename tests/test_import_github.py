@@ -272,3 +272,47 @@ def test_timelines_are_read_issue_by_issue():
     assert len(records[0].raw["issue"]["timelineItems"]["nodes"]) == 1
     query = next(json.loads(stdin)["query"] for args, stdin in fake.calls if stdin and "page: issues" in stdin)
     assert "timelineItems(" not in query  # pages no longer ask for timelines at all
+
+
+def test_timelines_are_read_four_at_a_time_and_kept_in_order():
+    """Decision 80: at most four timeline reads at once; the records keep GitHub's order."""
+    import threading
+    import time as clock
+    events = lambda n: page([{"__typename": "LabeledEvent", "createdAt": "2026-09-02T00:00:00Z", "actor": {"login": "ada"},
+                              "label": {"name": f"l{n}"}}])
+    fake = FakeGh([repo("acme/web")], {"acme/web": [node(n, timelineItems=events(n)) for n in range(1, 13)]})
+    lock, state = threading.Lock(), {"now": 0, "most": 0}
+
+    def tracked(args, stdin=None):
+        alone = stdin and "timelineItems(" in stdin and "page: issues" not in stdin
+        if alone:
+            with lock:
+                state["now"] += 1
+                state["most"] = max(state["most"], state["now"])
+            clock.sleep(0.05)
+        try:
+            return fake(args, stdin)
+        finally:
+            if alone:
+                with lock:
+                    state["now"] -= 1
+
+    _, census, records = read(tracked)
+    assert state["most"] == 4
+    assert [r.key for r in records] == [f"acme/web#{n}" for n in range(1, 13)]
+    assert [r.raw["issue"]["timelineItems"]["nodes"][0]["label"]["name"] for r in records] == [f"l{n}" for n in range(1, 13)]
+    assert census.points == 2 + 12  # the repositories, one issue page and a timeline each
+
+
+def test_a_secondary_limit_pauses_every_reader():
+    """One reader's secondary-limit refusal holds the others too: one budget, shared."""
+    gate = github.Gate(sleep=lambda seconds: slept.append(seconds))
+    slept = []
+    gate.hold(60)
+    import threading
+    threads = [threading.Thread(target=gate.wait) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(slept) == 4 and all(55 <= seconds <= 60 for seconds in slept)
