@@ -67,7 +67,8 @@ class Jira:
 
     # ---------------------------------------------------------------- talking to Jira
 
-    def check(self) -> None:
+    def check(self, mapped: dict) -> None:
+        self.cancelled = mapped.get("cancelled", self.cancelled)
         path = self.folder / "jira-key"
         if not isinstance(self.cancelled, (list, set)) or not all(isinstance(name, str) for name in self.cancelled):
             raise Stop("the map file's cancelled must be a list of resolution names", '"cancelled": ["Won\'t Do", "Duplicate"]')

@@ -190,7 +190,7 @@ class GitHub:
 
     # ---------------------------------------------------------------- talking to GitHub
 
-    def check(self) -> None:
+    def check(self, mapped: dict) -> None:
         code, out, err = self.run(["api", "-i", "user"])
         if code != 0:
             raise Stop("gh is not logged in to github.com", "gh auth login")

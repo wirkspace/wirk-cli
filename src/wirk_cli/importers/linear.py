@@ -114,7 +114,7 @@ class Linear:
 
     # ---------------------------------------------------------------- talking to Linear
 
-    def check(self) -> None:
+    def check(self, mapped: dict) -> None:
         path = self.folder / "linear-key"
         fix = ("make a personal API key restricted to Read in Linear (Settings, Account, Security & access), then save it "
                f"where only you can read it: run (umask 077 && cat > {path}), paste the key, press Enter and then Ctrl-D")

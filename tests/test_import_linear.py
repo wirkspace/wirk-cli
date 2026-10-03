@@ -193,7 +193,7 @@ def adapter(fake, folder, slept=None):
 
 def read(fake, folder, selection=()):
     found = adapter(fake, folder)
-    found.check()
+    found.check({})
     return found, *found.read(list(selection))
 
 
@@ -206,17 +206,17 @@ def by_key(records):
 def test_the_key_is_an_owner_only_file_and_only_ever_sent_to_linear(folder):
     os.chmod(folder / "linear-key", 0o644)
     with pytest.raises(Stop) as stop:
-        adapter(FakeLinear([]), folder).check()
+        adapter(FakeLinear([]), folder).check({})
     assert "chmod 600" in stop.value.fix
     os.remove(folder / "linear-key")
     with pytest.raises(Stop) as stop:
-        adapter(FakeLinear([]), folder).check()
+        adapter(FakeLinear([]), folder).check({})
     assert "Read" in stop.value.fix and "linear-key" in stop.value.fix and KEY not in str(stop.value) + stop.value.fix
     assert "umask 077" in stop.value.fix and "pbpaste" not in stop.value.fix  # works on any POSIX shell
     (folder / "linear-key").write_text("not a key")
     os.chmod(folder / "linear-key", 0o600)
     with pytest.raises(Stop):
-        adapter(FakeLinear([]), folder).check()
+        adapter(FakeLinear([]), folder).check({})
 
 
 def test_public_teams_by_default_private_ones_only_when_named(folder):
@@ -357,7 +357,7 @@ def test_a_rate_limit_waits_for_its_reset_and_complexity_is_counted(folder):
     fake.limited = 1
     slept = []
     found = adapter(fake, folder, slept)
-    found.check()
+    found.check({})
     census, records = found.read([])
     assert len(by_key(records)) == 1 and len(slept) == 1 and 25 < slept[0] <= 31
     assert census.points == 50 * (len(fake.requests) - 1)  # every answered query, the check included

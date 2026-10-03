@@ -391,3 +391,129 @@ def test_a_project_or_doc_gone_from_the_source_is_missing_but_one_outside_a_narr
     seen = replace(linearish(), seen=frozenset({"p-1"}))  # p-1 still in Linear, outside this run's teams; the rest are gone
     result = {(o.kind, o.key): o.outcome for o in make(fake, ctx=seen).run([])}
     assert result == {("project", "Odd \\] name"): "missing", ("initiative", "Reliability"): "missing"}
+
+
+# ---------------------------------------------------------------- refusals, stale parts and missing items, outcome by outcome
+
+def refuse_when(fake, wanted, answer):
+    """WIRK refuses every write whose operations `wanted` picks; the rest go through."""
+    write = fake.write
+    fake.write = lambda body: answer if wanted(body["operations"]) else write(body)
+    return write
+
+
+def test_a_line_written_over_the_importers_own_item_that_never_had_one_is_neither_held_nor_forged(fake):
+    fake.write({"request_id": "own-1", "operations": [{"op": "item.create", "data": {"title": "A note", "body": "A plain note.",
+                                                                                         "work": {}}}]})
+    item = next(iter(fake.mine()))
+    edit_as(fake, "bob", item, render.line1("GitHub", "issue", "3000000001", "2026-09-30T12:00:00Z", "0" * 12))
+    importer = make(fake)
+    assert outcomes(importer.run([issue(1)])) == {("acme/api#1", "issue"): "created"}
+    assert importer.index.forged == 0 and item not in importer.index.keys
+    assert fake.items[item]["revisions"][-1]["by"] == "bob"
+
+
+def test_a_link_refused_for_another_reason_or_again_and_again_is_an_error_for_its_issue(fake):
+    blocker = Ref(key="acme/api#2", scope="acme/api", public=True, ident="3000000002")
+    records = [issue(1, relations=[("blocked_by", blocker)]), issue(2)]
+    links_only = lambda operations: all(op["op"] == "link.create" for op in operations)
+    write = refuse_when(fake, links_only, refusal("invalid_input", "operations[0] is not accepted"))
+    result = make(fake).run(records)
+    assert [o.__dict__ for o in result if o.kind == "links"] == [
+        {"key": "acme/api#1", "kind": "links", "outcome": "error", "message": "invalid_input: operations[0] is not accepted",
+         "item": None}]
+    fake.write = write
+    refuse_when(fake, links_only, refusal("link_cycle", "This relationship would create a work cycle", input_index=0))
+    result = make(fake).run(records)
+    assert [(o.key, o.outcome, o.message) for o in result if o.kind == "links"] == [("acme/api#1", "error", "refused repeatedly")]
+    assert not fake.links
+
+
+def test_a_refused_archive_is_an_error_for_its_issue(fake):
+    refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409))
+    result = make(fake).run([issue(1, archived="Archived in Linear on 2026-03-01")])
+    assert [(o.kind, o.outcome, o.message) for o in result] == [("issue", "created", ""), ("issue", "error", "basis_changed: moved on")]
+    assert result[1].item is None and not fake.items[item_of_issue(fake, 1)]["archived"]
+
+
+def test_four_refusals_fixed_in_turn_end_as_refused_repeatedly(fake):
+    refuse_when(fake, lambda operations: operations[0]["op"] == "item.create",
+                refusal("unknown_enum_field", "no field repository", input_index=0))
+    result = make(fake).run([issue(1)])
+    first, rest = ("fields repository changed in WIRK during the run; left as header text",
+                   "fields  changed in WIRK during the run; left as header text")
+    assert [(o.outcome, o.message) for o in result] == [("error", "refused repeatedly: " + "; ".join([first, rest, rest, rest]))]
+    assert not fake.items and len(fake.writes()) == 4
+
+
+def test_a_field_option_removed_during_the_run_leaves_only_status_on_create_and_on_edit(fake):
+    write, refused = fake.write, []
+
+    def once_each(body):
+        op = body["operations"][0]["op"]
+        if op in ("item.create", "item.edit") and op not in refused:
+            refused.append(op)
+            return refusal("unknown_enum_option", "repository has no acme_api", input_index=0)
+        return write(body)
+    fake.write = once_each
+    note = "fields repository changed in WIRK during the run; left as header text"
+    assert [(o.outcome, o.message) for o in make(fake).run([issue(1)])] == [("created", note)]
+    assert fake.items[item_of_issue(fake, 1)]["revisions"][-1]["fields"] == {"status": "open"}
+    assert [(o.outcome, o.message) for o in make(fake).run([issue(1, body="Changed.")])] == [("updated", note)]
+    assert fake.items[item_of_issue(fake, 1)]["revisions"][-1]["fields"] == {"status": "open"}
+
+
+def test_a_likely_duplicate_of_a_persons_item_is_named_by_its_short_id(fake):
+    fake.as_whom = "bob"
+    fake.write({"request_id": "bob-1", "operations": [{"op": "item.create", "data": {"title": "Same words", "body": "Bob's own.",
+                                                                                         "work": {}}}]})
+    fake.as_whom = None
+    theirs = next(iter(fake.mine()))
+    fake.duplicates["Same words"] = theirs
+    result = make(fake).run([issue(1, title="Same words")])
+    assert (result[0].outcome, result[0].message) == ("created", f"possible duplicate kept separate: {theirs[5:13]}")
+    assert fake.writes()[-1]["reason"].endswith(f"\nSeparate GitHub issues acme/api#1 and {theirs[5:13]}; imported as they are")
+
+
+def big_discussion():
+    return [said("漢" * 60000, f"2026-09-0{n}T00:00:00Z") for n in range(1, 8)]
+
+
+def part_two(fake):
+    return next(i for i, item in fake.mine("doc").items() if item["revisions"][0]["body"].startswith("GitHub comments-2 "))
+
+
+def test_a_stale_part_a_person_changed_is_left_with_who_changed_it(fake):
+    big = big_discussion()
+    make(fake).run([issue(1, comments=big)])
+    part = part_two(fake)
+    edit_as(fake, "bob", part, fake.items[part]["revisions"][-1]["body"] + "\nBob's note.")
+    result = make(fake).run([issue(1, comments=big[:2])])
+    assert [o.__dict__ for o in result if o.kind == "comments-2"] == [
+        {"key": "acme/api#1", "kind": "comments-2", "outcome": "skipped",
+         "message": "no longer needed, but changed in WIRK (r2 by bob)", "item": part}]
+    assert not fake.items[part]["archived"]
+
+
+def test_a_stale_part_in_a_dry_run_when_wirk_refuses_and_once_archived(fake):
+    big = big_discussion()
+    make(fake).run([issue(1, comments=big)])
+    part = part_two(fake)
+    stale = lambda result: [(o.outcome, o.message, o.item) for o in result if o.kind == "comments-2"]
+    assert stale(make(fake, dry_run=True).run([issue(1, comments=big[:2])])) == [("would archive", "", part)]
+    write = refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409))
+    assert stale(make(fake).run([issue(1, comments=big[:2])])) == [("error", "basis_changed", part)]
+    fake.write = write
+    archive = fake.writes()[-1]
+    assert archive["operations"] == [{"op": "item.archive", "id": part}] and archive["expect"] == {part: 1}
+    assert archive["reason"] == "No longer needed: the discussion of [acme/api#1] now fits in 1 part"
+    assert stale(make(fake).run([issue(1, comments=big[:2])])) == [("archived", "", part)]
+    assert stale(make(fake).run([issue(1, comments=big[:2])])) == []  # an archived part is passed over
+
+
+def test_what_left_a_complete_read_is_named_missing_and_an_issue_outside_the_selection_is_not(fake):
+    make(fake).run([issue(1), issue(2), issue(9, key="acme/web#9")])
+    result = make(fake).run([issue(2)])
+    assert [o.__dict__ for o in result if o.outcome == "missing"] == [
+        {"key": "acme/api#1", "kind": "issue", "outcome": "missing",
+         "message": "deleted, transferred out or no longer visible in GitHub; nothing was archived", "item": item_of_issue(fake, 1)}]

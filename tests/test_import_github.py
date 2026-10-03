@@ -80,7 +80,7 @@ class FakeGh:
 
 def read(fake, selection=("acme",)):
     adapter = github.GitHub(run=fake, sleep=lambda seconds: None)
-    adapter.check()
+    adapter.check({})
     return adapter, *adapter.read(list(selection))
 
 
@@ -90,7 +90,7 @@ def test_no_login_stops_with_the_fix():
     adapter = github.GitHub(run=lambda args, stdin=None: (1, "", "To get started with GitHub CLI, please run: gh auth login"),
                             sleep=lambda s: None)
     with pytest.raises(github.Stop) as stop:
-        adapter.check()
+        adapter.check({})
     assert "gh auth login" in stop.value.fix
 
 
@@ -249,7 +249,7 @@ def test_secondary_limits_back_off_and_a_low_budget_waits_for_the_reset():
         return fake(args, stdin)
 
     adapter = github.GitHub(run=limited, sleep=slept.append)
-    adapter.check()
+    adapter.check({})
     adapter.read(["acme"])
     assert slept and slept[0] >= 59  # the shared pause, less the moment that passed since it was set
 
@@ -337,7 +337,7 @@ def test_a_spent_hourly_budget_waits_for_its_reset():
         return fake(args, stdin)
 
     adapter = github.GitHub(run=spent, sleep=slept.append)
-    adapter.check()
+    adapter.check({})
     census, records = adapter.read(["acme"])
     assert len(records) == 1 and refused and slept and 1700 < max(slept) <= 1810
 
@@ -369,7 +369,7 @@ def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_t
         return fake(args, stdin)
 
     adapter = github.GitHub(run=limited, sleep=slept.append)
-    adapter.check()
+    adapter.check({})
     if read_through:
         assert len(adapter.read(["acme"])[1]) == 1 and [round(s) for s in slept[:4]] == [60, 120, 240, 480]
     else:
