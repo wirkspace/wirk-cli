@@ -256,7 +256,7 @@ class Linear:
         initiatives = [i for i in lists["initiatives"] if not holds[i["id"]] or {p["id"] for p in holds[i["id"]]} & ids]
         ids |= {node["id"] for node in milestones + initiatives}
         related = defaultdict(list)
-        for found in lists["projectRelations"]:
+        for found in lists["projectRelations"]:  # anchored to a milestone when it names one
             blocker, blocked = found["projectMilestone"] or found["project"], found["relatedProjectMilestone"] or found["relatedProject"]
             kinds = ("blocking", "blocked_by") if found["type"] == "blocks" else ("related", "related")
             related[blocker["id"]].append((kinds[0], self.part(blocked["id"])))
@@ -265,18 +265,18 @@ class Linear:
             for project in sorted(holds[initiative["id"]], key=lambda p: p["name"]):
                 related[project["id"]].append(("initiative", self.part(initiative["id"])))
                 related[initiative["id"]].append(("includes", self.part(project["id"])))
-        for initiative in initiatives:
             parent = (initiative["parentInitiative"] or {}).get("id")
             if parent in ids:
                 related[initiative["id"]].append(("parent_initiative", self.part(parent)))
                 related[parent].append(("sub_initiative", self.part(initiative["id"])))
         records = [self.project(node, comments, related) for node in projects]
-        records += [self.build("milestone", node, self.part(node["id"]).key, node["description"] or "",
-                               self.projects[node["project"]["id"]]["url"], node.get("updatedAt") or self.projects[node["project"]["id"]]["updatedAt"],
-                               state="completed" if node["status"] == "done" else "open",
-                               facts=[f"Target: {node['targetDate']}"] if node["targetDate"] else [],
-                               due=due_at(node["targetDate"], "UTC") if node["targetDate"] else None,
-                               relations=[("project", self.part(node["project"]["id"]))] + related[node["id"]]) for node in milestones]
+        for node in milestones:
+            project = self.projects[node["project"]["id"]]
+            records.append(self.build("milestone", node, self.part(node["id"]).key, node["description"] or "", project["url"],
+                                      node.get("updatedAt") or project["updatedAt"], state="completed" if node["status"] == "done" else "open",
+                                      facts=[f"Target: {node['targetDate']}"] if node["targetDate"] else [],
+                                      due=due_at(node["targetDate"], "UTC") if node["targetDate"] else None,
+                                      relations=[("project", self.part(project["id"]))] + related[node["id"]]))
         records += [self.build("initiative", node, node["name"], self.text(node), node["url"], node["updatedAt"],
                                facts=[" · ".join([f"Status: {node['status']}",
                                                   *([f"Health: {HEALTH[node['health']]}"] if node["health"] in HEALTH else []),
