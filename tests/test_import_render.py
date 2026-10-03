@@ -185,3 +185,9 @@ def test_the_hash_moves_with_what_is_written_and_nothing_else():
     assert same == digest(version="2027-01-01T00:00:00Z")  # the version is on the first line only
     made = render.work_item(SELECTED, record(), users={}, notes={})
     assert render.digest(made.title, made.body, {}, {}, ["a"]) != render.digest(made.title, made.body, {}, {}, ["b"])
+
+
+def test_addresses_typed_in_text_are_kept_and_counted():
+    rendered = render.work_item(SELECTED, record(body='curl -d \'{"email": "ada@example.com"}\' and write to ben@example.org'),
+                                users={}, notes={})
+    assert "ada@example.com" in rendered.body and rendered.counts["addresses"] == 2
