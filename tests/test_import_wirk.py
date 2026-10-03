@@ -123,6 +123,7 @@ def test_an_edit_in_wirk_wins_until_overwrite(fake):
     assert listed.outcome == "would update" and "changed in WIRK since import (r2 by bob)" in listed.message
     result = make(fake, overwrite=True).run([issue(1, body="Changed at the source.")])
     assert result[0].outcome == "updated" and fake.writes()[-1]["expect"] == {item: 2}
+    assert "changed in WIRK since import (r2 by bob); replaced by --overwrite" in result[0].message
 
 
 def test_an_unchanged_source_stays_current_whoever_edited_last(fake):
