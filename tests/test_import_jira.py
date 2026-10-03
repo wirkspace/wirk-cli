@@ -43,6 +43,20 @@ FIELDS = [{"id": "customfield_10020", "name": "Sprint", "custom": True, "schema"
           {"id": "customfield_10034", "name": "Build", "custom": True,
            "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textfield"}},
           {"id": "summary", "name": "Summary", "custom": False, "schema": {"type": "string", "system": "summary"}}]
+# what a project read with expand=description,lead returns, with the per-viewer and volatile fields an archive must not keep
+LISTED = [{**p, "description": f"What {p['name']} is for.\n# Not a heading", "lead": BEN, "favourite": False, "isPrivate": False,
+           "insight": {"totalIssueCount": 3}, "permissions": {"canEdit": False}, "self": f"{BASE}/rest/api/3/project/{p['id']}"}
+          for p in PROJECTS]
+COMPONENTS = {"10000": [{"id": "10101", "name": "Web", "description": "The site", "issueCount": 4},
+                        {"id": "10100", "name": "API", "description": "The service", "lead": ADA, "issueCount": 7}]}
+VERSIONS = {"10000": [{"id": "10201", "name": "2.0", "description": "Next", "released": False, "archived": False, "startDate": "2026-09-01",
+                       "releaseDate": "2026-11-01", "overdue": False, "userStartDate": "01/Sep/26", "userReleaseDate": "01/Nov/26"},
+                      {"id": "10200", "name": "1.0", "released": True, "archived": False, "releaseDate": "2026-06-01", "overdue": False}]}
+
+
+def sprint(n, state="active", goal="Ship sign-in"):
+    return {"id": n, "name": f"Sprint {n}", "state": state, "boardId": 3, "goal": goal, "startDate": f"2026-09-{n:02d}T00:00:00.000Z",
+            "endDate": f"2026-09-{n + 13:02d}T00:00:00.000Z", **({"completeDate": f"2026-09-{n + 13:02d}T09:00:00.000Z"} if state == "closed" else {})}
 
 
 def ref(key, ident, summary="Elsewhere"):
@@ -78,6 +92,9 @@ class FakeJira:
         self.issues, self.changelogs, self.remote = list(issues), changelogs or {}, remote or {}
         self.more_comments, self.files, self.requests, self.limited, self.captcha = comments or {}, files or {}, [], 0, False
         self.tenant = None  # tenant_info's answer, when a test needs another
+        self.projects, self.components, self.versions = json.loads(json.dumps(LISTED)), json.loads(json.dumps(COMPONENTS)), \
+            json.loads(json.dumps(VERSIONS))
+        self.answers = {}  # path -> the answer a test wants there instead
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -90,11 +107,19 @@ class FakeJira:
             self.limited -= 1
             return httpx.Response(429, headers={"Retry-After": "7", "RateLimit-Reason": "jira-burst-based"})
         path, query = url.path.removeprefix(f"/ex/jira/{CLOUD}"), parse_qs(url.query)
+        if path in self.answers:
+            return self.answers[path]
         if path == "/rest/api/3/myself":
             return httpx.Response(200, json=ADA)
         if path == "/rest/api/3/project/search":
             start = int(query.get("startAt", ["0"])[0])
-            return httpx.Response(200, json={"values": PROJECTS[start:start + 2], "startAt": start, "isLast": start + 2 >= len(PROJECTS)})
+            return httpx.Response(200, json={"values": self.projects[start:start + 2], "startAt": start,
+                                             "isLast": start + 2 >= len(self.projects)})
+        if path.startswith("/rest/api/3/project/") and path.endswith("/components"):
+            return httpx.Response(200, json=self.components.get(path.split("/")[-2], []))
+        if path.startswith("/rest/api/3/project/") and path.endswith("/version"):
+            start, found = int(query.get("startAt", ["0"])[0]), self.versions.get(path.split("/")[-2], [])
+            return httpx.Response(200, json={"values": found[start:start + 50], "startAt": start, "isLast": start + 50 >= len(found)})
         if path == "/rest/api/3/field":
             return httpx.Response(200, json=FIELDS)
         if path == "/rest/api/3/search/jql":
@@ -148,7 +173,8 @@ def read(fake, folder, selection=()):
 
 
 def by_key(records):
-    return {record.key: record for record in records}
+    """The issues read, by key; project docs are tested on their own."""
+    return {record.key: record for record in records if record.kind == "issue"}
 
 
 # ---------------------------------------------------------------- the key, the site and the selection
@@ -383,7 +409,7 @@ def test_a_move_from_a_project_not_selected_keeps_its_name_out_of_the_history(fo
 def test_cancelled_resolutions_come_from_the_map_with_broad_defaults(folder):
     done = lambda n, why: issue(n, status={"name": "Done", "statusCategory": {"key": "done"}}, resolution={"name": why})
     nodes = [done(1, "Declined"), done(2, "Cannot Reproduce"), done(3, "Fixed")]
-    states = {r.key: r.state for r in read(FakeJira(nodes), folder)[2]}
+    states = {key: r.state for key, r in by_key(read(FakeJira(nodes), folder)[2]).items()}
     assert states == {"SEED-1": "cancelled", "SEED-2": "cancelled", "SEED-3": "completed"}
     found = adapter(FakeJira(nodes), folder)
     found.cancelled = {"Fixed"}
@@ -516,3 +542,147 @@ def test_a_move_at_a_time_that_cannot_be_read_withholds_the_whole_history(folder
     found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
     archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
     assert b"Outside" not in archive and b"legal hold" not in archive and b"Later words" not in archive
+
+
+# ---------------------------------------------------------------- project docs (docs/plans/importers-jira-projects.md)
+
+def docs(records):
+    return {record.key: record for record in records if record.kind == "project"}
+
+
+def sprinted(n, *sprints, project="SEED", **fields):
+    return issue(n, project, customfield_10020=list(sprints), **fields)
+
+
+def test_a_project_selected_as_a_project_becomes_one_doc_of_what_a_team_needs(folder):
+    fake = FakeJira([sprinted(1, sprint(7)), sprinted(2, sprint(7), sprint(6, "closed", "Close the beta")), issue(3, "OPS")])
+    found, census, records = read(fake, folder, ["SEED"])
+    assert list(docs(records)) == ["SEED"] and census.issues == 2
+    doc = docs(records)["SEED"]
+    assert (doc.ident, doc.title, doc.url) == ("p10000", "Seed project", "https://acme.atlassian.net/browse/SEED")
+    assert doc.opened == ["Lead: Ben Sample"] and doc.fields == {} and not doc.comments and not doc.relations
+    assert doc.body == "\n\n".join([
+        "What Seed project is for.\n\\# Not a heading",
+        "## Components\n\n- API · lead Ada Example\n- Web · no lead",
+        "## Versions\n\n- 1.0 · released · start none · release 2026-06-01\n- 2.0 · unreleased · start 2026-09-01 · release 2026-11-01",
+        "## Sprints\n\n- Sprint 6 · closed · 2026-09-06T00:00:00.000Z to 2026-09-19T00:00:00.000Z · completed 2026-09-19T09:00:00.000Z"
+        " · goal: Close the beta\n- Sprint 7 · active · 2026-09-07T00:00:00.000Z to 2026-09-20T00:00:00.000Z · goal: Ship sign-in"])
+    projects = [request for request in fake.requests if request.url.path.endswith("/project/search")]
+    assert all(parse_qs(urlsplit(str(r.url)).query)["expand"] == ["description,lead"] for r in projects)
+    assert "project docs: 1 read" in census.notes
+
+
+def test_the_project_archive_holds_only_what_the_doc_shows_and_no_email(folder):
+    found, census, records = read(FakeJira([sprinted(1, sprint(7))]), folder, ["SEED"])
+    doc = docs(records)["SEED"]
+    archive = json.loads(render.archive(doc.raw, found.withheld(found.context(census.selected)), {}))
+    person = lambda user: {"accountId": user["accountId"], "displayName": user["displayName"]}
+    assert archive == {
+        "project": {"id": "10000", "key": "SEED", "name": "Seed project", "description": "What Seed project is for.\n# Not a heading",
+                    "lead": person(BEN)},
+        "components": [{"id": "10100", "name": "API", "lead": person(ADA)}, {"id": "10101", "name": "Web", "lead": None}],
+        "versions": [{"id": "10200", "name": "1.0", "released": True, "archived": False, "startDate": None, "releaseDate": "2026-06-01"},
+                     {"id": "10201", "name": "2.0", "released": False, "archived": False, "startDate": "2026-09-01",
+                      "releaseDate": "2026-11-01"}],
+        "sprints": [{"id": 7, "name": "Sprint 7", "state": "active", "startDate": "2026-09-07T00:00:00.000Z",
+                     "endDate": "2026-09-20T00:00:00.000Z", "completeDate": None, "goal": "Ship sign-in"}]}
+    assert "@example.com" not in doc.body + json.dumps(archive)
+
+
+def test_a_named_issue_brings_no_doc_for_its_project(folder):
+    found, census, records = read(FakeJira([issue(1), issue(5, "OPS")]), folder, ["SEED", "OPS-5"])
+    assert list(docs(records)) == ["SEED"] and {r.key for r in records if r.kind == "issue"} == {"SEED-1", "OPS-5"}
+    found, census, records = read(FakeJira([issue(5, "OPS")]), folder, ["OPS-5"])
+    assert not docs(records) and not [note for note in census.notes if note.startswith("project docs")]
+
+
+def test_a_sprint_holding_only_a_skipped_restricted_issue_appears_on_no_doc(folder):
+    fake = FakeJira([sprinted(1, sprint(7)), sprinted(9, sprint(8, goal="Secret"), security={"name": "Staff only"})])
+    found, census, records = read(fake, folder, ["SEED"])
+    assert "Sprint 8" not in docs(records)["SEED"].body and "Secret" not in json.dumps(docs(records)["SEED"].raw)
+
+
+def test_a_project_and_an_issue_with_the_same_id_stay_apart(folder):
+    from import_fakes import FakeWirk
+    from test_import_wirk import make, outcomes
+    same = issue(1)
+    same["id"] = "10000"  # Jira's project and issue IDs are separate sequences that meet
+    blocked = issue(2, issuelinks=[{"id": "500", "type": {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+                                    "inwardIssue": ref("SEED-1", "10000")}])
+    found, census, records = read(FakeJira([same, blocked]), folder, ["SEED"])
+    assert sorted(r.ident for r in records) == ["10000", "20002", "p10000"]
+    store = FakeWirk(fields={})
+    result = outcomes(make(store, ctx=found.context(census.selected)).run(records))
+    assert result == {("SEED-1", "issue"): "created", ("SEED-2", "issue"): "created", ("SEED", "project"): "created"}
+    work = {i: item for i, item in store.items.items() if item["revisions"][-1]["work"] is not None}
+    assert [(l["type"], l["from"] in work, l["to"] in work) for l in store.links.values()] == [("requires", True, True)]
+
+
+def run_into(store, fake, folder, selection, clock="2026-10-03T12:00:00Z"):
+    from test_import_wirk import make
+    found = jira.Jira(http=httpx.Client(transport=httpx.MockTransport(fake)), sleep=[].append, folder=folder, clock=lambda: clock)
+    found.check({})
+    census, records = found.read(list(selection))
+    return {(o.key, o.kind): o.outcome for o in make(store, ctx=found.context(census.selected)).run(records)}
+
+
+def test_a_rerun_writes_nothing_when_only_what_the_doc_does_not_show_changes(folder):
+    from import_fakes import FakeWirk
+    store, fake = FakeWirk(fields={}), FakeJira([sprinted(1, sprint(7)), sprinted(2, sprint(6, "closed"))])
+    assert run_into(store, fake, folder, ["SEED"])[("SEED", "project")] == "created"
+    fake.projects[0].update(favourite=True, insight={"totalIssueCount": 9}, permissions={"canEdit": True}, isPrivate=True)
+    fake.components["10000"][0]["issueCount"] = 40
+    fake.versions["10000"][0].update(overdue=True, userStartDate="1 Sep", userReleaseDate="1 Nov")
+    fake.issues[0], fake.issues[1] = sprinted(1, sprint(6, "closed")), sprinted(2, sprint(7))  # the same two sprints, swapped
+    before = len(store.writes())
+    result = run_into(store, fake, folder, ["SEED"], clock="2026-10-04T08:00:00Z")
+    assert result[("SEED", "project")] == "current"
+    assert [w for w in store.writes()[before:] if "Jira project" in json.dumps(w)] == []
+
+
+def test_a_moved_release_date_or_a_started_sprint_revises_the_project_doc(folder):
+    from import_fakes import FakeWirk
+    store, fake = FakeWirk(fields={}), FakeJira([sprinted(1, sprint(7, "future")), issue(2)])
+    run_into(store, fake, folder, ["SEED"])
+    fake.versions["10000"][0]["releaseDate"] = "2026-12-01"
+    result = run_into(store, fake, folder, ["SEED"])
+    assert result[("SEED", "project")] == "updated" and result[("SEED-2", "issue")] == "current"
+    fake.issues[0] = sprinted(1, sprint(7, "active"))
+    assert run_into(store, fake, folder, ["SEED"])[("SEED", "project")] == "updated"
+
+
+@pytest.mark.parametrize("where", ["components", "version"])
+@pytest.mark.parametrize("answer", [httpx.Response(403), httpx.Response(404), httpx.Response(400), httpx.Response(500)])
+def test_a_project_whose_components_or_versions_cannot_be_read_gets_no_doc_and_the_run_goes_on(where, answer, folder):
+    from import_fakes import FakeWirk
+    store, fake = FakeWirk(fields={}), FakeJira([issue(1), issue(2, "OPS")])
+    assert run_into(store, fake, folder, ["SEED", "OPS"])[("SEED", "project")] == "created"
+    fake.answers[f"/rest/api/3/project/10000/{where}"] = answer
+    fake.issues[0] = issue(1, summary="Changed")
+    found = jira.Jira(http=httpx.Client(transport=httpx.MockTransport(fake)), sleep=[].append, folder=folder)
+    found.check({})
+    census, records = found.read(["SEED", "OPS"])
+    assert list(docs(records)) == ["OPS"] and len([r for r in records if r.kind == "issue"]) == 2
+    assert "project docs: 1 read · 1 skipped (components or versions could not be read): SEED" in census.notes
+    result = run_into(store, fake, folder, ["SEED", "OPS"])
+    assert result[("SEED-1", "issue")] == "updated" and ("SEED", "project") not in result  # the earlier doc stays as it was
+
+
+@pytest.mark.parametrize("answer", [httpx.Response(401, headers={"X-Seraph-LoginReason": "AUTHENTICATION_DENIED"}), httpx.Response(401)])
+def test_a_captcha_or_a_dead_token_during_a_components_read_still_stops(answer, folder):
+    fake = FakeJira([issue(1)])
+    fake.answers["/rest/api/3/project/10000/components"] = answer
+    with pytest.raises(Stop) as stop:
+        read(fake, folder, ["SEED"])
+    assert type(stop.value) is Stop and ("CAPTCHA" in str(stop.value) or "refused the token" in str(stop.value))
+
+
+def test_a_narrower_selection_reports_no_project_missing_but_one_no_longer_browsed_is(folder):
+    from import_fakes import FakeWirk
+    store, fake = FakeWirk(fields={}), FakeJira([issue(1), issue(2, "OPS")])
+    run_into(store, fake, folder, ["SEED", "OPS"])
+    assert "missing" not in run_into(store, fake, folder, ["SEED"]).values()
+    fake.projects = [p for p in fake.projects if p["key"] != "OPS"]
+    result = run_into(store, fake, folder, ["SEED"])
+    assert result[("OPS", "project")] == "missing"
+    assert not any(item["archived"] for item in store.items.values())
