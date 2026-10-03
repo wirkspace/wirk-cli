@@ -295,7 +295,8 @@ def test_jira_every_project_with_restricted_issues_named_then_the_import(jira_wo
     assert template["cancelled"] == ["Cannot Reproduce", "Declined", "Duplicate", "Won't Do", "Won't Fix"]  # read back by the run below
     fake.tokens[(home / "import" / "wirk-token-jira-import").read_text().strip()] = "alice-jira-import"
     code, out, err = run()
-    assert code == 0 and "created: 2" in out and "find one: wirk query text='Jira issue [SEED-1]'" in out, out + err
+    assert code == 0 and "created: 5" in out and "find one: wirk query text='Jira issue [SEED-1]'" in out, out + err  # 2 issues, 3 projects
+    assert "note: project docs: 3 read" in out
     assert jira_world["token"] not in out + err
     from wirk_cli.help import HELP
     assert "wirk import jira [PROJECT|ISSUE_KEY…]" in HELP["import"] and "import/jira-key" in HELP["import"]
@@ -409,3 +410,15 @@ def test_without_file_storage_the_stop_names_the_source_it_did_not_read(which, s
     world["fake"].no_files = "No file store is configured"
     code, out, err = world["run"]("--dry-run")
     assert code == 2 and f"Nothing was read from {source} or written to WIRK" in err and "GitHub" not in err
+
+
+@pytest.mark.parametrize("answer, said", [(httpx.Response(401, headers={"X-Seraph-LoginReason": "AUTHENTICATION_DENIED"}), "CAPTCHA"),
+                                          (httpx.Response(401), "refused the token")])
+def test_a_captcha_or_a_dead_token_during_a_project_read_stops_the_jira_run(answer, said, jira_world, monkeypatch):
+    from test_import_jira import FakeJira, issue as jira_issue
+    from wirk_cli.importers import jira
+    source = FakeJira([jira_issue(1)])
+    source.answers["/rest/api/3/project/10000/components"] = answer
+    monkeypatch.setattr(jira, "TRANSPORT", httpx.MockTransport(source))
+    code, out, err = jira_world["run"]("SEED", "--dry-run")
+    assert code == 2 and said in err and not jira_world["fake"].writes()

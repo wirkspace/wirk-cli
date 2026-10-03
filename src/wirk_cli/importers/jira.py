@@ -4,6 +4,7 @@ API gateway for the site, reads only, and no email is kept. Restricted issues, c
 the issue is named."""
 
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 import base64
 import json
 import os
@@ -18,6 +19,7 @@ from . import adf, render
 from .render import Stop
 
 SOURCE, NOUN = "Jira", ("project", "projects")
+KINDS, DOCS = ("issue", "project"), frozenset({"project"})  # a project selected as a project is one doc
 GATEWAY = "https://api.atlassian.com/ex/jira/"
 TRANSPORT = None  # how requests leave; tests answer through a fake
 ISSUE_KEY = re.compile(r"[A-Z][A-Z0-9_]*-[0-9]+")
@@ -36,6 +38,13 @@ CHURN = {"comment", "worklog", "updated", "watches", "votes", "timeoriginalestim
          "aggregatetimeoriginalestimate", "aggregatetimeestimate", "aggregatetimespent", "timetracking", "progress",
          "aggregateprogress"}
 CAP = 100 * 1024 * 1024
+# a project doc's archive holds only what the doc shows, plus IDs (docs/plans/importers-jira-projects.md §3)
+VERSION, SPRINT = ("id", "name", "released", "archived", "startDate", "releaseDate"), \
+    ("id", "name", "state", "startDate", "endDate", "completeDate", "goal")
+
+
+class Refused(Stop):
+    """A read Jira refused or did not answer: it stops the run, unless the reader can do without what it asked for."""
 
 
 def clean(value):
@@ -56,6 +65,19 @@ def bare(found: dict | None) -> dict | None:
     return found and {**found, "fields": {key: value for key, value in (found.get("fields") or {}).items() if key != "summary"}}
 
 
+def kind_of(definition: dict) -> str:
+    """A field's type, the last part of its schema's custom key: select, textarea, gh-sprint …"""
+    return ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1]
+
+
+def by_id(items) -> list:
+    return sorted(items, key=lambda item: (len(str(item["id"])), str(item["id"])))
+
+
+def person(user: dict | None) -> dict | None:
+    return user and {"accountId": user.get("accountId"), "displayName": user.get("displayName")}
+
+
 def placed(entry: dict) -> tuple:
     """A history entry's place: its instant, then Jira's order; one without both goes last and is withheld."""
     try:
@@ -69,9 +91,10 @@ class Jira:
     # resolutions of done work that mean it was not done (§6); the map file's "cancelled" replaces them
     cancelled = {"Won't Do", "Duplicate", "Won't Fix", "Cannot Reproduce", "Declined"}
 
-    def __init__(self, http=None, sleep=None, folder=None):
+    def __init__(self, http=None, sleep=None, folder=None, clock=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
-        self.sleep, self.folder, self.points = sleep or time.sleep, folder or config_dir() / "import", 0
+        self.sleep, self.folder, self.points, self.seen = sleep or time.sleep, folder or config_dir() / "import", 0, frozenset()
+        self.clock = clock or (lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))  # a project doc's version
 
     # ---------------------------------------------------------------- talking to Jira
 
@@ -125,22 +148,23 @@ class Jira:
                 raise Stop("Jira asks for a CAPTCHA before it takes this login again", f"sign in at https://{self.site} in a "
                            "browser and answer it, then run the same command again")
             if answer is not None and answer.status_code in (401, 403):
-                raise Stop("Jira refused the token", "make a new scoped read-only token and save it as the last one was")
+                kind = Stop if answer.status_code == 401 else Refused  # a 403 refuses this read, not every read
+                raise kind("Jira refused the token", "make a new scoped read-only token and save it as the last one was")
             if answer is None or answer.status_code >= 500:
                 failures += 1
                 if failures > 3:
-                    raise Stop("Jira did not answer; run the same command again")
+                    raise Refused("Jira did not answer; run the same command again")
                 self.sleep(5 * 2 ** failures)
                 continue
             if answer.status_code != 200:
-                raise Stop(f"Jira refused a read: HTTP {answer.status_code} for {path}")
+                raise Refused(f"Jira refused a read: HTTP {answer.status_code} for {path}")
             self.points += 1
             return answer.content if raw else answer.json()
 
-    def paged(self, path: str, key: str, size: int) -> list:
+    def paged(self, path: str, key: str, size: int, **params) -> list:
         found = []
         while True:
-            answer = self.call("GET", path, {"startAt": len(found), "maxResults": size})
+            answer = self.call("GET", path, {"startAt": len(found), "maxResults": size, **params})
             found += answer[key]
             if not answer[key] or answer.get("isLast") or len(found) >= answer.get("total", float("inf")):
                 return found
@@ -148,10 +172,12 @@ class Jira:
     # ---------------------------------------------------------------- what to read
 
     def context(self, selected: list) -> render.Context:
-        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS)
+        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, self.seen)
 
     def read(self, selection: list) -> tuple[render.Census, list]:
-        projects = {p["key"]: p for p in self.paged("/rest/api/3/project/search", "values", 50)}
+        projects = {p["key"]: p for p in self.paged("/rest/api/3/project/search", "values", 50, expand="description,lead")}
+        # every project still there, selected or not; its doc's ID is "p" + its ID, since issue and project IDs meet
+        self.seen = frozenset("p" + p["id"] for p in projects.values())
         self.fields = {f["id"]: f for f in self.call("GET", "/rest/api/3/field")}
         named = {word for word in selection if ISSUE_KEY.fullmatch(word)}
         wanted = [word for word in selection if word not in named] or ([] if named else sorted(projects))
@@ -193,7 +219,52 @@ class Jira:
         census.comments = sum(len(record.comments) for record in records)
         if self.counts:
             census.notes.append("ADF: " + " · ".join(f"{name} {count}" for name, count in sorted(self.counts.items())))
-        return census, records
+        return census, records + self.projects([projects[key] for key in wanted], issues, census)
+
+    # ---------------------------------------------------------------- projects selected as projects
+
+    def projects(self, chosen: list, issues: list, census: render.Census) -> list:
+        """One doc per project selected as a project, with the sprints of its issues kept; one whose components or
+        versions Jira will not give is left for a later run."""
+        marked = [ident for ident, definition in self.fields.items() if kind_of(definition) == "gh-sprint"]
+        sprints = defaultdict(dict)  # one snapshot per sprint ID
+        for node in issues:
+            for found in (sprint for ident in marked for sprint in node["fields"].get(ident) or []):
+                sprints[node["fields"]["project"]["id"]].setdefault(found["id"], found)
+        docs, unread = [], []
+        for project in chosen:
+            try:
+                components = self.call("GET", f"/rest/api/3/project/{project['id']}/components")
+                versions = self.paged(f"/rest/api/3/project/{project['id']}/version", "values", 50)
+            except Refused:
+                unread.append(project["key"])
+                continue
+            docs.append(self.project(project, components, versions, list(sprints[project["id"]].values())))
+        if chosen:
+            census.notes.append(f"project docs: {len(docs)} read" + (
+                f" · {len(unread)} skipped (components or versions could not be read): {', '.join(unread)}" if unread else ""))
+        return docs
+
+    def project(self, node: dict, components: list, versions: list, sprints: list) -> render.Record:
+        """The doc and its archive, both from the same allowlist (§3 of the plan)."""
+        raw = {"project": {**{key: node.get(key) for key in ("id", "key", "name", "description")}, "lead": person(node.get("lead"))},
+               "components": [{"id": c["id"], "name": c["name"], "lead": person(c.get("lead"))} for c in by_id(components)],
+               "versions": [{key: v.get(key) for key in VERSION} for v in by_id(versions)],
+               "sprints": [{key: s.get(key) for key in SPRINT} for s in by_id(sprints)]}
+        one = lambda text: " ".join(str(text).split())
+        lines = {"Components": [f"- {one(c['name'])} · " + (f"lead {one(c['lead']['displayName'])}" if c["lead"] else "no lead")
+                                for c in raw["components"]],
+                 "Versions": [f"- {one(v['name'])} · {'archived' if v['archived'] else 'released' if v['released'] else 'unreleased'} · "
+                              f"start {v['startDate'] or 'none'} · release {v['releaseDate'] or 'none'}" for v in raw["versions"]],
+                 "Sprints": [f"- {one(s['name'])} · {s['state']} · {s['startDate']} to {s['endDate']}"
+                             + (f" · completed {s['completeDate']}" if s["completeDate"] else "")
+                             + (f" · goal: {one(s['goal'])}" if s["goal"] else "") for s in raw["sprints"]]}
+        body = "\n\n".join([render.HEADING.sub(r"\1\\\2", (node.get("description") or "").strip()),
+                             *(f"## {name}\n\n" + "\n".join(found) for name, found in lines.items() if found)]).strip("\n")
+        return render.Record(SOURCE, "project", ident="p" + node["id"], key=node["key"], url=f"https://{self.site}/browse/{node['key']}",
+                             version=self.clock(), title=node["name"], body=body, state="open", closed=None,
+                             opened=[f"Lead: {self.name(node.get('lead'))}"], facts=[], assignees=[], fields={}, due=None,
+                             relations=[], comments=[], attachments=[], raw=raw, raw_comments=[])
 
     def changelogs(self, ids: list) -> dict:
         """Every issue's history, oldest first, from the bulk fetch (up to 1,000 issues a request)."""
@@ -302,10 +373,10 @@ class Jira:
         """Field values by name (small current sets only become fields, §6), header facts, and paragraph-field sections."""
         sprints, points, custom, sections, fields = [], None, [], [], defaultdict(list)
         for ident, definition in self.fields.items():
-            value, schema = f.get(ident), definition.get("schema") or {}
+            value = f.get(ident)
             if value in (None, [], "") or not definition.get("custom"):
                 continue
-            kind, name = (schema.get("custom") or "").rsplit(":", 1)[-1], definition["name"]
+            kind, name = kind_of(definition), definition["name"]
             if kind == "gh-sprint":
                 sprints = value
             elif name in STORY_POINTS:
@@ -353,7 +424,7 @@ class Jira:
     def selections(self, records: list) -> dict:
         found = dict(SELECTIONS)
         for definition in self.fields.values():
-            kind = ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1]
+            kind = kind_of(definition)
             if kind in SELECT:
                 found[definition["name"]] = SELECT[kind]
         return found
