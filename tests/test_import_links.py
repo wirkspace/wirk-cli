@@ -67,7 +67,9 @@ def test_no_link_to_a_withheld_or_unimported_issue(fake):
 def test_no_link_to_an_item_archived_in_wirk_and_no_write_for_it_on_the_next_run(fake):
     make(fake).run([issue(1), issue(2)])
     archived = item_of(fake, 2)
+    fake.as_whom = "bob"  # a person archives it
     fake.write({"request_id": "a-1", "reason": "Not needed", "expect": {archived: 1}, "operations": [{"op": "item.archive", "id": archived}]})
+    fake.as_whom = None
     records = [issue(1, relations=[("related", to(2))]), issue(2, relations=[("related", to(1))])]
     make(fake).run(records)
     assert not [l for l in fake.links.values() if archived in (l["from"], l["to"]) and l["type"] != "related_to" or

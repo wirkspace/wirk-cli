@@ -155,7 +155,7 @@ Markdown conversion and pacing belong to the adapter.
   - **Nothing about comments** is on the work item: no count, no comment, no comment's raw form. The discussion doc is found through the `related_to` link. A new comment therefore never revises the work item.
 - **One discussion doc**, when the issue has comments.
   - Title `<key> discussion: <issue title>`, cut to 200. Its body is its own provenance line, its key line (`GitHub comments on [Acme/api#123] · <url>`), the content notice, then every comment in order: a heading `### @ada · 2026-03-02T11:00:00Z · edited`, the comment, its reactions.
-  - **Forged headings are neutralized.** A line inside a comment that starts like a heading of this doc (`### @`) is written with a backslash, `\### @…`, so it reads as text and cannot pose as another comment; the report counts them.
+  - **Headings in comments are neutralized.** Every line inside a comment that starts as a Markdown heading (one to six `#` and a space) is written with a backslash, `\### …`, so it reads as text: no author's text can pose as another comment, a bot's or an external user's included, or add structure to the doc. The report counts them. A comment with no heading line is written exactly as before; a discussion whose comments hold heading lines changes once.
   - It is `related_to` the work item. Its files are the comments' archive and the attachments the comments reference.
   - **Parts.** When the encoded JSON of the write that carries a part (the request body exactly as sent, escapes included) would pass 2 MiB, the discussion continues in parts (`… discussion (2)`, first-line kind `comments-2`), each `related_to` the work item. Parts are cut between comments; a source's longest comment always fits in a part of its own. The first part goes in one write with the work item, so the work item's bytes count toward it. Parts after the first go one to a write. So no write nears the 4 MiB request limit, whatever the script or emoji in the text.
   - **Stale parts.** A part the discussion no longer needs (comments deleted, or shorter after a redaction) is archived by the importer with the reason `No longer needed: the discussion of [Acme/api#123] now fits in 1 part`, when the importer made its latest revision; otherwise it is reported.
@@ -628,6 +628,122 @@ Settled now from the Linear note and the rulings; revised against the real works
 | L18 | Re-run, change, WIRK edit, forgery, retargeting, second importer, interruption | as G34 to G40 | R C |
 
 R is the person's own Linear workspace, read-only; its dry-run census decides which rows it really exercises. The rest stay F and C, and the report says which.
+
+### 5.1 Build record: Linear issues (3 October 2026)
+
+The first Linear slice imports issues. Projects, milestones, initiatives, documents and updates (L10, L11) are the next slice, in their own pull request. Until then, an issue's project and milestone are header lines.
+
+**No real source yet.** The person's read key is still to come. So every answer in the tests is synthetic, shaped from the fields the Linear note read in Linear's published schema at `2a3ac4c`. Every row that needs the real workspace (R) is open below.
+
+**Built** (`src/wirk_cli/importers/linear.py`, about 360 lines; tests in `tests/test_import_linear.py` and `tests/test_import_linear_contract.py`):
+- **Reads:** GraphQL queries only, with the key from `<config>/import/linear-key` (owner-only, `lin_api_` shape), sent only to `api.linear.app` and `uploads.linear.app`. No email is asked for.
+- **Lists:** teams, states, users, labels, cycles, projects, milestones and relations are root lists read whole. Issues come 25 a page, with their labels, link cards and history nested and followed past the first page. Comments come from the root list, filtered to the selected teams.
+- **Pacing:** a `RATELIMITED` answer waits for the reset and does not count as a failure. A low remaining budget also waits, so a long read never fails halfway. Complexity is summed from `X-Complexity` for the report.
+- **Selection:** public teams when none is named. A private team only when named, with the warning. Private teams not named are listed, without counts, since their issues are not read.
+- **Issues:** the key line `Linear issue [ENG-123] · <url>`. Status follows the state type, and `workflow` takes the state's name. The header holds the team, status, priority, estimate on the team's scale, due day and zone, cycle, project and milestone, labels by group, `Previously:` identifiers, reactions, link cards, and the archive line.
+- **Fields:** `team`, `workflow`, `priority`, `estimate`, `cycle`, `label`, and one field per label group (a group named like one of those takes ` (label group)`).
+- **Relations:** parent and sub-issues; blocks both ways; duplicate as `Duplicate of` and `Duplicates`; related and similar as `Related`. References into private teams not selected are counted, never shown, and replaced in the archive.
+- **Comments:** threads in order, with each reply marked `reply to @…`, resolutions `resolved by @… at …`, and quoted text as a block quote. Bots and external users are named as such.
+- **Archives:** the issue archive holds the issue, its relations and its history; the discussion holds the comments.
+- **Archived and trashed:** imported, then archived by the importer in a second write with the reason `Archived in Linear on <day>` or `In Linear's trash since <day>`. They are restored when Linear restores them, but only an archive the importer made itself.
+
+**Shared changes:**
+- The census moved into `render.py`.
+- Comments take heading marks, and a hidden comment names its source.
+- A record carries its archive reason and a due instant (GitHub's due day becomes the end of that day in UTC, the same as before).
+- `duplicated_by` joins the relations.
+- The importer mirrors archive state, and an archive it made is its own to undo.
+- The missing-issue rule reads a key's scope for any source.
+- The report names the source's scopes and cost unit, and it shows pull requests only for GitHub.
+
+**Choices made in the build,** for the review:
+1. **The map file keys Linear users by `displayName`**, Linear's handle, which is unique in a workspace, rather than by user ID. The person edits the map, and an ID means nothing to them. People are written `@handle`, as GitHub's are, which also keeps the forged-heading guard working.
+2. **Sub-issues come from the parents of the issues read.** A sub-issue in a team outside the selection is therefore not listed on its parent.
+3. **History goes into the archive with its scalar `*Id` fields.** That costs less, and no name or key from a private team can come through it.
+4. **Teams are public or private by `private`.** The Linear note names a newer `visibility` (with restricted sub-teams). The first real dry run settles which one the schema holds; a query naming a missing field stops with Linear's message.
+5. **Uploads are read only from `uploads.linear.app`.** A redirect to a storage host leaves the file a link and reports it, until the seed shows the host to allow (§3.7).
+6. **Archive outcomes are counted, not listed.** `archived` and `restored` are not attention lines, since a mature workspace archives thousands of issues. This changes GitHub's report too: a stale discussion part's archive is no longer listed, and is still counted.
+
+**Status of the evidence rows** (F fakes, C contract test against a scratch core at `60b84ae`; R needs the real workspace):
+
+| # | Now | Still needs |
+|---|---|---|
+| L1 | F C: public by default, private skipped or named with the warning, references counted | R; sub-teams and restricted teams |
+| L2 | F: every state type, `workflow` by name | R |
+| L3 | F: labels, groups as fields, header always | R: retired labels, unicode names, group selection |
+| L4 | F: priority, estimates on Fibonacci and T-shirt scales | R |
+| L5 | F: cycle as a field when small | R: a workspace's real number of cycles |
+| L6 | F: the end of the day in the team's zone on a daylight-saving day | — |
+| L7 | F C: `contributes_to` | R: depth and cross-team parents |
+| L8 | F C: `requires` and the completed-dependent fallback | — |
+| L9 | F: duplicate, related, similar | R: whether `similar` occurs |
+| L10, L11 | F C: projects, milestones, relations, initiatives, documents, updates (§5.2) | R: real field names and sizes |
+| L12 | F C: threads, replies, resolutions, quotes, edits, reactions, bots | R: reply depth, `reactionData`'s exact shape |
+| L13 | F: uploads with the key, link cards in the header | R: the storage host, real files |
+| L14 | F: found by UUID, `Previously:` identifiers | R: a real move |
+| L15 | F C: archived, trashed, restored, never another's archive | R: whether trashed issues come back with `includeArchived` |
+| L16 | F: history in the archive, past its first page | R |
+| L17 | F: waits on `RATELIMITED` and when the budget runs low | R: real headers |
+| L18 | F C: the shared rules, run on GitHub's evidence | R |
+
+**Budget.** The Linear adapter is 372 lines after the review's fixes (359 before). Shared code grew by 41 lines, to 1,266: 13 of them are the census, moved from the GitHub adapter, which shrank to 485; the rest are mostly the archive mirror.
+
+**The review of `7d0735d`** said fix. It accepted all six choices above, and found no regression on GitHub. Its findings, fixed RED (`3fbb969`), then GREEN, then a SIMPLIFY pass (`f5532e7`):
+
+| Finding | GREEN | What changed |
+|---|---|---|
+| Medium: an issue moved from a private team showed `Previously: [SEC-12]`, and the archive kept it | `1dfcf45` | An earlier identifier is a reference under §3.9. It is shown when its team is selected or public. Otherwise it is counted, and in the archive it is replaced like any withheld node |
+| Medium: bot and external-user headings have no `@`, so their forged headings passed | `15db4b2` | Every heading line in imported comment text is neutralized, for every source (§3.2). GitHub's seeds are unchanged: zero differences, and the same one neutralized heading |
+| Low: `reactionData` may list each reaction | `f93c909` | Reactions are counted one by one in either shape |
+| Low: relations lacked `includeArchived`, and one into an unreadable team could fail the whole read | `fc41a3b` | Archived relations are read too. A partial answer is accepted for relations only, and the left-out relations are counted in the report |
+| Low: nested history used about 6,600 of a query's 10,000 points | `58d0633` | History is read 20 at a time, about 3,600 points a page by the published rules; the real cost waits for `X-Complexity` on a real workspace |
+| Low: the key hint used `pbpaste`; GitHub's empty Target date became `T23:59:59Z` | `490605a` | A hint for any POSIX shell; an empty date stays empty, with a regression test |
+
+
+### 5.2 Build record: Linear projects, milestones, initiatives, documents and updates (3 October 2026)
+
+The second Linear slice, stacked on the first. It uses synthetic answers too, shaped from the note's reading of the schema; nothing here has met a real workspace.
+
+**What is imported:**
+- **Projects:** any project with at least one selected team. A project is a work item.
+  - Owner: the lead.
+  - Status: by the project status's type (backlog, planned and paused are `open`, started is `in_progress`). The status's name goes to `workflow`.
+  - Fields: `team` (selected or public teams only), `priority` and `health`.
+  - Due: a target with a coarse resolution is due on the last day of its month, quarter, half or year, and the header says `Target: 2026 Q3`.
+- **Milestones** of those projects are work items titled `<project> · <milestone>`. Each `contributes_to` its project and is due on its target day. Linear's derived `done` is `completed`.
+- **Issues** `contribute_to` their milestone, or else their project. The header line that named them as text is gone.
+- **Project relations** are `requires` by §3.6, anchored to a milestone when Linear anchors them there. Both ends must be visible to the key.
+- **Initiatives become docs** (choice 16), `related_to` the projects in them.
+  - The header carries status, health, target and owner, then `Parent initiative` and `Sub-initiatives` as text.
+  - An initiative is imported when it holds an imported project, or holds none. One that holds only projects of teams not imported is left out.
+- **Documents** of an imported project, initiative or issue, and **project and initiative updates**, are docs `related_to` what they belong to. An update's header carries its health and reactions.
+- **Comments** on projects, initiatives, documents and updates come from one more list, the comments that are not on an issue. They go to each object's own discussion doc, as an issue's do.
+- **Archived and trashed** objects of every kind follow the issue rule (§5.1).
+
+**Shared changes:**
+- The importer writes the adapter's kinds. Each kind has its own key line (`Linear project [Checkout v2] · <url>`) and its own archive file, `linear-project-<id>.json`.
+- The index reads every kind.
+- Docs carry no work part and no fields.
+- `contributes_to` takes `project` and `milestone` as well as `parent`. `related_to` takes `initiative`, `includes` and `of`.
+
+**Evidence:**
+- Tests on fakes, with every kind of object: 23 Linear tests in all.
+- The contract test against a scratch core at `60b84ae`, from one synthetic workspace:
+  - 15 items, with every link written;
+  - a milestone that `contributes_to` its project, and an issue that `contributes_to` its milestone;
+  - a project that `requires` a milestone;
+  - an initiative doc `related_to` its project;
+  - the private team's project and initiative left out;
+  - a re-run that writes nothing.
+- The whole suite: 418 passed against a scratch core, and 399 passed with 19 skipped without one.
+
+**Still needs the real workspace:**
+- the names of `targetDateResolution`, a milestone's `status`, and the parent fields of Comment and Document;
+- whether `initiativeToProjects` and `projectRelations` exist as root lists.
+
+The first real dry run names any field the schema lacks.
+
+**Size.** The Linear adapter is 518 lines. Shared code is 1,271.
 
 ## 6. Jira, third
 

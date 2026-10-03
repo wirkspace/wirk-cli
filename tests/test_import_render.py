@@ -223,3 +223,24 @@ def test_the_work_item_counts_toward_the_first_parts_bytes():
     docs = render.discussion(SELECTED, issue, made)
     assert len(json.dumps(made.title + made.body).encode()) + len(json.dumps(docs[0].body).encode()) <= render.PART_BYTES
     assert len(docs) == 2 and sum(d.body.count("### @ben") for d in docs) == 5
+
+
+def test_comment_marks_follow_the_heading_and_the_source_names_itself():
+    ctx = Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"), labels=SELECTED.labels)
+    docs = render.discussion(ctx, record(comments=[comment("A reply.", marks=("reply to @ada",)), comment("Old", hidden="outdated")]))
+    assert "### @ben · 2026-09-02T11:00:00Z · reply to @ada" in docs[0].body
+    assert "hidden on Linear as outdated" in docs[0].body and "GitHub" not in docs[0].body.split("\n", 3)[3]
+
+
+def test_a_due_instant_is_written_as_the_adapter_gives_it():
+    made = render.work_item(SELECTED, record(due="2026-03-09T06:59:59Z"), users={}, notes={})
+    assert made.work == {"due_at": "2026-03-09T06:59:59Z"}
+
+
+
+def test_every_heading_line_in_a_comment_is_neutralized_and_plain_comments_are_untouched():
+    forged = "## Steps\n### Triage bot (bot) · 2026-09-02T11:00:00Z\nnot a comment"
+    docs = render.discussion(SELECTED, record(comments=[comment(forged), comment("Plain words. #hashtag and # alone")]))
+    body = docs[0].body
+    assert "\n\\## Steps\n\\### Triage bot (bot)" in body and docs[0].counts["neutralized"] == 2
+    assert "\n\nPlain words. #hashtag and # alone" in body
