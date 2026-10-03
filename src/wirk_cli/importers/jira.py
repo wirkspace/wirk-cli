@@ -236,12 +236,12 @@ class Jira:
         gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
             hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        ordered = sorted(history, key=lambda e: e.get("created") or "")
-        moves = [next((i for i in e.get("items", []) if i.get("field") == "project"), {}) for e in ordered]
-        where = next((m["from"] for m in moves if m.get("from")), f["project"]["id"])  # the project its history began in
+        ordered = sorted(history, key=lambda e: (render.compact(e["created"]), int(e["id"])))  # the instant, then Jira's order
+        moves = [next((i for i in e.get("items", []) if i.get("field") == "project"), None) for e in ordered]
+        where = next((m.get("from") for m in moves if m is not None), f["project"]["id"])  # where it began; unknown fails closed
         for entry, move in zip(ordered, moves):  # a change made in, or moving into or out of, a project not selected names it (§3.9)
-            self.outside |= {entry.get("id")} if {where, move.get("to") or where} - self.shown_projects else set()
-            where = move.get("to") or where
+            before, where = (move.get("from"), move.get("to")) if move is not None else (where, where)
+            self.outside |= {entry.get("id")} if {before, where} - self.shown_projects else set()
         raw = {"issue": clean({**node, "fields": self.archived(f, attachments)}), "worklogs": clean(worklogs),
                "changelog": clean(history), "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)
