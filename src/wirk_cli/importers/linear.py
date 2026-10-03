@@ -67,7 +67,8 @@ def due_at(day: str, zone: str | None) -> str:
         place = ZoneInfo(zone or "UTC")
     except (ZoneInfoNotFoundError, ValueError):
         place = timezone.utc
-    return datetime.combine(date.fromisoformat(day), day_time(23, 59, 59), place).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = datetime.combine(date.fromisoformat(day), day_time(23, 59, 59), place)
+    return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def reactions(data) -> str:
@@ -224,6 +225,29 @@ class Linear:
     def record(self, node: dict, comments: list, related: list, children: list) -> render.Record:
         team = self.teams[node["team"]["id"]]
         state = self.states.get((node["state"] or {}).get("id"), {"name": "Unknown", "type": "unstarted"})
+        fields, facts = self.fields_and_facts(node, team, state)
+        archived = (f"In Linear's trash since {node['archivedAt'][:10]}" if node.get("trashed") else
+                    f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
+        times = [f"{word} {node[word + 'At']}" for word in ("started", "completed", "canceled") if node.get(word + "At")]
+        ordered, assignee = self.thread(comments), self.users.get((node["assignee"] or {}).get("id"))
+        relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
+            [("sub_issue", self.reference(child)) for child in children] + \
+            sorted(((kind, self.reference(other)) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
+        raw = {"team": team["key"], "issue": {key: value for key, value in node.items() if key != "updatedAt"},
+               "relations": [relation for _, _, relation in related]}
+        return render.Record(
+            SOURCE, "issue", node["id"], node["identifier"], node["url"], node["updatedAt"], node["title"], node["description"] or "",
+            STATES.get(state["type"], "open"),
+            next((f"{word} at {node[word + 'At']}" for word in ("completed", "canceled") if node.get(word + "At")), None),
+            [" · ".join([f"Opened by {self.person(node['creator'])} {node['createdAt']}", *times])],
+            facts + ([archived] if archived else []),
+            [(assignee["displayName"], f"@{assignee['displayName']}")] if assignee else [], fields,
+            due_at(node["dueDate"], team["timezone"]) if node["dueDate"] else None, relations,
+            [self.comment(found, {c["id"]: c for c in comments}) for found in ordered], self.uploads(node, ordered), raw, ordered,
+            archived)
+
+    def fields_and_facts(self, node: dict, team: dict, state: dict) -> tuple[dict, list]:
+        """The field values by name, and the header's facts: every value is also a header line (§3.8)."""
         groups = defaultdict(list)
         for label in sorted((self.labels[l["id"]] for l in node["labels"]["nodes"] if l["id"] in self.labels),
                             key=lambda label: label["name"].casefold()):
@@ -231,40 +255,23 @@ class Linear:
             group = parent["name"] if parent else "Label"
             groups[f"{group} (label group)" if parent and group in SELECTIONS else group].append(label["name"])
         priority, estimate, cycle = PRIORITIES.get(node["priority"]), self.estimate(node["estimate"], team), self.cycle(node["cycle"])
-        fields = {"Team": [team["key"]], "Workflow": [state["name"]], **({"Priority": [priority]} if priority else {}),
-                  **({"Estimate": [estimate]} if estimate else {}), **({"Cycle": [cycle]} if cycle else {}), **groups}
-        closed = next((f"{word} at {node[word + 'At']}" for word in ("completed", "canceled") if node.get(word + "At")), None)
-        archived = (f"In Linear's trash since {node['archivedAt'][:10]}" if node.get("trashed") else
-                    f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
-        where = [f"Project: {self.projects[p]['name']}" for p in [(node["project"] or {}).get("id")] if p in self.projects]
-        where += [f"Milestone: {self.milestones[m]['name']}" for m in [(node["projectMilestone"] or {}).get("id")] if m in self.milestones]
+        fields = {"Team": [team["key"]], "Workflow": [state["name"]], "Priority": [priority], "Estimate": [estimate],
+                  "Cycle": [cycle], **groups}
+        project, milestone = (self.projects.get((node["project"] or {}).get("id")),
+                              self.milestones.get((node["projectMilestone"] or {}).get("id")))
         facts = [" · ".join([f"Team: {team['name']} ({team['key']})", f"Status: {state['name']} ({state['type']})",
                              *([f"Priority: {priority}"] if priority else []),
                              *([f"Estimate: {estimate} ({team['issueEstimationType']})"] if estimate else [])]),
-                 *([f"Due: {node['dueDate']} ({team['timezone'] or 'UTC'})"] if node["dueDate"] else []),
-                 *([f"Cycle: {cycle}"] if cycle else []), " · ".join(where),
+                 f"Due: {node['dueDate']} ({team['timezone'] or 'UTC'})" if node["dueDate"] else "",
+                 f"Cycle: {cycle}" if cycle else "",
+                 " · ".join([*([f"Project: {project['name']}"] if project else []),
+                             *([f"Milestone: {milestone['name']}"] if milestone else [])]),
                  " · ".join(f"{'Labels' if name == 'Label' else name}: {', '.join(values)}" for name, values in groups.items()),
-                 *([f"Previously: {', '.join(f'[{key}]' for key in node['previousIdentifiers'])}"] if node["previousIdentifiers"] else []),
-                 *([f"Reactions: {reactions(node['reactionData'])}"] if reactions(node["reactionData"]) else []),
-                 *(" ".join(filter(None, ["Attachment:", card["sourceType"] or "link", f'"{card["title"]}"', card["subtitle"], card["url"]]))
-                   for card in node["attachments"]["nodes"]),
-                 *([archived] if archived else [])]
-        ordered = self.thread(comments)
-        relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
-            [("sub_issue", self.reference(child)) for child in children] + \
-            sorted(((kind, self.reference(other)) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
-        raw = {"team": team["key"], "issue": {key: value for key, value in node.items() if key != "updatedAt"},
-               "relations": [relation for _, _, relation in related]}
-        assignee = self.users.get((node["assignee"] or {}).get("id"))
-        return render.Record(SOURCE, "issue", node["id"], node["identifier"], node["url"], node["updatedAt"], node["title"],
-                             node["description"] or "", STATES.get(state["type"], "open"), closed,
-                             [" · ".join([f"Opened by {self.person(node['creator'])} {node['createdAt']}",
-                                          *(f"{word} {node[word + 'At']}" for word in ("started", "completed", "canceled")
-                                            if node.get(word + "At"))])],
-                             [fact for fact in facts if fact], [(assignee["displayName"], f"@{assignee['displayName']}")] if assignee else [],
-                             fields, due_at(node["dueDate"], team["timezone"]) if node["dueDate"] else None, relations,
-                             [self.comment(found, comments) for found in ordered], self.uploads(node, ordered), raw, ordered,
-                             archived)
+                 f"Previously: {', '.join(f'[{key}]' for key in node['previousIdentifiers'])}" if node["previousIdentifiers"] else "",
+                 f"Reactions: {reactions(node['reactionData'])}" if reactions(node["reactionData"]) else "",
+                 *(" ".join(filter(None, ["Attachment:", card["sourceType"] or "link", f'"{card["title"]}"', card["subtitle"],
+                                          card["url"]])) for card in node["attachments"]["nodes"])]
+        return {name: values for name, values in fields.items() if values != [None]}, [fact for fact in facts if fact]
 
     def estimate(self, value, team: dict) -> str | None:
         if value is None or team["issueEstimationType"] in (None, "notUsed"):
@@ -294,8 +301,8 @@ class Linear:
             walk(found)
         return ordered + [c for c in sorted(comments, key=lambda c: (c["createdAt"], c["id"])) if c not in ordered]
 
-    def comment(self, found: dict, comments: list) -> render.Comment:
-        parent = next((c for c in comments if found["parent"] and c["id"] == found["parent"]["id"]), None)
+    def comment(self, found: dict, by_id: dict) -> render.Comment:
+        parent = by_id.get((found["parent"] or {}).get("id"))
         quote = "\n".join("> " + line for line in found["quotedText"].split("\n")) + "\n\n" if found["quotedText"] else ""
         marks = ([f"reply to {self.author(parent)}"] if parent else []) + \
             ([f"resolved by {self.person(found['resolvingUser'])} at {found['resolvedAt']}"] if found["resolvedAt"] else [])
