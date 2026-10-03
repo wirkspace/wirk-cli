@@ -2,7 +2,7 @@
 
 Plan only, for adversarial review before any code. Branch `importers-trim`, from main `f1cc8e5`. The shared code is `src/wirk_cli/importers/__init__.py`, `render.py` and `wirk.py`: 1,279 lines (279, 385 and 615) against decision 81's budget of about 1,120. The adapters are outside the budget (GitHub 485 against 490; Linear 530; Jira 375 and `adf.py` 169).
 
-This is the second version, revised after the plan review of 3 October. The proof now comes first, the cuts are smaller, and no budget is fixed in advance (§6). Line numbers are at `f1cc8e5`.
+This is the second version, revised after the plan review of 3 October and approved on recheck with the additions marked in §2.2 and §2.3. The proof now comes first, the cuts are smaller, and no budget is fixed in advance (§6). Line numbers are at `f1cc8e5`.
 
 — importer-implementer
 
@@ -33,7 +33,7 @@ This is the second version, revised after the plan review of 3 October. The proo
 
 ### 2.2 Characterization tests, committed first
 
-The cuts touch lines that no test runs today. Before any cut, one commit adds ordinary tests (about ten, in `tests/test_import_wirk.py` and `tests/test_import_command.py`) that pass on main unchanged and stay as lasting coverage. A line trace of the full suite at `f1cc8e5` never reaches `wirk.py` 152, 331, 335, 441, 523, 555–559, 577, 579–580 and 582, or `__init__.py` 253, 267 and 277. The tests cover these whole ranges:
+The cuts touch lines that no test runs today. Before any cut, one commit adds ordinary tests (in `tests/test_import_wirk.py` and `tests/test_import_command.py`) that pass on main unchanged and stay as lasting coverage. A line trace of the full suite at `f1cc8e5` never reaches `wirk.py` 152, 331, 335, 441, 523, 555–559, 577, 579–580 and 582, or `__init__.py` 253, 267 and 277. The tests cover these whole ranges:
 
 | Lines | Function | Scenario the tests pin down |
 |---|---|---|
@@ -46,6 +46,10 @@ The cuts touch lines that no test runs today. Before any cut, one commit adds or
 | `wirk.py` 573–589 | `stale` | a discussion that shrinks, with a part already archived (577), a part a person changed (579–580), a dry run (582) and a refused archive |
 | `wirk.py` 599–609 | `gone`, `missing_one` | an issue gone from a complete read; one outside a narrower selection; comment parts and objects the source still shows |
 | `__init__.py` 267, 275, 277 | `report` | a forged line reported; more than 50 outcomes that need attention, cut at 50 with the `more:` line |
+| `__init__.py` 127–129 (recheck) | `Run.connect` | the agent's status refused, in text and `--json`: stderr keeps WIRK's hint as the fix line, and the JSON code stays `import_stopped` |
+| `__init__.py` 170–176 (recheck) | `check_statuses` | a status the wirkspace lacks, mapped to one it has in the map file: the check passes |
+| `__init__.py` 185, 216 (recheck) | `write_setup`, `report` | a map whose `field_limit` makes one field header-only: left out of the setup, named on the `header only:` line and in the JSON `header_only` |
+| `__init__.py` 270–273 (recheck) | `report` | a run with no outcomes, and a run whose outcomes include no issue: no `find one:` line |
 
 From this commit on, both test counts above rise by the number of tests it adds, and every later commit keeps them exactly.
 
@@ -73,12 +77,15 @@ The recorder lives outside the repository and is never committed, nor are its re
 | `Run.write_setup` | the field limit taken as 1 | setup request, stdout |
 | `Run.report` | the `find one:` line left out | stdout |
 | `Run.connect` | `workspace_id` left out of the second status request | WIRK requests |
+| `Run.connect` (recheck) | WIRK's hint left out of the stop when the agent's status is refused | stderr |
+| `Run.check_statuses` (recheck) | the map's statuses ignored by the check | exit status, stderr |
 | `Run.go`, `Jira.check` | the map's `cancelled` ignored | item fields and bodies |
 | `Importer.start`, `operations` | `status` left out of the managed fields | write bodies |
 | `Importer.links_of` | archived targets kept | write bodies |
 | `Importer.write_links`, `rid` | the request ID without its source prefix | write bodies |
 | `Importer.seal` | a part's version taken from its earliest comment, not its latest | item bodies |
-| `Importer.stale`, `mirror` | `expect` left out of the archive write | write bodies |
+| `Importer.stale` (recheck: one row each) | `expect` left out of a stale part's archive write | write bodies |
+| `Importer.mirror` | the source's archive reason replaced by the restore wording | write bodies |
 | `Importer.one`, `send` | an outcome's item left out | stdout |
 | `Wirk.item` | `missing_one` reading the card, not the full body | stdout |
 
@@ -89,24 +96,24 @@ Estimates are in lines of the shared code. Each commit is followed by the import
 | Order | Cut | Shared lines | What changes |
 |---|---|---|---|
 | 1 | **#1** Single-use helpers | about −9 | inline `render.small` into `write_setup` (−4) and `Wirk.status` into `Importer.start` (−3); `managed` becomes an attribute set in `start` (−2). `key_of` and `render.sealed` stay |
-| 2 | **#6 + A** `connect` asks through `wirk.Wirk` | about −4 (3–5) | both status requests go through `Wirk.post`, which already scopes them, so `Run.scoped` goes; the second answer is checked inline; `go` passes the `Wirk` it gets |
-| 3 | **C** `field_limit` read once | about −1 | read in `go`, used by `write_setup` and `report` |
-| 4 | **D** The `if outcomes:` guard in `report` | about −1 | it adds nothing to `next(…, None)` |
-| 5 | **E** `links_of` in one pass | about −1 | the targets found and filtered in one comprehension, in the same order |
-| 6 | **#5** The map passed to `check(mapped)` | about −2 shared, +1 in `jira.py` | `go` stops setting `adapter.cancelled`; Jira's `check` takes it from the map. No new adapter hooks: a relocation, not a saving. GitHub's and Linear's `check` take the map and ignore it. Tests that call `check()` pass a map; no assertion changes |
-| 7 | **#3** One `Outcome` builder for `one` and `send` | about −1 (0 to −2) | one place builds an outcome from a plan, its word, its message and the held item |
-| 8 | **#2** One archive-or-restore body for `stale` and `mirror` | about 0 (+1 to −1) | only the body is shared: request ID, reason, `expect` and operations. Each keeps its own batching, reason and outcomes |
-| 9 | One request-ID format | 0 | `rid` takes an ID, so `write_links` uses it too |
-| 10 | The comment version on `Rendered` | 0 | `discussion` computes it once and `seal` reads it, rather than computing it again |
-| 11 | Two unused defaults | 0 | `Wirk.item`'s `depth` and `send`'s `said`: every caller passes them |
+| 2 | **#6 + `scoped`** `connect` asks through `wirk.Wirk` | about −4 (3–5) | both status requests go through `Wirk.post`, which already scopes them, so `Run.scoped` goes; the second answer is checked inline; `go` passes the `Wirk` it gets. A refused agent status still raises the same `Stop` with WIRK's hint, never a `WirkError` |
+| 3 | **`check_statuses`** reads `importer.statuses` | about −1 | the same map, built by the same expression from the same `self.mapped`; only its values are used, as a set |
+| 4 | **`field_limit`** read once | about −1 | read in `go`, used by `write_setup` and `report` |
+| 5 | **The `if outcomes:` guard** in `report` | about −1 | it adds nothing to `next(…, None)` |
+| 6 | **`links_of`** in one pass | about −1 | the targets found and filtered in one comprehension, in the same order |
+| 7 | **#5** The map passed to `check(mapped)` | about −2 shared, +1 in `jira.py` | `go` stops setting `adapter.cancelled`; Jira's `check` takes it from the map. No new adapter hooks: a relocation, not a saving. GitHub's and Linear's `check` take the map and ignore it. Tests that call `check()` pass a map; no assertion changes |
+| 8 | **#3** One `Outcome` builder for `one` and `send` | about −1 (0 to −2) | one place builds an outcome from a plan, its word, its message and the held item |
+| 9 | **#2** One archive-or-restore body for `stale` and `mirror` | about 0 (+1 to −1) | only the body is shared: request ID, reason, `expect` and operations. Each keeps its own batching, reason and outcomes |
+| 10 | One request-ID format | 0 | `rid` takes an ID, so `write_links` uses it too |
+| 11 | The comment version on `Rendered` | 0 | `discussion` computes it once and `seal` reads it, rather than computing it again |
+| 12 | Two unused defaults | 0 | `Wirk.item`'s `depth` and `send`'s `said`: every caller passes them |
 
-**Total: about −19 shared (−16 to −22), so about 1,260 lines.** The first version's sum was wrong (1,279 − 38 is 1,241, not 1,235). Its estimates for #2, #4 and #7 were too high.
+**Total: about −20 shared (−17 to −23), so about 1,259 lines.** The first version's sum was wrong (1,279 − 38 is 1,241, not 1,235). Its estimates for #2, #4 and #7 were too high.
 
 **Considered and not taken:**
 - **#4, one text for a WIRK refusal.** A helper costs about two lines while every call site stays one line.
 - **#7, report lines computed once.** The JSON branch returns before any text line is built, so there is nothing to share.
 - **Reusing `connect`'s status in `start`.** It asks with a 1,024-byte limit, and `start` needs the whole field list. `Wirk.status` is inlined instead.
-- **`check_statuses` reading the importer's status map.** Not in this trim.
 - **Merging `render.Rendered` into `wirk.Plan`.** It blurs what was rendered with what will be written, and touches every sealing path.
 - **Sharing a loop between `send` and `write_links`.** Their refusal handling differs on purpose: an issue's write is fixed and resent, while a link falls back to `related_to`.
 - **Shortening docstrings, constants or wording, or packing statements onto longer lines.** That removes clarity, changes output or games the count.
@@ -125,7 +132,7 @@ Estimates are in lines of the shared code. Each commit is followed by the import
 
 ## 5. Acceptance
 
-1. **Line counts.** `wc -l` for each module before and after each cut, in the pull request. No touched line grows past 141 characters (the longest in the shared modules today), and no two statements share a line.
+1. **Line counts.** `wc -l` for each module before and after each cut, in the pull request. No touched line grows past 141 characters (stricter than today's longest, 148 at `render.py`:195), and no two statements share a line.
 2. **Tests.** The counts of §2.1, plus the characterization tests, unchanged after every commit. The contract tests against the scratch core give the same count before and after.
 3. **The recorder.** An empty diff after every cut against the baseline recorded at the characterization commit, and a non-empty diff for every seeded mutation (§2.3).
 4. **Real core, GitHub.** The three GitHub seeds are imported into a fresh scratch core at `60b84ae`, before and after. Every item's first line and hash, and every link, must be equal, and the REST verifier must show zero differences.
@@ -134,4 +141,4 @@ One pull request carries the commits in the order of §3, with the evidence for 
 
 ## 6. Budget
 
-No number is fixed in advance. The budget for three sources becomes the count measured after the trim, which the coordinator records as decision 82. The estimates in §3 put it at about 1,260. Each later source argues its own shared additions in its plan.
+No number is fixed in advance. The budget for three sources becomes the count measured after the trim, which the coordinator records as decision 82. The estimates in §3 put it at about 1,259. Each later source argues its own shared additions in its plan.
