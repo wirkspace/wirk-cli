@@ -55,7 +55,7 @@ class Wirk:
         self.service, self.workspace = service, workspace
 
     def post(self, route: str, body: dict, uncertain: str | None = None) -> dict:
-        body = {**body, "format": "json", **({"workspace_id": self.workspace} if self.workspace else {})}
+        body = {**body, "format": "json", **({"workspace_id": self.workspace} if self.workspace is not None else {})}
         return self.service.post(route, body, uncertain=uncertain)
 
     def ok(self, route: str, body: dict) -> dict:
@@ -64,9 +64,6 @@ class Wirk:
         if not answer["ok"]:
             raise WirkError(answer["errors"][0])
         return answer
-
-    def status(self) -> dict:
-        return self.ok("/v2/status", {"max_bytes": 65536})["data"]
 
     def cards(self, fields: dict):
         body = {"fields": fields, **PAGE}
@@ -77,7 +74,7 @@ class Wirk:
                 return
             body = {**body, "cursor": answer["page"]["next_cursor"]}
 
-    def item(self, ref, depth: str = "full") -> dict:
+    def item(self, ref, depth: str) -> dict:
         """One item, its body read whole through the continuation."""
         body = {"fetch": [ref], "depth": depth, "max_bytes": 65536}
         answer = self.ok("/v2/query", body)
@@ -187,10 +184,11 @@ class Importer:
 
     def start(self, me: str | None = None) -> dict:
         """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
-        you = self.wirk.status()
+        you = self.wirk.ok("/v2/status", {"max_bytes": 65536})["data"]
         self.me = me or you["you"]["principal"]
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
+        self.managed = {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
         self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
@@ -303,8 +301,7 @@ class Importer:
 
     def links_of(self, ident: str, wanted: list) -> list:
         source = self.single(ident)
-        targets = [(link, self.single(link[2])) for link in wanted]
-        targets = [(link, target) for link, target in targets if target and not target.archived]
+        targets = [(link, target) for link in wanted if (target := self.single(link[2])) and not target.archived]
         if not source or source.archived or not targets:
             return []
         view = self.wirk.item(source.item, "full")
@@ -317,7 +314,7 @@ class Importer:
     def write_links(self, ident, item, revision, chunk) -> list:
         operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}} for link, target in chunk]
         expect = {item: revision, **{target.item: target.r for link, target in chunk if link[0] == "contributes_to"}}
-        body = {"request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}", "operations": operations, "expect": expect,
+        body = {"request_id": self.rid(ident), "operations": operations, "expect": expect,
                 "reason": f"Imported from {self.ctx.source}: the relations of {self.keys[ident]}"}
         notes = []
         for _ in range(len(operations) + 1):
@@ -330,7 +327,7 @@ class Importer:
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}")]
             operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
-            body = {**body, "request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}"}
+            body = {**body, "request_id": self.rid(ident)}
             notes.append(f"kept as related: WIRK refused it ({problem['code']})")
         return [Outcome(self.keys[ident], "links", "error", "refused repeatedly")]
 
@@ -354,9 +351,6 @@ class Importer:
                 found[plan.key] = present if plan.selection == "many" else present[0]
         return found
 
-    def managed(self) -> set:
-        return {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
-
     def plans(self, record: render.Record) -> list:
         users = {user: wirk_id for user, wirk_id in self.users.items() if wirk_id not in self.not_members}
         made = render.work_item(self.ctx, record, users, self.notes)
@@ -375,8 +369,7 @@ class Importer:
     def seal(self, made, record, fields, work, files, attachments) -> Plan:
         names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
-        version = record.version if made.kind == record.kind else max(c.version for c in record.comments)
-        return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, version, digest), fields, work,
+        return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
                     files, attachments, digest)
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
@@ -434,14 +427,17 @@ class Importer:
         word = "archive" if want else "restore"
         if not found or self.dry_run:
             return [Outcome(record.key, kind, f"would {word}", item=h.item) for kind, h in found]
-        answer = self.wirk.write({"request_id": self.rid(record), "reason": record.archived or f"Active again in {self.ctx.source}",
-                                  "expect": {h.item: h.r for _, h in found},
-                                  "operations": [{"op": f"item.{word}", "id": h.item} for _, h in found]})
+        answer = self.wirk.write(self.archiving(record, word, [h for _, h in found],
+                                                record.archived or f"Active again in {self.ctx.source}"))
         if not answer["ok"]:
             return [Outcome(record.key, record.kind, "error", f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}")]
         for (kind, h), result in zip(found, answer["data"]["results"]):
             self.index.add(kind, record.ident, replace(h, r=result["revision"], archived=want))
         return [Outcome(record.key, kind, f"{word}d", item=h.item) for kind, h in found]
+
+    def archiving(self, record, word: str, held: list, reason: str) -> dict:
+        return {"request_id": self.rid(record.ident), "reason": reason, "expect": {h.item: h.r for h in held},
+                "operations": [{"op": f"item.{word}", "id": h.item} for h in held]}
 
     def operations(self, record, acting, work):
         operations, expect = [], {}
@@ -460,7 +456,7 @@ class Importer:
             else:
                 patch = {"title": plan.title, "body": plan.body, **patch_files}
                 if plan.work is not None:
-                    patch["fields"] = {key: plan.fields.get(key) for key in self.managed()}
+                    patch["fields"] = {key: plan.fields.get(key) for key in self.managed}
                     patch["work"] = {"owner_id": plan.work.get("owner_id"), "due_at": plan.work.get("due_at")}
                 operations.append({"op": "item.edit", "id": held.item, "patch": patch})
                 expect[held.item] = held.r
@@ -473,7 +469,7 @@ class Importer:
 
         def store(data: bytes, name: str, description: str, uri: str) -> str:
             return self.wirk.upload(data, name, description, {"role": "original", "origin": {"uri": uri, "observed_at": record.version}},
-                                    self.rid(record))
+                                    self.rid(record.ident))
         for name, data in plan.files:
             if name in having and having[name]["sha256"] == hashlib.sha256(data).hexdigest():
                 continue
@@ -490,17 +486,17 @@ class Importer:
             return attach, {}
         return [], {**({"attach_uploads": attach} if attach else {}), **({"replace_files": swap} if swap else {})}
 
-    def rid(self, record) -> str:
-        return f"{self.prefix}-{record.ident}-{secrets.token_hex(8)}"
+    def rid(self, ident: str) -> str:
+        return f"{self.prefix}-{ident}-{secrets.token_hex(8)}"
 
     def reason(self, record) -> str:
         if record.state == "completed":
             return render.evidence(self.ctx, record)
         return f"Imported from {self.ctx.source} {record.key} by wirk import {self.prefix}"
 
-    def send(self, record, acting, work, said: dict | None = None) -> list:
+    def send(self, record, acting, work, said: dict) -> list:
         operations, expect = self.operations(record, acting, work)
-        body = {"request_id": self.rid(record), "operations": operations, "reason": self.reason(record),
+        body = {"request_id": self.rid(record.ident), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
         notes = []
 
@@ -518,7 +514,7 @@ class Importer:
             if fixed is None:
                 return each("error", f"{problem['code']}: {problem.get('message', '')}")
             notes.append(fixed)
-            body = {**body, "request_id": self.rid(record)}
+            body = {**body, "request_id": self.rid(record.ident)}
         else:
             return each("error", "refused repeatedly: " + "; ".join(notes))
         results = answer["data"]["results"]
@@ -528,7 +524,7 @@ class Importer:
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
                                                          plan.digest))
-            message = "; ".join(filter(None, [(said or {}).get(plan.kind, ""), *notes]))
+            message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
@@ -581,10 +577,8 @@ class Importer:
                 elif self.dry_run:
                     outcomes.append(Outcome(record.key, kind, "would archive", item=found.item))
                 else:
-                    answer = self.wirk.write({"request_id": self.rid(record), "expect": {found.item: found.r},
-                                              "reason": f"No longer needed: the discussion of [{record.key}] now fits in "
-                                                        f"{parts} part{'s' if parts != 1 else ''}",
-                                              "operations": [{"op": "item.archive", "id": found.item}]})
+                    reason = f"No longer needed: the discussion of [{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"
+                    answer = self.wirk.write(self.archiving(record, "archive", [found], reason))
                     outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error",
                                             "" if answer["ok"] else answer["errors"][0]["code"], found.item))
         return outcomes

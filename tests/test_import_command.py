@@ -306,3 +306,98 @@ def test_a_map_whose_cancelled_is_not_a_list_of_names_stops_with_the_shape_it_wa
     (jira_world["home"] / "import" / "jira-map.json").write_text(json.dumps({"cancelled": "Won't Do"}))
     code, out, err = jira_world["run"]("--dry-run")
     assert code == 2 and "cancelled" in err and "list" in err
+
+
+# ---------------------------------------------------------------- the report and the stops, line by line
+
+def test_a_refused_status_stops_with_wirks_hint_in_text_and_json(world):
+    world["fake"].status = lambda body: refusal("not_available", "Workspace is unavailable", 404,
+                                                hint="wirk status names the wirkspaces you can reach")
+    told = "Error import: Workspace is unavailable\n  wirk status names the wirkspaces you can reach\n"
+    assert world["run"]("github", "acme", "--dry-run") == (2, "", told)
+    code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
+    assert (code, err) == (2, told) and json.loads(out) == {
+        "ok": False, "data": {}, "errors": [{"code": "import_stopped", "count": 1, "message": "Workspace is unavailable"}]}
+
+
+def test_a_status_the_wirkspace_lacks_passes_once_the_map_names_one_it_has(world):
+    world["fake"].definitions["status"] = {"open": "active", "completed": "completed", "cancelled": "cancelled"}
+    (world["home"] / "import").mkdir(mode=0o700)
+    (world["home"] / "import" / "github-map.json").write_text(json.dumps({"status": {"in_progress": "open"}}))
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0 and "would create: 2" in out, out + err
+
+
+def test_a_field_over_the_maps_limit_is_header_only_and_not_set_up(world, monkeypatch):
+    labels = lambda name: page([{"name": name, "description": ""}])
+    monkeypatch.setattr(github, "gh", FakeGh([repo("acme/web")], {"acme/web": [node(1, labels=labels("bug")),
+                                                                                node(2, labels=labels("docs"))]}))
+    folder = world["home"] / "import"
+    folder.mkdir(mode=0o700)
+    (folder / "github-map.json").write_text(json.dumps({"field_limit": 1}))
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0, out + err
+    setup = json.loads((folder / "github-setup.json").read_text())
+    assert [op["field"]["key"] for op in setup["operations"] if op["op"] == "field.create"] == ["repository"]
+    assert next(line for line in out.split("\n") if line.startswith("fields: ")) == (
+        "fields: header only: label (2 values, over the limit of 1) · not set up yet: label, repository")
+    answer = json.loads(world["run"]("github", "acme", "--dry-run", "--json")[1])
+    assert answer["data"]["summary"]["header_only"] == {"label": 2}
+
+
+def test_an_owner_who_is_not_a_member_is_named_on_the_owners_line(world, monkeypatch):
+    monkeypatch.setattr(github, "gh", FakeGh([repo("acme/web")], {"acme/web": [node(1, assignees={"nodes": [{"login": "ben"}]})]}))
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    folder = world["home"] / "import"
+    (folder / "github-map.json").write_text(json.dumps({"users": {"ben": "carol"}}))
+    code, out, err = world["run"]("github", "acme")
+    assert code == 0, out + err
+    assert (f"owners: carol not in this wirkspace, so their issues have no owner; add them, or change {folder / 'github-map.json'}"
+            in out.split("\n"))
+    assert [item["revisions"][-1]["work"] for item in world["fake"].mine().values()] == [{}]
+
+
+def test_a_line_someone_else_wrote_is_reported_as_ignored(world):
+    fake = world["fake"]
+    fake.as_whom = "bob"
+    line = render.line1("GitHub", "issue", "3000000001", "2026-09-30T12:00:00Z", "0" * 12)
+    fake.write({"request_id": "bob-1", "operations": [{"op": "item.create", "data": {"title": "Issue 1", "body": line, "work": {}}}]})
+    fake.as_whom = None
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0 and "ignored: 1 items with a provenance line the importer did not write" in out.split("\n")
+
+
+def test_more_than_fifty_outcomes_that_need_attention_end_with_how_many_more(world, monkeypatch):
+    monkeypatch.setattr(github, "gh", FakeGh([repo("acme/web", issues=51)], {"acme/web": [node(n) for n in range(1, 52)]}))
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    world["fake"].write = lambda body: refusal("invalid_input", "operations[0] is not accepted")
+    code, out, err = world["run"]("github", "acme")
+    lines = out.split("\n")
+    shown = [line for line in lines if line.startswith("  acme/web#")]
+    assert code == 1 and len(shown) == 50 and shown[0] == "  acme/web#1 error: invalid_input: operations[0] is not accepted"
+    assert lines[-2:] == ["  1 more: add --json for every outcome", ""]
+
+
+def test_a_run_with_no_outcomes_has_no_find_one_line(world, monkeypatch):
+    monkeypatch.setattr(github, "gh", FakeGh([repo("acme/web", issues=0)], {"acme/web": []}))
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0 and "items: none" in out.split("\n") and "find one:" not in out, out + err
+
+
+def test_a_run_whose_outcomes_hold_no_issue_has_no_find_one_line(linear_world, monkeypatch):
+    from test_import_linear import FakeLinear
+    from wirk_cli.importers import linear
+    monkeypatch.setattr(linear, "TRANSPORT", httpx.MockTransport(FakeLinear([])))
+    code, out, err = linear_world["run"]("--dry-run")
+    assert code == 0 and "would create: " in out and "find one:" not in out, out + err
+
+
+def test_an_empty_workspace_id_is_sent_as_given_so_wirk_refuses_it(world):
+    status = world["fake"].status
+    world["fake"].status = lambda body: (refusal("not_available", "Workspace is unavailable", 404) if body.get("workspace_id") == ""
+                                         else status(body))  # as core answers a wirkspace ID that names none
+    code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run")
+    assert (code, out, err) == (2, "", "Error import: Workspace is unavailable\n")
+    assert [body for route, body in world["fake"].requests] == [{"format": "json", "max_bytes": 1024, "workspace_id": ""}]
