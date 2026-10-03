@@ -24,6 +24,8 @@ REASONS = {"COMPLETED": "completed", "NOT_PLANNED": "not planned", "DUPLICATE": 
 EMOJI = {"THUMBS_UP": "👍", "THUMBS_DOWN": "👎", "LAUGH": "😄", "HOORAY": "🎉", "CONFUSED": "😕", "HEART": "❤️",
          "ROCKET": "🚀", "EYES": "👀"}
 LIMITED = re.compile(r"secondary rate limit|abuse detection|HTTP 429", re.I)
+SPENT = re.compile(r"API rate limit (already )?exceeded", re.I)  # the hour's budget: wait for its reset
+RESET = "query { rateLimit { cost remaining resetAt } }"
 TIMEOUT = re.compile(r"timeout|HTTP 50[234]|Something went wrong", re.I)
 PAGE = 25
 READERS = 4  # timelines read at once (decision 80); writes to WIRK stay one at a time
@@ -209,7 +211,8 @@ class GitHub:
 
     def graphql(self, query: str, variables: dict) -> dict:
         assert not query.lstrip().startswith("mutation")  # the importer only reads
-        for attempt in range(4):
+        attempt = 0
+        while attempt < 4:
             self.gate.wait()
             code, out, err = self.run(["api", "graphql", "--input", "-"], json.dumps({"query": query, "variables": variables}))
             try:
@@ -220,13 +223,26 @@ class GitHub:
                 self.pace(answer["data"].get("rateLimit"))
                 return answer["data"]
             text = out + err
+            if SPENT.search(text):  # waiting for the reset is not a failed attempt
+                self.gate.hold(self.until_reset() + 1)
+                continue
+            attempt += 1
             if LIMITED.search(text):
-                self.gate.hold(60 * 2 ** attempt)
+                self.gate.hold(60 * 2 ** (attempt - 1))
                 continue
             if TIMEOUT.search(text):
                 raise TimeoutError(text[:200])
             raise Stop(f"GitHub refused a read: {(answer.get('errors') or [{}])[0].get('message') or err.strip()[:200]}")
         raise Stop("GitHub kept refusing for its secondary rate limit; wait an hour and run the same command again")
+
+    def until_reset(self) -> float:
+        """Seconds until the hour's GraphQL budget resets; GitHub answers this query even when the budget is spent."""
+        code, out, _ = self.run(["api", "graphql", "--input", "-"], json.dumps({"query": RESET, "variables": {}}))
+        try:
+            reset = datetime.fromisoformat(json.loads(out)["data"]["rateLimit"]["resetAt"].replace("Z", "+00:00"))
+        except (ValueError, KeyError, TypeError):
+            return 60.0
+        return max(1.0, (reset - datetime.now(timezone.utc)).total_seconds())
 
     def pace(self, limit: dict | None) -> None:
         """Wait for the reset when the hour's points run low, so a long read never fails halfway."""
@@ -234,7 +250,7 @@ class GitHub:
             self.points += (limit or {}).get("cost", 0)
         if limit and limit["remaining"] < max(50, 2 * limit["cost"] * READERS):
             reset = datetime.fromisoformat(limit["resetAt"].replace("Z", "+00:00"))
-            self.gate.hold(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds() + 1))
+            self.gate.hold(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds()) + 1)
 
     # ---------------------------------------------------------------- what to read
 
