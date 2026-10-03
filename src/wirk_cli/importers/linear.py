@@ -57,7 +57,7 @@ ISSUE = ("id identifier number previousIdentifiers url title description priorit
 COMMENT = ("id body createdAt editedAt quotedText resolvedAt reactionData parent { id } issue { id } project { id } "
            "initiative { id } projectUpdate { id } initiativeUpdate { id } documentContent { document { id } } user { id } "
            "resolvingUser { id } botActor { name } externalUser { name }")
-UPDATE = "id body health url createdAt editedAt user { id } reactionData"
+UPDATE = "id body health url createdAt editedAt archivedAt user { id } reactionData"
 LISTS = {  # read whole at the start: (arguments, what each node holds)
     "teams": ("", "id key name private timezone issueEstimationType"),
     "workflowStates": ("includeArchived: true", "id name type position team { id }"),
@@ -67,7 +67,7 @@ LISTS = {  # read whole at the start: (arguments, what each node holds)
     "projects": ("includeArchived: true", "id name description content url status { id name type } priority lead { id } "
                  "teams(first: 20) { nodes { id } } targetDate targetDateResolution health createdAt updatedAt completedAt "
                  "canceledAt archivedAt trashed"),
-    "projectMilestones": ("", "id name description targetDate status project { id }"),
+    "projectMilestones": ("includeArchived: true", "id name description targetDate status archivedAt project { id }"),
     "issueRelations": ("includeArchived: true", f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"),
     "projectRelations": ("", "id type project { id } relatedProject { id } projectMilestone { id } relatedProjectMilestone { id }"),
     "initiatives": ("includeArchived: true", "id name description content url status owner { id } targetDate health "
@@ -75,8 +75,8 @@ LISTS = {  # read whole at the start: (arguments, what each node holds)
     "initiativeToProjects": ("", "id initiative { id } project { id }"),
     "documents": ("includeArchived: true", "id title content url creator { id } createdAt updatedAt project { id } "
                   "initiative { id } issue { id } archivedAt trashed"),
-    "projectUpdates": ("", UPDATE + " project { id }"),
-    "initiativeUpdates": ("", UPDATE + " initiative { id }"),
+    "projectUpdates": ("includeArchived: true", UPDATE + " project { id }"),
+    "initiativeUpdates": ("includeArchived: true", UPDATE + " initiative { id }"),
 }
 PARTIAL = {"issueRelations"}  # lists whose answer may leave out what the key cannot read, with an error saying so
 IN_TEAMS = "team: { id: { in: $teams } }"
