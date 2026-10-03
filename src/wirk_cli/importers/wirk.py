@@ -56,21 +56,20 @@ class Wirk:
         body = {**body, "format": "json", **({"workspace_id": self.workspace} if self.workspace else {})}
         return self.service.post(route, body, uncertain=uncertain)
 
-    def data(self, route: str, body: dict) -> dict:
+    def ok(self, route: str, body: dict) -> dict:
+        """The answer, or WIRK's refusal as a WirkError."""
         answer = self.post(route, body)
         if not answer["ok"]:
             raise WirkError(answer["errors"][0])
-        return answer["data"]
+        return answer
 
     def status(self) -> dict:
-        return self.data("/v2/status", {"max_bytes": 65536})
+        return self.ok("/v2/status", {"max_bytes": 65536})["data"]
 
     def cards(self, fields: dict):
         body = {"fields": fields, **PAGE}
         while True:
-            answer = self.post("/v2/query", body)
-            if not answer["ok"]:
-                raise WirkError(answer["errors"][0])
+            answer = self.ok("/v2/query", body)
             yield from answer["data"].get("cards", [])
             if answer["page"].get("complete", True) or not answer["page"].get("next_cursor"):
                 return
@@ -79,13 +78,11 @@ class Wirk:
     def item(self, ref, depth: str = "full") -> dict:
         """One item, its body read whole through the continuation."""
         body = {"fetch": [ref], "depth": depth, "max_bytes": 65536}
-        answer = self.post("/v2/query", body)
-        if not answer["ok"]:
-            raise WirkError(answer["errors"][0])
+        answer = self.ok("/v2/query", body)
         view = answer["data"]["results"][0]
         text = view.get("body", "")
         while not view.get("body_complete", True) and answer["page"].get("next_cursor"):
-            answer = self.post("/v2/query", {**body, "cursor": answer["page"]["next_cursor"]})
+            answer = self.ok("/v2/query", {**body, "cursor": answer["page"]["next_cursor"]})
             view = answer["data"]["results"][0]
             text += view.get("body", "")
         return {**view, "body": text}
@@ -105,7 +102,7 @@ class Wirk:
     def upload(self, data: bytes, filename: str, description: str, metadata: dict, request_id: str) -> str:
         declared = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         for _ in range(2):
-            signed = self.data("/v2/files", {"upload": declared})
+            signed = self.ok("/v2/files", {"upload": declared})["data"]
             if not signed["present"]:
                 self.service.put(signed["put"], io.BytesIO(data), len(data), "wirk import (run it again)")
             confirm = {"filename": filename, **declared, "description": description[:500], "metadata": metadata}
@@ -287,8 +284,8 @@ class Importer:
         stale = [link for key, link in self.existing(view).items() if key not in self.planned]
         makers = {}
         for start in range(0, len(stale), 32):
-            answer = self.wirk.data("/v2/query", {"fetch": stale[start:start + 32], "depth": "card"})
-            makers.update({found["id"]: found.get("created_by") for found in answer["results"]})
+            answer = self.wirk.ok("/v2/query", {"fetch": stale[start:start + 32], "depth": "card"})
+            makers.update({found["id"]: found.get("created_by") for found in answer["data"]["results"]})
         return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) == self.me]
 
     def link_pass(self) -> list:
@@ -451,12 +448,14 @@ class Importer:
         """Uploads for a new item, or what an edit attaches and swaps; attachments are downloaded only when missing."""
         having = {} if view is None else {f["filename"]: f for f in view["all"]["files"]}
         attach, swap = [], []
+
+        def store(data: bytes, name: str, description: str, uri: str) -> str:
+            return self.wirk.upload(data, name, description, {"role": "original", "origin": {"uri": uri, "observed_at": record.version}},
+                                    self.rid(record))
         for name, data in plan.files:
             if name in having and having[name]["sha256"] == hashlib.sha256(data).hexdigest():
                 continue
-            upload = self.wirk.upload(data, name, f"{self.ctx.source} {record.key} as its API returned it, emails removed",
-                                      {"role": "original", "origin": {"uri": record.url, "observed_at": record.version}},
-                                      self.rid(record))
+            upload = store(data, name, f"{self.ctx.source} {record.key} as its API returned it, emails removed", record.url)
             (swap.append({"file_id": having[name]["id"], "upload_id": upload}) if name in having else attach.append(upload))
         for attachment in plan.attachments:
             if attachment.name not in having:
@@ -464,10 +463,7 @@ class Importer:
                 self.counts["attachments"] += data is not None
                 self.counts["left as links"] += data is None
                 if data is not None:
-                    attach.append(self.wirk.upload(data, attachment.name, f"{self.ctx.source} attachment in {record.key}",
-                                                   {"role": "original", "origin": {"uri": attachment.url,
-                                                                                   "observed_at": record.version}},
-                                                   self.rid(record)))
+                    attach.append(store(data, attachment.name, f"{self.ctx.source} attachment in {record.key}", attachment.url))
         if view is None:
             return attach, {}
         return [], {**({"attach_uploads": attach} if attach else {}), **({"replace_files": swap} if swap else {})}

@@ -31,12 +31,15 @@ def main(words: list, options: dict, transport=None) -> int:
         return 0
     try:
         return Run(words, options, transport).go()
-    except Stop as stop:
-        print(f"Error import: {stop}" + (f"\n  {stop.fix}" if stop.fix else ""), file=sys.stderr)
+    except (Stop, wirk.WirkError) as stop:
+        tell(stop)
         return 2
-    except wirk.WirkError as error:
-        print(f"Error import: {error.code}: {error}", file=sys.stderr)
-        return 2
+
+
+def tell(stop: Exception) -> None:
+    """Why the run stopped: our Stop, WIRK's refusal or the client's failure, with what helps."""
+    code, fix = getattr(stop, "code", None), getattr(stop, "fix", None) or getattr(stop, "hint", None)
+    print(f"Error import: {f'{code}: ' if code else ''}{stop}" + (f"\n  {fix}" if fix else ""), file=sys.stderr)
 
 
 class Run:
@@ -55,7 +58,6 @@ class Run:
         self.folder = config_dir() / "import"
         self.token_file = self.folder / f"wirk-token-{source}-import"
         self.setup_file, self.map_file = self.folder / f"{source}-setup.json", self.folder / f"{source}-map.json"
-        self.again = command("wirk", "import", source, *rest, *(["--dry-run"] if self.dry_run else []))
 
     # ---------------------------------------------------------------- the run
 
@@ -83,6 +85,7 @@ class Run:
                 outcomes = importer.run(records)
             except (Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
                 self.report(census, importer, importer.outcomes, you, setup=None, stopped=stop)
+                tell(stop)
                 return 2
             if self.dry_run and importer.index.blocked:  # the plan is shown, but no setup until a person decides
                 self.report(census, importer, outcomes, you, setup=None)
@@ -184,15 +187,16 @@ class Run:
         attention = [o for o in outcomes if o.outcome in ATTENTION or o.message]
         limit = self.mapped.get("field_limit", 50)
         large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
-        summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run, "selected": census.selected,
-                   "skipped_not_public": census.skipped, "named_not_public": census.named_private, "issues": census.issues, "comments": census.comments,
-                   "pull_requests_skipped": census.pulls, "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts),
-                   "header_only": large, "missing_options": {k: sorted(v) for k, v in importer.missing.items()},
-                   "fields_not_set_up": sorted(importer.unset), "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
+        summary = {"source": self.module.SOURCE, "principal": self.principal, "dry_run": self.dry_run,
+                   "selected": census.selected, "skipped_not_public": census.skipped, "named_not_public": census.named_private,
+                   "issues": census.issues, "comments": census.comments, "pull_requests_skipped": census.pulls,
+                   "graphql_points": census.points, "outcomes": dict(counts), "text": dict(importer.counts), "header_only": large,
+                   "missing_options": {k: sorted(v) for k, v in importer.missing.items()}, "fields_not_set_up": sorted(importer.unset),
+                   "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None}
-        error = {"code": getattr(stopped, "code", "stopped"), "message": str(stopped), "hint": getattr(stopped, "fix", None) or getattr(stopped, "hint", None) or ""}
         if self.json:
-            print(json.dumps({"ok": not counts["error"] and not stopped, "errors": [error] if stopped else [],
+            errors = [{"code": getattr(stopped, "code", "stopped"), "message": str(stopped)}] if stopped else []
+            print(json.dumps({"ok": not counts["error"] and not stopped, "errors": errors,
                               "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
             return
         space = you["wirkspace"]
@@ -239,6 +243,4 @@ class Run:
         if len(attention) > 50:
             lines.append(f"  {len(attention) - 50} more: add --json for every outcome")
         print("\n".join(lines))
-        if stopped:
-            print(f"Error import: {error['code']}: {stopped}" + (f"\n  {error['hint']}" if error["hint"] else ""), file=sys.stderr)
 

@@ -196,7 +196,7 @@ class Gate:
 
 
 class GitHub:
-    source, noun, labels = SOURCE, NOUN, LABELS
+    source = SOURCE
 
     def __init__(self, run=None, sleep=None, http=None):
         self.run, self.scopes, self.projects, self.http = run or gh, set(), False, http
