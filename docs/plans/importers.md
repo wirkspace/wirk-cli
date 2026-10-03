@@ -686,7 +686,7 @@ The first Linear slice imports issues. Projects, milestones, initiatives, docume
 | L17 | F: waits on `RATELIMITED` and when the budget runs low | R: real headers |
 | L18 | F C: the shared rules, run on GitHub's evidence | R |
 
-**Budget.** The Linear adapter is 359 lines. Shared code grew by 41 lines, to 1,266: 13 of them are the census, moved from the GitHub adapter, which shrank to 485; the rest are mostly the archive mirror.
+**Budget.** The Linear adapter is 372 lines after the review's fixes (359 before). Shared code grew by 41 lines, to 1,266: 13 of them are the census, moved from the GitHub adapter, which shrank to 485; the rest are mostly the archive mirror.
 
 **The review of `7d0735d`** said fix. It accepted all six choices above, and found no regression on GitHub. Its findings, fixed RED (`3fbb969`), then GREEN, then a SIMPLIFY pass (`f5532e7`):
 
