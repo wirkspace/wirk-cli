@@ -31,6 +31,10 @@ STATES = {"new": "open", "indeterminate": "in_progress", "done": "completed"}
 SELECT = {"select": "one", "radiobuttons": "one", "multiselect": "many", "multicheckboxes": "many", "cascadingselect": "one"}
 STORY_POINTS, POINT_VALUES = {"Story Points", "Story point estimate"}, 20  # a field only with at most 20 values
 NOT_KEPT = {"avatarUrls", "lastViewed", "isWatching", "hasVoted", "emailAddress"}  # per viewer, expiring or personal
+# counts that churn without the issue changing; the worklogs in the archive carry the time spent
+CHURN = {"comment", "worklog", "updated", "watches", "votes", "timeoriginalestimate", "timeestimate", "timespent",
+         "aggregatetimeoriginalestimate", "aggregatetimeestimate", "aggregatetimespent", "timetracking", "progress",
+         "aggregateprogress"}
 CAP = 100 * 1024 * 1024
 
 
@@ -253,9 +257,9 @@ class Jira:
 
     @staticmethod
     def archived(f: dict, attachments: list) -> dict:
-        """The issue's fields for its archive: without what moves with comments, the files left out, and the titles of the
-        issues it embeds."""
-        kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
+        """The issue's fields for its archive: without what churns, the files left out, and the titles of the issues it
+        embeds."""
+        kept = {k: v for k, v in f.items() if k not in CHURN}
         return {**kept, "attachment": attachments, "parent": bare(f.get("parent")), "subtasks": [bare(s) for s in f.get("subtasks") or []],
                 "issuelinks": [{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
                                for link in f.get("issuelinks") or []]}

@@ -808,7 +808,7 @@ The first Jira slice imports issues. Projects and boards as docs (with component
   - `story_points` while it has at most 20 values;
   - select, radio, checkbox and cascading custom fields (a field named Owner becomes `jira_owner`).
 
-  Every value is also a header line: labels, components, versions, every sprint with its state, story points, other custom fields and web links. Watcher, vote and time-tracking counts stay in the archive only. Paragraph fields become `## <name>` sections of the body.
+  Every value is also a header line: labels, components, versions, every sprint with its state, story points, other custom fields and web links. Watcher, vote and time-tracking counts are kept nowhere, so they never revise an item. Paragraph fields become `## <name>` sections of the body.
 - **ADF to Markdown** by the Jira note's §2.8 contract.
   - Every line that would read as a heading, quote or list is escaped. Headings are written as text.
   - Unknown nodes keep their text and are counted, and so are dropped styling and unresolved images. An image names its attachment when its alt text matches a file.
@@ -849,7 +849,7 @@ The first Jira slice imports issues. Projects and boards as docs (with component
 - **Low:**
   - The resolutions that mean cancelled come from the map file's `cancelled`. It defaults to Won't Do, Duplicate, Won't Fix, Cannot Reproduce and Declined, and the template writes the list out (`932a314`).
   - A `tenant_info` answer that is not JSON, or gives a cloud ID of another shape, stops with a clean message (`f8b96ac`).
-  - Watcher, vote and time-tracking counts left the header for the archive (`b16ca8f`). A changed count still changes the archive file, and so the work item's files.
+  - Watcher, vote and time-tracking counts left the header (`b16ca8f`), and by the root's ruling the archive too: they churn without the issue changing, and the worklogs carry the time spent. A watch or vote alone leaves the work item `current`.
 - **Linear, from #8's review:** milestones and updates are read with their archived ones, so an archived one is mirrored rather than reported missing (`16f7562`).
 
 **Rows still waiting for the real site (S):**
