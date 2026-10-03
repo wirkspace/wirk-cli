@@ -197,7 +197,7 @@ def shortcut(words: list[str], options: dict) -> dict:
 def write(words, options, transport):
     body = request_body(options, words, lambda: {"request_id": options.get("--request-id") or new_id("w"),
                                                  **shortcut(words, options)})
-    return emit(connect(transport).post("/v2/write", body, uncertain=body.get("request_id", "?")), options)
+    return send(connect(transport), "/v2/write", body, options, body.get("request_id", "?"))
 
 
 def review(words, options, transport):
@@ -206,7 +206,21 @@ def review(words, options, transport):
     if options.get("--person"):
         confirm(decision_phrase(body), "decide it as yourself")
     service = connect(transport, person=bool(options.get("--person")))
-    return emit(service.post("/v2/review", body, uncertain=body.get("request_id", "?")), options)
+    return send(service, "/v2/review", body, options, body.get("request_id", "?"))
+
+
+def send(service: Service, route: str, body: dict, options: dict, uncertain: str | None, receipt: bool = True) -> int:
+    """POST a body that may change something. A body from --request FILE carries its own request ID, so after an
+    unknown outcome the retry is the same command again; writes and reviews can also be found by their receipt."""
+    try:
+        return emit(service.post(route, body, uncertain=uncertain), options)
+    except Failure as failure:
+        if failure.code == "outcome_unknown" and "--request" in options:
+            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"],
+                            *(["--person"] if options.get("--person") else []))
+            failure.hint = (f"Run the same command again: {again}: it applies once or returns the stored receipt."
+                            + (f" Or: {command('wirk', 'query', f'receipt={uncertain}')}" if receipt else ""))
+        raise
 
 
 def decision_phrase(body: dict) -> str:
@@ -382,14 +396,8 @@ def admin(words, options, transport):
         raise UsageError("admin takes show wirkspace|account, or --request FILE")
     confirm(phrase, "send it as yourself")
     body.setdefault("format", fmt(options))
-    try:
-        uncertain = body.get("request_id") if "--request" in options else None  # a show reads; nothing is uncertain
-        return emit(connect(transport, person=True).post("/v2/admin", body, uncertain=uncertain), options)
-    except Failure as failure:  # the request ID is in the file, and query receipt= does not look up administration
-        if failure.code == "outcome_unknown":
-            failure.hint = (f"Run the same command again: {command('wirk', 'admin', '--request', options['--request'])}: "
-                            "it applies once or returns the stored receipt.")
-        raise
+    uncertain = body.get("request_id") if "--request" in options else None  # a show reads; nothing is uncertain
+    return send(connect(transport, person=True), "/v2/admin", body, options, uncertain, receipt=False)
 
 
 def import_(words, options, transport):
