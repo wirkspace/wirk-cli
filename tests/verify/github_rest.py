@@ -87,6 +87,15 @@ def same(stored: str, original: str) -> bool:
     return re.fullmatch(pattern, clean(original)) is not None
 
 
+def email_keys(value) -> set:
+    """Every key of the JSON named like an email field; addresses people typed inside text are not keys."""
+    if isinstance(value, dict):
+        return {key for key in value if re.search("e-?mail", key, re.I)} | set().union(*map(email_keys, value.values()))
+    if isinstance(value, list):
+        return set().union(*map(email_keys, value))
+    return set()
+
+
 def cut(text: str) -> str:
     text = " ".join(clean(text).split())
     return text if len(text) <= 200 else text[:199].rstrip() + "…"
@@ -192,8 +201,8 @@ class Check:
         if archive is None:
             return self.differ(key, "no issue archive")
         data = json.loads(archive)
-        if re.search(r'"[^"]*e-?mail[^"]*"\s*:', archive.decode(), re.I):
-            self.differ(key, "the archive holds an email field")
+        if email_keys(data):
+            self.differ(key, f"the archive holds email fields {sorted(email_keys(data))}")
         stored = data["issue"]["timelineItems"]["nodes"]
         if len(stored) != len(events):
             types = Counter(e.get("event") for e in events)
