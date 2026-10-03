@@ -21,6 +21,7 @@ SOURCE, NOUN = "Jira", ("project", "projects")
 GATEWAY = "https://api.atlassian.com/ex/jira/"
 TRANSPORT = None  # how requests leave; tests answer through a fake
 ISSUE_KEY = re.compile(r"[A-Z][A-Z0-9_]*-[0-9]+")
+CLOUD = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 SITE = re.compile(r"[a-z0-9][a-z0-9-]*\.atlassian\.net")
 LABELS = {"parent": "Parent", "sub_issue": "Children", "blocked_by": "Is blocked by", "blocking": "Blocks",
           "duplicate_of": "Duplicates", "duplicated_by": "Is duplicated by", "related": "Links", "previously": "Previous keys"}
@@ -86,8 +87,16 @@ class Jira:
         if not SITE.fullmatch(self.site or ""):
             raise Stop(f"{path} names {self.site!r}, not a Jira Cloud site such as acme.atlassian.net", fix)
         self.auth = "Basic " + base64.b64encode(f"{login}:{token}".encode()).decode()
-        cloud = key.get("cloud_id") or self.http.get(f"https://{self.site}/_edge/tenant_info").json().get("cloudId")
-        self.base = GATEWAY + str(cloud)
+        cloud = key.get("cloud_id")
+        if not cloud:
+            try:
+                cloud = self.http.get(f"https://{self.site}/_edge/tenant_info").json().get("cloudId")
+            except (httpx.HTTPError, ValueError, AttributeError):
+                cloud = None
+        if not isinstance(cloud, str) or not CLOUD.fullmatch(cloud):
+            raise Stop(f"could not read the cloud ID of {self.site} from its tenant_info",
+                       f'check the site in {path}, or add the site\'s "cloud_id" to it')
+        self.base = GATEWAY + cloud
         self.call("GET", "/rest/api/3/myself")
 
     def call(self, method: str, path: str, params: dict | None = None, body: dict | None = None, raw: bool = False):
