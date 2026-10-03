@@ -164,5 +164,5 @@ def test_show_help_says_it_is_not_live_yet(capsys):
 
 def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
     text = help_of(capsys, "write")
-    assert "when your person may make it" in text and "requires_review" in text and "--propose --reason" in text
+    assert "when you may make it" in text and "your person may" not in text and "requires_review" in text and "--propose --reason" in text
     assert "basis_changed" in text and "quotation_mismatch" in text
