@@ -629,6 +629,65 @@ Settled now from the Linear note and the rulings; revised against the real works
 
 R is the person's own Linear workspace, read-only; its dry-run census decides which rows it really exercises. The rest stay F and C, and the report says which.
 
+### 5.1 Build record: Linear issues (3 October 2026)
+
+The first Linear slice imports issues. Projects, milestones, initiatives, documents and updates (L10, L11) are the next slice, in their own pull request. Until then, an issue's project and milestone are header lines.
+
+**No real source yet.** The person's read key is still to come. So every answer in the tests is synthetic, shaped from the fields the Linear note read in Linear's published schema at `2a3ac4c`. Every row that needs the real workspace (R) is open below.
+
+**Built** (`src/wirk_cli/importers/linear.py`, about 360 lines; tests in `tests/test_import_linear.py` and `tests/test_import_linear_contract.py`):
+- **Reads:** GraphQL queries only, with the key from `<config>/import/linear-key` (owner-only, `lin_api_` shape), sent only to `api.linear.app` and `uploads.linear.app`. No email is asked for.
+- **Lists:** teams, states, users, labels, cycles, projects, milestones and relations are root lists read whole. Issues come 25 a page, with their labels, link cards and history nested and followed past the first page. Comments come from the root list, filtered to the selected teams.
+- **Pacing:** a `RATELIMITED` answer waits for the reset and does not count as a failure. A low remaining budget also waits, so a long read never fails halfway. Complexity is summed from `X-Complexity` for the report.
+- **Selection:** public teams when none is named. A private team only when named, with the warning. Private teams not named are listed, without counts, since their issues are not read.
+- **Issues:** the key line `Linear issue [ENG-123] · <url>`. Status follows the state type, and `workflow` takes the state's name. The header holds the team, status, priority, estimate on the team's scale, due day and zone, cycle, project and milestone, labels by group, `Previously:` identifiers, reactions, link cards, and the archive line.
+- **Fields:** `team`, `workflow`, `priority`, `estimate`, `cycle`, `label`, and one field per label group (a group named like one of those takes ` (label group)`).
+- **Relations:** parent and sub-issues; blocks both ways; duplicate as `Duplicate of` and `Duplicates`; related and similar as `Related`. References into private teams not selected are counted, never shown, and replaced in the archive.
+- **Comments:** threads in order, with each reply marked `reply to @…`, resolutions `resolved by @… at …`, and quoted text as a block quote. Bots and external users are named as such.
+- **Archives:** the issue archive holds the issue, its relations and its history; the discussion holds the comments.
+- **Archived and trashed:** imported, then archived by the importer in a second write with the reason `Archived in Linear on <day>` or `In Linear's trash since <day>`. They are restored when Linear restores them, but only an archive the importer made itself.
+
+**Shared changes:**
+- The census moved into `render.py`.
+- Comments take heading marks, and a hidden comment names its source.
+- A record carries its archive reason and a due instant (GitHub's due day becomes the end of that day in UTC, the same as before).
+- `duplicated_by` joins the relations.
+- The importer mirrors archive state, and an archive it made is its own to undo.
+- The missing-issue rule reads a key's scope for any source.
+- The report names the source's scopes and cost unit, and it shows pull requests only for GitHub.
+
+**Choices made in the build,** for the review:
+1. **The map file keys Linear users by `displayName`**, Linear's handle, which is unique in a workspace, rather than by user ID. The person edits the map, and an ID means nothing to them. People are written `@handle`, as GitHub's are, which also keeps the forged-heading guard working.
+2. **Sub-issues come from the parents of the issues read.** A sub-issue in a team outside the selection is therefore not listed on its parent.
+3. **History goes into the archive with its scalar `*Id` fields.** That costs less, and no name or key from a private team can come through it.
+4. **Teams are public or private by `private`.** The Linear note names a newer `visibility` (with restricted sub-teams). The first real dry run settles which one the schema holds; a query naming a missing field stops with Linear's message.
+5. **Uploads are read only from `uploads.linear.app`.** A redirect to a storage host leaves the file a link and reports it, until the seed shows the host to allow (§3.7).
+6. **Archive outcomes are counted, not listed.** `archived` and `restored` are not attention lines, since a mature workspace archives thousands of issues. This changes GitHub's report too: a stale discussion part's archive is no longer listed, and is still counted.
+
+**Status of the evidence rows** (F fakes, C contract test against a scratch core at `60b84ae`; R needs the real workspace):
+
+| # | Now | Still needs |
+|---|---|---|
+| L1 | F C: public by default, private skipped or named with the warning, references counted | R; sub-teams and restricted teams |
+| L2 | F: every state type, `workflow` by name | R |
+| L3 | F: labels, groups as fields, header always | R: retired labels, unicode names, group selection |
+| L4 | F: priority, estimates on Fibonacci and T-shirt scales | R |
+| L5 | F: cycle as a field when small | R: a workspace's real number of cycles |
+| L6 | F: the end of the day in the team's zone on a daylight-saving day | — |
+| L7 | F C: `contributes_to` | R: depth and cross-team parents |
+| L8 | F C: `requires` and the completed-dependent fallback | — |
+| L9 | F: duplicate, related, similar | R: whether `similar` occurs |
+| L10, L11 | — | the next slice |
+| L12 | F C: threads, replies, resolutions, quotes, edits, reactions, bots | R: reply depth, `reactionData`'s exact shape |
+| L13 | F: uploads with the key, link cards in the header | R: the storage host, real files |
+| L14 | F: found by UUID, `Previously:` identifiers | R: a real move |
+| L15 | F C: archived, trashed, restored, never another's archive | R: whether trashed issues come back with `includeArchived` |
+| L16 | F: history in the archive, past its first page | R |
+| L17 | F: waits on `RATELIMITED` and when the budget runs low | R: real headers |
+| L18 | F C: the shared rules, run on GitHub's evidence | R |
+
+**Budget.** The Linear adapter is 359 lines. Shared code grew by 41 lines, to 1,266: 13 of them are the census, moved from the GitHub adapter, which shrank to 485; the rest are mostly the archive mirror.
+
 ## 6. Jira, third
 
 Settled now from the Jira note and the rulings; it needs a Jira Cloud site the person creates.
