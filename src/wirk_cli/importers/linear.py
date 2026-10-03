@@ -292,6 +292,7 @@ class Linear:
                                                   *([f"Target: {node['targetDate']}"] if node["targetDate"] else []),
                                                   *([f"Owner: {self.person(node['owner'])}"] if node["owner"] else [])])],
                                relations=related[node["id"]], comments=comments[node["id"]]) for node in initiatives]
+        names = {node["id"]: node["name"] for node in projects + initiatives}
         parents = {**{node["id"]: self.part(node["id"]) for node in projects + initiatives},
                    **{node["id"]: self.reference(node) for node in issues}}
         records += [self.build("document", node, bracketed(node["title"]), node["content"] or "", node["url"], node["updatedAt"],
@@ -303,8 +304,7 @@ class Linear:
         for name, kind in (("projectUpdates", "project"), ("initiativeUpdates", "initiative")):
             records += [self.build("update", node, f"{parents[node[kind]['id']].key} update {node['createdAt'][:10]} ({node['id']})",
                                    node["body"] or "", node["url"], node["editedAt"] or node["createdAt"],
-                                   title=f"{(self.projects.get(node[kind]['id']) or self.initiatives[node[kind]['id']])['name']} update "
-                                         f"{node['createdAt'][:10]}",
+                                   title=f"{names[node[kind]['id']]} update {node['createdAt'][:10]}",
                                    opened=[" · ".join([f"Posted by {self.person(node['user'])} {node['createdAt']}",
                                                        *(["edited"] if node["editedAt"] else [])])],
                                    facts=[f"Health: {HEALTH[node['health']]}" if node["health"] in HEALTH else "",
