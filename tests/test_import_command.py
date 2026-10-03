@@ -251,3 +251,8 @@ def test_linear_public_teams_by_default_then_the_import_as_its_own_importer(line
     code, out, err = run("ENG", "SEC")
     assert code == 0 and "warning: SEC is private on Linear: everyone in the wirkspace will read its 1 issues" in out
     assert KEY not in out + err
+
+
+def test_the_help_shows_linear_its_teams_and_where_its_key_lives(world):
+    text = world["run"]()[1]
+    assert "wirk import linear [TEAM…]" in text and "import/linear-key" in text and "every public team" in text
