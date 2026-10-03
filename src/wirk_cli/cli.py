@@ -382,7 +382,13 @@ def admin(words, options, transport):
         raise UsageError("admin takes show wirkspace|account, or --request FILE")
     confirm(phrase, "send it as yourself")
     body.setdefault("format", fmt(options))
-    return emit(connect(transport, person=True).post("/v2/admin", body, uncertain=body.get("request_id")), options)
+    try:
+        return emit(connect(transport, person=True).post("/v2/admin", body, uncertain=body.get("request_id")), options)
+    except Failure as failure:  # the request ID is in the file, and query receipt= does not look up administration
+        if failure.code == "outcome_unknown":
+            failure.hint = (f"Run the same command again: {command('wirk', 'admin', '--request', options['--request'])}: "
+                            "it applies once or returns the stored receipt.")
+        raise
 
 
 def import_(words, options, transport):
