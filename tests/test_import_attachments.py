@@ -19,7 +19,7 @@ PNG = b"\x89PNG fake image bytes"
 def read_with(issue_node, http=None, extra=None):
     adapter = github.GitHub(run=FakeGh([repo("acme/web")], {"acme/web": [issue_node]}, extra=extra), sleep=lambda s: None,
                             http=http)
-    adapter.check()
+    adapter.check({})
     return adapter, adapter.read(["acme/web"])[1][0]
 
 

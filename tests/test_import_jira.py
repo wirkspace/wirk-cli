@@ -143,7 +143,7 @@ def adapter(fake, folder, slept=None):
 
 def read(fake, folder, selection=()):
     found = adapter(fake, folder)
-    found.check()
+    found.check({})
     return found, *found.read(list(selection))
 
 
@@ -165,11 +165,11 @@ def test_the_key_file_holds_site_login_and_token_owner_only_and_only_atlassian_h
             assert request.method == "GET" or request.url.path.endswith(("/search/jql", "/changelog/bulkfetch"))
     os.chmod(folder / "jira-key", 0o644)
     with pytest.raises(Stop) as stop:
-        adapter(fake, folder).check()
+        adapter(fake, folder).check({})
     assert "chmod 600" in stop.value.fix
     os.remove(folder / "jira-key")
     with pytest.raises(Stop) as stop:
-        adapter(fake, folder).check()
+        adapter(fake, folder).check({})
     assert "jira-key" in stop.value.fix and "read" in stop.value.fix.lower() and TOKEN not in str(stop.value) + stop.value.fix
 
 
@@ -177,11 +177,11 @@ def test_a_captcha_lockout_stops_and_a_429_waits_its_retry_after(folder):
     fake = FakeJira([issue(1)])
     fake.captcha = True
     with pytest.raises(Stop) as stop:
-        adapter(fake, folder).check()
+        adapter(fake, folder).check({})
     assert "CAPTCHA" in str(stop.value)
     fake.captcha, fake.limited, slept = False, 1, []
     found = adapter(fake, folder, slept)
-    found.check()
+    found.check({})
     assert slept == [7]
 
 
@@ -387,7 +387,7 @@ def test_cancelled_resolutions_come_from_the_map_with_broad_defaults(folder):
     assert states == {"SEED-1": "cancelled", "SEED-2": "cancelled", "SEED-3": "completed"}
     found = adapter(FakeJira(nodes), folder)
     found.cancelled = {"Fixed"}
-    found.check()
+    found.check({})
     assert {r.key: r.state for r in found.read([])[1]}["SEED-3"] == "cancelled"
 
 
@@ -396,7 +396,7 @@ def test_a_site_whose_cloud_id_cannot_be_read_stops_cleanly(answer, folder):
     fake = FakeJira([issue(1)])
     fake.tenant = answer
     with pytest.raises(Stop) as stop:
-        adapter(fake, folder).check()
+        adapter(fake, folder).check({})
     assert "cloud" in str(stop.value).lower() and "cloud_id" in stop.value.fix and TOKEN not in str(stop.value) + stop.value.fix
 
 

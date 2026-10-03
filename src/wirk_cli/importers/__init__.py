@@ -92,9 +92,7 @@ class Run:
             mapped = self.read_map()
             self.limit = mapped.get("field_limit", 50)
             adapter = self.adapter
-            if "cancelled" in mapped:  # Jira's resolutions that mean done work was not done
-                adapter.cancelled = mapped["cancelled"]  # checked by the adapter that reads it
-            adapter.check()
+            adapter.check(mapped)
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
             plan = render.plan_fields(records, adapter.selections(records), adapter.source)
