@@ -301,8 +301,7 @@ class Importer:
 
     def links_of(self, ident: str, wanted: list) -> list:
         source = self.single(ident)
-        targets = [(link, self.single(link[2])) for link in wanted]
-        targets = [(link, target) for link, target in targets if target and not target.archived]
+        targets = [(link, target) for link in wanted for target in [self.single(link[2])] if target and not target.archived]
         if not source or source.archived or not targets:
             return []
         view = self.wirk.item(source.item, "full")
