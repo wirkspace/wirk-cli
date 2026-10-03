@@ -431,3 +431,36 @@ def test_the_history_never_names_a_file_that_was_not_kept(folder):
     found, census, records = read(FakeJira([node], history), folder)
     archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
     assert b"payroll-dump.csv" not in archive and b"seen.png" in archive
+
+
+def history_item(field, before, after, **ids):
+    return {"field": field, "fieldtype": "jira", "fromString": before, "toString": after, **ids}
+
+
+def test_history_recorded_while_in_a_project_not_selected_is_withheld(folder):
+    entries = {"20005": [
+        {"id": "13", "author": ADA, "created": "2026-09-04T00:00:00.000+0000", "items": [history_item("summary", "Old words", "Issue 5")]},
+        {"id": "11", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [
+            history_item("status", "To Do", "Outside legal hold"), history_item("Sprint", None, "Outside sprint 9"),
+            history_item("Component", None, "Outside payroll component")]},
+        {"id": "12", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [
+            history_item("Key", "OUT-7", "SEED-5"), history_item("project", "Outside", "Seed project", **{"from": "10002", "to": "10000"})]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Outside" not in archive and b"OUT-7" not in archive and b"Old words" in archive
+
+
+def test_a_round_trip_through_a_project_not_selected_withholds_the_whole_stay(folder):
+    move = lambda ident, when, before, after, old, new: {"id": ident, "author": ADA, "created": when, "items": [
+        history_item("Key", old, new), history_item("project", *(p["name"] for p in (before, after)), **{"from": before["id"], "to": after["id"]})]}
+    seed, out = PROJECTS[0], PROJECTS[2]
+    entries = {"20005": [
+        {"id": "25", "author": ADA, "created": "2026-09-05T00:00:00.000+0000", "items": [history_item("summary", "Later words", "Issue 5")]},
+        move("22", "2026-09-02T00:00:00.000+0000", seed, out, "SEED-5", "OUT-9"),
+        {"id": "21", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("summary", "First words", "Next")]},
+        move("24", "2026-09-04T00:00:00.000+0000", out, seed, "OUT-9", "SEED-5"),
+        {"id": "23", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [history_item("status", "To Do", "Outside legal hold")]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Outside" not in archive and b"OUT-9" not in archive and b"legal hold" not in archive
+    assert b"First words" in archive and b"Later words" in archive
