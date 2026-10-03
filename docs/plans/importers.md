@@ -99,14 +99,14 @@ Left out on purpose: `--resume` (re-running resumes), `--since` (the hash decide
    - `<config>/import/github-setup.json`, the administration request. It holds `principal.create` for `<person>-github-import` (an agent of the person whose agent ran the dry run, from `status`), `member.set` with `editor` in the target wirkspace, the `field.create` operations of §3.8, and `token.add` **last**. On core `main` an agent without membership rows acts with its person's role in every wirkspace of the account (decision 66), so the row must exist before the token does. When the importer's token already authenticates, the file holds only what is still missing: fields, or `member.set` for a new wirkspace.
    - `<config>/import/wirk-token-github-import`, the importer's own WIRK token: generated here, owner-only, created exclusively, never printed. Only its SHA-256 digest is in the setup file. The name says whose token it is, so it is never mistaken for a GitHub token.
    - `<config>/import/github-map.json`, the map template (§3.8), written only when no such file exists, so a person's edits are never lost.
-2. **Person:** reads both files and runs the line the dry run printed, `wirk admin --request ~/.config/wirk/import/github-setup.json`, at a terminal, typing its confirmation. An account administrator is needed: `principal.create` and `token.add` are account operations in `admin.py`.
+2. **Person:** reads both files and runs the line the dry run printed, `wirk admin --request ~/.config/wirk/import/github-setup.json`, at their own terminal after `wirk login --person`, typing its confirmation. An agent cannot, and the dry run, the run before setup and the help all say so. An account administrator is needed: `principal.create` and `token.add` are account operations in `admin.py`.
 3. **Agent:** `wirk import github Acme`. It writes as `<person>-github-import`, with the map from `<config>/import/` unless `map=` names another. Every later run is this step alone. After cutover the person revokes the token; the report's last lines print how.
 
 If the person skips the field operations, the import still runs with the fields that exist and keeps everything else as header text (§3.8).
 
 ### 2.3 Output and exit status
 
-Text output is a summary, then one line per object whose outcome needs attention: `skipped: …`, `blocked: …`, `ambiguous`, `missing in GitHub: …`, `error: …`, duplicates allowed, link fallbacks and unlinks. Routine `created`, `updated` and `current` outcomes are counted, not listed, because 4,000 lines would flood an agent's context. More than 50 such lines end with a count and the `--json` hint. `--json` gives every outcome. A long run prints progress to standard error every 100 issues.
+Text output is a summary, then one line per object whose outcome needs attention: `skipped: …`, `blocked: …`, `ambiguous`, `missing in GitHub: …`, `error: …`, duplicates allowed, link fallbacks and unlinks. Routine `created`, `updated` and `current` outcomes are counted, not listed, because 4,000 lines would flood an agent's context. More than 50 such lines end with a count and the `--json` hint. Errors are also summed up once per code, `errors: 146 files_unavailable: …`; with `--json`, any error or stop makes `ok` false and fills the top-level `errors` with each code, its count and its first message. `--json` gives every outcome. A long run prints progress to standard error every 100 issues.
 
 ```
 GitHub Acme → wirkspace Acme (1a2b3c4d) as alice-github-import (agent of alice)
@@ -124,7 +124,7 @@ setup: a person runs: wirk admin --request ~/.config/wirk/import/github-setup.js
 find one: wirk query text='GitHub issue [Acme/cli#12]'
 ```
 
-Exit status, as the Granola connector's: 0 when every object went through; 1 when any ended in `error`; 2 when the run could not start or had to stop (no `gh` login, a missing scope, a rejected key, the setup not applied, another importer's items in the selection during a dry run (§3.4), another run in progress, WIRK not answering). Every outcome reached before a stop is still printed.
+Exit status, as the Granola connector's: 0 when every object went through; 1 when any ended in `error`; 2 when the run could not start or had to stop (no `gh` login, a missing scope, a rejected key, the setup not applied, another importer's items in the selection during a dry run (§3.4), another run in progress, WIRK not answering). Every outcome reached before a stop is still printed. A service whose status reports its file storage unavailable stops both runs before anything is read or written, since every issue's raw archive is a file; a file store lost during a run stops it at the first refusal.
 
 ## 3. The shared importer
 
