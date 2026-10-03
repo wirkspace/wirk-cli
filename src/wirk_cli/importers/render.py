@@ -38,7 +38,7 @@ HEADING = re.compile(r"^([ \t]*)(#{1,6}[ \t]+@)", re.M)  # within one line, so b
 EMAIL_KEY = re.compile(r"e-?mail", re.I)
 SPAM = {"spam", "abuse"}
 RELATIONS = ("parent", "sub_issue", "blocked_by", "blocking", "duplicate_of", "duplicated_by", "related", "transferred_from",
-             "mentioned")
+             "mentioned", "previously")
 
 
 class Stop(Exception):

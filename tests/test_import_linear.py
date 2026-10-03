@@ -206,10 +206,11 @@ def test_an_issue_maps_to_a_record(folder):
     for line in ["Opened by @ada 2026-09-01T10:00:00.000Z · started 2026-09-03T15:02:10.000Z",
                  "Team: Engineering (ENG) · Status: In Review (started) · Priority: High · Estimate: 3 (fibonacci)",
                  "Due: 2026-03-08 (America/Los_Angeles)", "Cycle: ENG cycle 42", "Project: Checkout v2 · Milestone: Beta",
-                 "Labels: Bug · Area: Frontend", "Previously: [OPS-45]", "Reactions: +1 2",
+                 "Labels: Bug · Area: Frontend", "Reactions: +1 2",
                  'Attachment: github "Keep next= through SSO" #412 open https://github.com/acme/web/pull/412']:
         assert line in header
     assert record.raw["issue"]["identifier"] == "ENG-7" and "updatedAt" not in record.raw["issue"]
+    assert ("previously", "OPS-45") in [(kind, ref.key) for kind, ref in record.relations]  # rendered under the reference rule
 
 
 @pytest.mark.parametrize("name, meaning", [("Triage", "open"), ("Todo", "open"), ("In Review", "in_progress"), ("Done", "completed"),

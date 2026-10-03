@@ -22,7 +22,7 @@ FILE_HOSTS = {"uploads.linear.app"}  # where uploads are read, with the key; any
 TRANSPORT = None  # how requests leave; tests answer through a fake
 KEY = re.compile(r"lin_api_[A-Za-z0-9]{20,}")
 LABELS = {"parent": "Parent", "sub_issue": "Sub-issues", "blocked_by": "Blocked by", "blocking": "Blocking",
-          "duplicate_of": "Duplicate of", "duplicated_by": "Duplicates", "related": "Related"}
+          "duplicate_of": "Duplicate of", "duplicated_by": "Duplicates", "related": "Related", "previously": "Previously"}
 SELECTIONS = {"Team": "many", "Workflow": "one", "Priority": "one", "Estimate": "one", "Cycle": "one", "Label": "many"}
 STATES = {"triage": "open", "backlog": "open", "unstarted": "open", "started": "in_progress", "completed": "completed",
           "canceled": "cancelled", "duplicate": "cancelled"}
@@ -171,7 +171,7 @@ class Linear:
         self.teams, self.states, self.users, self.labels, self.cycles, self.projects, self.milestones = (
             {node["id"]: node for node in lists[name]} for name in
             ("teams", "workflowStates", "users", "issueLabels", "cycles", "projects", "projectMilestones"))
-        keys = {team["key"]: team for team in lists["teams"]}
+        self.keys = keys = {team["key"]: team for team in lists["teams"]}
         unknown = [word for word in selection if word not in keys]
         if unknown:
             raise Stop(f"Linear has no team {', '.join(unknown)} that this key can see",
@@ -233,8 +233,12 @@ class Linear:
         relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
             [("sub_issue", self.reference(child)) for child in children] + \
             sorted(((kind, self.reference(other)) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
-        raw = {"team": team["key"], "issue": {key: value for key, value in node.items() if key != "updatedAt"},
-               "relations": [relation for _, _, relation in related]}
+        # an identifier from before a move names its team: shown, and kept in the archive, only as any reference is (§3.9)
+        previous = [{"identifier": key, "team": {"key": key.rsplit("-", 1)[0], "private": key.rsplit("-", 1)[0] not in self.keys
+                                                 or self.keys[key.rsplit("-", 1)[0]]["private"]}} for key in node["previousIdentifiers"]]
+        relations += [("previously", render.Ref(p["identifier"], p["team"]["key"], not p["team"]["private"])) for p in previous]
+        raw = {"team": team["key"], "relations": [relation for _, _, relation in related],
+               "issue": {**{key: value for key, value in node.items() if key != "updatedAt"}, "previousIdentifiers": previous}}
         return render.Record(
             SOURCE, "issue", node["id"], node["identifier"], node["url"], node["updatedAt"], node["title"], node["description"] or "",
             STATES.get(state["type"], "open"),
@@ -267,7 +271,6 @@ class Linear:
                  " · ".join([*([f"Project: {project['name']}"] if project else []),
                              *([f"Milestone: {milestone['name']}"] if milestone else [])]),
                  " · ".join(f"{'Labels' if name == 'Label' else name}: {', '.join(values)}" for name, values in groups.items()),
-                 f"Previously: {', '.join(f'[{key}]' for key in node['previousIdentifiers'])}" if node["previousIdentifiers"] else "",
                  f"Reactions: {reactions(node['reactionData'])}" if reactions(node["reactionData"]) else "",
                  *(" ".join(filter(None, ["Attachment:", card["sourceType"] or "link", f'"{card["title"]}"', card["subtitle"],
                                           card["url"]])) for card in node["attachments"]["nodes"])]
