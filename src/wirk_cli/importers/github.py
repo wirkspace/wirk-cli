@@ -1,11 +1,13 @@
 """The GitHub adapter (docs/plans/importers.md §4): issues read through the person's `gh` login, with GraphQL queries and
 GETs only. It never reads gh's token and never writes to GitHub; pull requests are counted, never read."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import re
 import subprocess
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -24,6 +26,7 @@ EMOJI = {"THUMBS_UP": "👍", "THUMBS_DOWN": "👎", "LAUGH": "😄", "HOORAY": 
 LIMITED = re.compile(r"secondary rate limit|abuse detection|HTTP 429", re.I)
 TIMEOUT = re.compile(r"timeout|HTTP 50[234]|Something went wrong", re.I)
 PAGE = 25
+READERS = 4  # timelines read at once (decision 80); writes to WIRK stay one at a time
 CAP = 100 * 1024 * 1024  # bytes a download may hold (§3.7)
 # Where GitHub serves attachment bytes; a redirect anywhere else is not followed, and no credential is ever sent.
 FILE_HOSTS = {"github.com", "objects.githubusercontent.com", "private-user-images.githubusercontent.com",
@@ -170,12 +173,29 @@ def reactions(groups: list) -> str:
                       for g in groups or [] if g["reactors"]["totalCount"])
 
 
+class Gate:
+    """One rate-limit budget for every reader: a pause that any reader sets holds them all."""
+
+    def __init__(self, sleep=time.sleep, clock=time.monotonic):
+        self.sleep, self.clock, self.until, self.lock = sleep, clock, 0.0, threading.Lock()
+
+    def hold(self, seconds: float) -> None:
+        with self.lock:
+            self.until = max(self.until, self.clock() + seconds)
+
+    def wait(self) -> None:
+        with self.lock:
+            left = self.until - self.clock()
+        if left > 0:
+            self.sleep(left)
+
+
 class GitHub:
     source, noun, labels = SOURCE, NOUN, LABELS
 
     def __init__(self, run=None, sleep=None, http=None):
-        self.run, self.sleep, self.scopes, self.projects, self.http = run or gh, sleep or time.sleep, set(), False, http
-        self.points = 0
+        self.run, self.scopes, self.projects, self.http = run or gh, set(), False, http
+        self.gate, self.points, self.counting = Gate(sleep or time.sleep), 0, threading.Lock()
 
     # ---------------------------------------------------------------- talking to GitHub
 
@@ -190,6 +210,7 @@ class GitHub:
     def graphql(self, query: str, variables: dict) -> dict:
         assert not query.lstrip().startswith("mutation")  # the importer only reads
         for attempt in range(4):
+            self.gate.wait()
             code, out, err = self.run(["api", "graphql", "--input", "-"], json.dumps({"query": query, "variables": variables}))
             try:
                 answer = json.loads(out) if out.strip() else {}
@@ -200,7 +221,7 @@ class GitHub:
                 return answer["data"]
             text = out + err
             if LIMITED.search(text):
-                self.sleep(60 * 2 ** attempt)
+                self.gate.hold(60 * 2 ** attempt)
                 continue
             if TIMEOUT.search(text):
                 raise TimeoutError(text[:200])
@@ -209,10 +230,11 @@ class GitHub:
 
     def pace(self, limit: dict | None) -> None:
         """Wait for the reset when the hour's points run low, so a long read never fails halfway."""
-        self.points += (limit or {}).get("cost", 0)
-        if limit and limit["remaining"] < max(50, 2 * limit["cost"]):
+        with self.counting:
+            self.points += (limit or {}).get("cost", 0)
+        if limit and limit["remaining"] < max(50, 2 * limit["cost"] * READERS):
             reset = datetime.fromisoformat(limit["resetAt"].replace("Z", "+00:00"))
-            self.sleep(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds() + 1))
+            self.gate.hold(max(1.0, (reset - datetime.now(timezone.utc)).total_seconds() + 1))
 
     # ---------------------------------------------------------------- what to read
 
@@ -277,10 +299,13 @@ class GitHub:
                 continue
             issues = answer["repository"]["page"]
             for node in issues["nodes"]:
-                node["timelineItems"] = {"pageInfo": {"hasNextPage": True, "endCursor": None}, "nodes": []}  # read alone
                 for connection in connections(self.projects):
-                    self.rest_of(node, connection)
-                yield node
+                    if connection != "timelineItems":
+                        self.rest_of(node, connection)
+                node["timelineItems"] = {"pageInfo": {"hasNextPage": True, "endCursor": None}, "nodes": []}  # read alone
+            with ThreadPoolExecutor(max_workers=READERS) as readers:
+                list(readers.map(lambda node: self.rest_of(node, "timelineItems"), issues["nodes"]))
+            yield from issues["nodes"]
             if not issues["pageInfo"]["hasNextPage"]:
                 return
             after = issues["pageInfo"]["endCursor"]
@@ -289,9 +314,18 @@ class GitHub:
         """A nested connection longer than its first page, read to the end."""
         found = node[connection]
         while found["pageInfo"]["hasNextPage"]:
-            more = self.graphql(more_query(connection, self.projects), {"id": node["id"], "after": found["pageInfo"]["endCursor"]})["node"][connection]
+            more = self.read_alone(more_query(connection, self.projects), {"id": node["id"], "after": found["pageInfo"]["endCursor"]})["node"][connection]
             found = {"pageInfo": more["pageInfo"], "nodes": found["nodes"] + more["nodes"]}
         node[connection] = found
+
+    def read_alone(self, query: str, variables: dict) -> dict:
+        """One issue's query, tried again after a timeout, since nothing smaller can be asked for."""
+        for attempt in range(3):
+            try:
+                return self.graphql(query, variables)
+            except TimeoutError:
+                self.gate.hold(5 * 2 ** attempt)
+        raise Stop("GitHub timed out reading one issue three times; run the same command again")
 
     # ---------------------------------------------------------------- one issue as a record
 

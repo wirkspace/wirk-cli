@@ -250,7 +250,7 @@ def test_secondary_limits_back_off_and_a_low_budget_waits_for_the_reset():
     adapter = github.GitHub(run=limited, sleep=slept.append)
     adapter.check()
     adapter.read(["acme"])
-    assert slept and slept[0] >= 60
+    assert slept and slept[0] >= 59  # the shared pause, less the moment that passed since it was set
 
 
 def test_only_reads_reach_github():
