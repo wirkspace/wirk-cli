@@ -217,10 +217,15 @@ def send(service: Service, route: str, body: dict, options: dict, uncertain: str
     except Failure as failure:
         if failure.code == "outcome_unknown" and "--request" in options:
             again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"],
-                            *(["--person"] if options.get("--person") else []))
+                            *present(options, "--person", "--json"))
             failure.hint = (f"Run the same command again: {again}: it applies once or returns the stored receipt."
                             + (f" Or: {command('wirk', 'query', f'receipt={uncertain}')}" if receipt else ""))
         raise
+
+
+def present(options: dict, *switches: str) -> list[str]:
+    """The given switches that this command had, so a printed retry repeats them."""
+    return [switch for switch in switches if options.get(switch)]
 
 
 def decision_phrase(body: dict) -> str:
@@ -260,7 +265,7 @@ def send_file(source, path: str, request_id: str, options: dict, service: Servic
     declared = {"bytes": size, "sha256": sha256}
     described = {"description": options["--description"]} if "--description" in options else {}
     retry = command("wirk", "upload", path, "--request-id", request_id,
-                    *(["--description", options["--description"]] if described else []))
+                    *(["--description", options["--description"]] if described else []), *present(options, "--json"))
     for attempt in (1, 2):
         issued = service.post("/v2/files", {"upload": declared, "format": "json"})
         if not issued["ok"]:
