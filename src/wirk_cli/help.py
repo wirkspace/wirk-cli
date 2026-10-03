@@ -146,8 +146,8 @@ in a linked doc and its raw record as a file; running it again brings only what 
 Linear and Jira later.
 
   1. wirk import github acme --dry-run     read GitHub and WIRK, write nothing, print the plan
-  2. a person who administers the account reviews and runs the line the dry run prints:
-     wirk admin --request ~/.config/wirk/import/github-setup.json
+  2. a person who administers the account reviews the setup and applies it at their own terminal,
+     after wirk login --person (an agent cannot): wirk admin --request ~/.config/wirk/import/github-setup.json
   3. wirk import github acme               import as your importer agent; run again to refresh
 
 Repositories that are not public are imported only when named (acme/private-repo): everyone in the

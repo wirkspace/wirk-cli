@@ -45,6 +45,7 @@ class FakeWirk:
         self.requests, self.duplicates, self.faults = [], {}, []
         self.as_whom = None  # a principal other than the importer, for tests that act as a person
         self.tokens = None  # token -> principal; None takes every token as the importer's
+        self.no_files = None  # why the file store is unavailable, as status reports it
 
     # ---------------------------------------------------------------- transport
 
@@ -84,8 +85,10 @@ class FakeWirk:
 
     def status(self, body):
         vocab = [{"key": key, "name": f"{key}: " + ", ".join(options)} for key, options in self.definitions.items()]
+        files = {"files": {"ready": False, "reason": self.no_files}} if self.no_files else {}
         return envelope({"you": {"principal": self.who(), "kind": "agent", "person": self.person,
-                                 "wirkspace": {"id": "wsp_" + "1" * 32, "name": "Scratch"}, "capabilities": ["read", "edit"]},
+                                 "wirkspace": {"id": "wsp_" + "1" * 32, "name": "Scratch"}, "capabilities": ["read", "edit"],
+                                 **files},
                          "ask": {"fields": vocab + [{"key": key, "name": key} for key in FIXED]}})
 
     # ---------------------------------------------------------------- query

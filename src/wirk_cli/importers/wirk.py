@@ -217,8 +217,8 @@ class Importer:
         try:
             return work(*args)
         except (WirkError, Failure) as error:
-            if isinstance(error, Failure) and error.code not in UNSETTLED:
-                raise
+            if isinstance(error, Failure) and error.code not in UNSETTLED or error.code == "files_unavailable":
+                raise  # the client's own failure, or no file storage: every issue would fail the same way
             return [Outcome(key, kind, "error", f"{error.code}: {error}")]
 
     # ---------------------------------------------------------------- links (§3.6)

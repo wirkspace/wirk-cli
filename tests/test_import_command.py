@@ -8,7 +8,7 @@ import stat
 import httpx
 import pytest
 
-from import_fakes import FakeWirk
+from import_fakes import FakeWirk, refusal
 from test_import_github import FakeGh, node, page, ref, repo
 from wirk_cli import cli
 from wirk_cli.importers import github, render
@@ -153,3 +153,58 @@ def test_a_run_that_stops_still_prints_what_it_did(world):
     answer = json.loads(out)
     assert code == 2 and not answer["ok"] and answer["errors"][0]["code"] == "service_unavailable"
     assert answer["data"]["outcomes"][0]["outcome"] == "current"
+
+
+def test_without_file_storage_nothing_is_read_or_written_and_the_person_is_told_why(world):
+    world["fake"].no_files = "No file store is configured"
+    for argv in (("github", "acme", "--dry-run"), ("github", "acme")):
+        code, out, err = world["run"](*argv)
+        assert code == 2 and "files_unavailable" in err and "file storage" in err and "WIRK administrator" in err
+        assert "Nothing was read from GitHub or written" in err
+    assert not world["gh"].calls and not world["fake"].writes()
+    assert not (world["home"] / "import" / "github-setup.json").exists()
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    assert code == 2 and not answer["ok"] and answer["errors"][0]["code"] == "files_unavailable"
+
+
+def test_file_storage_lost_during_a_run_stops_it_once(world):
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    world["fake"].files = lambda body: refusal("files_unavailable", "No file store is configured", 503)
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    assert code == 2 and not answer["ok"] and answer["errors"][0]["code"] == "files_unavailable"
+    assert not any(o["outcome"] == "error" for o in answer["data"]["outcomes"])
+
+
+def test_when_every_issue_errors_the_json_names_the_error_once_with_its_count(world):
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    world["fake"].write = lambda body: refusal("invalid_input", "operations[0] is not accepted")
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    assert code == 1 and not answer["ok"]
+    assert answer["errors"] == [{"code": "invalid_input", "count": 2, "message": "operations[0] is not accepted"}]
+    code, out, err = world["run"]("github", "acme")
+    assert "errors: 2 invalid_input: operations[0] is not accepted" in out
+
+
+def test_the_setup_is_a_persons_step_and_says_so(world):
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    setup = next(line for line in out.split("\n") if line.startswith("setup: "))
+    assert "a person who administers" in setup and "wirk login --person" in setup and "an agent cannot" in setup
+    answer = json.loads(world["run"]("github", "acme", "--dry-run", "--json")[1])
+    assert "wirk login --person" in answer["data"]["summary"]["setup_by"]
+    assert "wirk login --person" in world["run"]()[1] and "agent cannot" in world["run"]()[1]
+
+
+def test_a_blocked_dry_run_prints_one_json_answer(world):
+    fake = world["fake"]
+    fake.as_whom = "bob-github-import"
+    line = render.line1("GitHub", "issue", "3000000001", "2026-09-30T12:00:00Z", "0" * 12)
+    fake.write({"request_id": "bob-1", "operations": [{"op": "item.create", "data": {"title": "Issue 1", "body": line, "work": {}}}]})
+    fake.as_whom = None
+    code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
+    answer = json.loads(out)  # one document
+    assert code == 2 and not answer["ok"] and "bob-github-import" in answer["errors"][0]["message"]
