@@ -5,7 +5,7 @@ owner whose names start with import-seed-, never deletes, and paces content requ
 and 480 in any hour. Every step checks GitHub first, so running it again creates only what is missing.
 
     python tests/seed/github.py            seed, or finish seeding
-    python tests/seed/github.py --changes  apply the scripted changes for the re-run test (A8)
+    python tests/seed/github.py --changes N  apply the scripted changes up to stage N, for the re-run test (A8)
 """
 
 from collections import deque
@@ -371,10 +371,10 @@ class Seeder:
             self.rest("POST", f"repos/{full}/actions/workflows/seed-comment.yml/dispatches",
                       {"ref": "main", "inputs": {"issue": str(found["number"])}})
 
-    def changes(self):
-        """The scripted changes for A8, each applied once."""
+    def changes(self, stage: int):
+        """The scripted changes for A8 up to `stage`, each applied once."""
         self.load()
-        for change in self.m["changes"]:
+        for change in (c for c in self.m["changes"] if c["stage"] <= stage):
             found, full = self.issues[change["seed"]], self.names[self.repo_of(change["seed"])]
             if "title" in change:
                 self.rest("PATCH", f"repos/{full}/issues/{found['number']}", {"title": change["title"]})
@@ -382,6 +382,8 @@ class Seeder:
                 self.rest("POST", f"repos/{full}/issues/{found['number']}/comments", {"body": change["comment"]})
             if "add_label" in change:
                 self.rest("POST", f"repos/{full}/issues/{found['number']}/labels", {"labels": [change["add_label"]]})
+            if change.get("reopen") and found["state"] == "CLOSED":
+                self.graphql("mutation($i: ID!) { reopenIssue(input: {issueId: $i}) { clientMutationId } }", {"i": found["id"]}, write=True)
             if change.get("close") and found["state"] == "OPEN":
                 self.graphql("mutation($i: ID!) { closeIssue(input: {issueId: $i, stateReason: COMPLETED}) { clientMutationId } }",
                              {"i": found["id"]}, write=True)
@@ -397,4 +399,4 @@ class Seeder:
 
 if __name__ == "__main__":
     tool = Seeder(json.loads(MANIFEST.read_text()))
-    tool.changes() if "--changes" in sys.argv else tool.seed()
+    tool.changes(int(sys.argv[sys.argv.index("--changes") + 1])) if "--changes" in sys.argv else tool.seed()

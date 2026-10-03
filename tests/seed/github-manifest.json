@@ -1,5 +1,5 @@
 {
- "about": "Synthetic seed for the GitHub importer's evidence runs (docs/plans/importers.md §4.6). Every text is invented. {key:X} is seed X's owner/repo#number, {n:X} its number, {sentinel} the private sentinel. Each issue's expect states the WIRK result the plan's mapping gives; it is written from the plan, never from the importer's code.",
+ "about": "Synthetic seed for the GitHub importer's evidence runs (docs/plans/importers.md §4.6). Every text is invented. {key:X} is seed X's owner/repo#number, {n:X} its number, {sentinel} the private sentinel. Each issue's expect states the WIRK result the plan's mapping gives; it is written from the plan, never from the importer's code. A change's expect overrides its seed's expect once the change's stage is applied (verify with --stage N).",
  "owner": "wirkspace",
  "sentinel": "PRIVSEED-1ba3bd",
  "repos": {
@@ -912,27 +912,126 @@
  "changes": [
   {
    "seed": "P01",
-   "title": "Login redirect drops the next parameter (renamed)"
+   "title": "Login redirect drops the next parameter (renamed)",
+   "stage": 1
   },
   {
    "seed": "P02",
-   "comment": "A comment added after the first import."
+   "comment": "A comment added after the first import.",
+   "stage": 1,
+   "expect": {
+    "discussion": 1
+   }
   },
   {
    "seed": "P03",
-   "add_label": "area/api"
+   "add_label": "area/api",
+   "stage": 1,
+   "expect": {
+    "fields": {
+     "label": [
+      "area/api"
+     ]
+    }
+   }
   },
   {
    "seed": "P05",
-   "close": "completed"
+   "close": "completed",
+   "stage": 1,
+   "expect": {
+    "status": "completed"
+   }
   },
   {
    "seed": "P12",
-   "blocked_by": "P15"
+   "blocked_by": "P15",
+   "stage": 1,
+   "expect": {
+    "links": [
+     [
+      "requires",
+      "P13"
+     ],
+     [
+      "requires",
+      "P15"
+     ]
+    ]
+   }
   },
   {
    "seed": "P09",
-   "remove_parent": "P08"
+   "remove_parent": "P08",
+   "stage": 1,
+   "expect": {
+    "links": [],
+    "header": []
+   }
+  },
+  {
+   "stage": 1,
+   "seed": "P08",
+   "note": "follows P09's removal",
+   "expect": {
+    "header": [
+     "Sub-issues in GitHub order: [{key:P10}], [{key:A02}]"
+    ],
+    "public": {
+     "header": [
+      "Sub-issues in GitHub order: [{key:P10}], 1 in repositories not imported"
+     ]
+    }
+   }
+  },
+  {
+   "stage": 2,
+   "seed": "P31",
+   "title": "In the open milestone (renamed)"
+  },
+  {
+   "stage": 2,
+   "seed": "P32",
+   "comment": "A comment on a completed issue, after the import.",
+   "expect": {
+    "discussion": 1
+   }
+  },
+  {
+   "stage": 2,
+   "seed": "P13",
+   "add_label": "🔥 hot",
+   "expect": {
+    "fields": {
+     "label": [
+      "🔥 hot"
+     ]
+    },
+    "header": [
+     "Blocking: [{key:P12}], [{key:P33}]"
+    ]
+   }
+  },
+  {
+   "stage": 2,
+   "seed": "P10",
+   "reopen": true,
+   "expect": {
+    "status": "open"
+   }
+  },
+  {
+   "stage": 2,
+   "seed": "P33",
+   "blocked_by": "P13",
+   "expect": {
+    "links": [
+     [
+      "requires",
+      "P13"
+     ]
+    ]
+   }
   }
  ]
 }
