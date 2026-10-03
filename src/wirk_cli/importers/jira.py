@@ -163,7 +163,7 @@ class Jira:
         issues = [node for node in issues if node not in restricted]
         self.skipped = {node["key"] for node in restricted} | {node["id"] for node in restricted}  # never named around them
         self.selected = set(wanted) | {key.rsplit("-", 1)[0] for key in named}
-        self.shown_projects, self.moved_from, self.kept_files = {projects[k]["id"] for k in self.selected if k in projects}, set(), set()
+        self.shown_projects, self.moves, self.kept_files = {projects[k]["id"] for k in self.selected if k in projects}, set(), set()
         histories = self.changelogs([node["id"] for node in issues])
         children = defaultdict(list)
         for node in issues:
@@ -235,9 +235,8 @@ class Jira:
         gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
             hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        for entry in history:  # a move from a project not selected: its project and workflow stay unnamed (§3.9)
-            if any(i.get("field") == "project" and i.get("from") not in self.shown_projects for i in entry.get("items", [])):
-                self.moved_from |= {i.get("from") for i in entry["items"] if i.get("field") == "Workflow"}
+        self.moves |= {entry.get("id") for entry in history  # a move from a project not selected names it throughout (§3.9)
+                       if any(i.get("field") == "project" and i.get("from") not in self.shown_projects for i in entry.get("items", []))}
         raw = {"issue": clean({**node, "fields": self.archived(f, attachments)}), "worklogs": clean(worklogs),
                "changelog": clean(history), "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)
@@ -352,9 +351,7 @@ class Jira:
         def check(node: dict) -> bool:
             if isinstance(node.get("key"), str) and ISSUE_KEY.fullmatch(node["key"]):
                 return hidden(node["key"])
-            if node.get("field") == "project":
-                return node.get("from") not in self.shown_projects
-            if node.get("field") == "Workflow" and node.get("from") in self.moved_from:
+            if "items" in node and node.get("id") in self.moves:  # the whole entry of such a move
                 return True
             if node.get("field") == "Attachment":  # a file not kept is not named in its history either
                 return (node.get("to") or node.get("from")) not in self.kept_files
