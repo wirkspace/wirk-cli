@@ -314,7 +314,7 @@ class Importer:
     def write_links(self, ident, item, revision, chunk) -> list:
         operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}} for link, target in chunk]
         expect = {item: revision, **{target.item: target.r for link, target in chunk if link[0] == "contributes_to"}}
-        body = {"request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}", "operations": operations, "expect": expect,
+        body = {"request_id": self.rid(ident), "operations": operations, "expect": expect,
                 "reason": f"Imported from {self.ctx.source}: the relations of {self.keys[ident]}"}
         notes = []
         for _ in range(len(operations) + 1):
@@ -327,7 +327,7 @@ class Importer:
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}")]
             operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
-            body = {**body, "request_id": f"{self.prefix}-{ident}-{secrets.token_hex(8)}"}
+            body = {**body, "request_id": self.rid(ident)}
             notes.append(f"kept as related: WIRK refused it ({problem['code']})")
         return [Outcome(self.keys[ident], "links", "error", "refused repeatedly")]
 
@@ -437,7 +437,7 @@ class Importer:
         return [Outcome(record.key, kind, f"{word}d", item=h.item) for kind, h in found]
 
     def archiving(self, record, word: str, held: list, reason: str) -> dict:
-        return {"request_id": self.rid(record), "reason": reason, "expect": {h.item: h.r for h in held},
+        return {"request_id": self.rid(record.ident), "reason": reason, "expect": {h.item: h.r for h in held},
                 "operations": [{"op": f"item.{word}", "id": h.item} for h in held]}
 
     def operations(self, record, acting, work):
@@ -470,7 +470,7 @@ class Importer:
 
         def store(data: bytes, name: str, description: str, uri: str) -> str:
             return self.wirk.upload(data, name, description, {"role": "original", "origin": {"uri": uri, "observed_at": record.version}},
-                                    self.rid(record))
+                                    self.rid(record.ident))
         for name, data in plan.files:
             if name in having and having[name]["sha256"] == hashlib.sha256(data).hexdigest():
                 continue
@@ -487,8 +487,8 @@ class Importer:
             return attach, {}
         return [], {**({"attach_uploads": attach} if attach else {}), **({"replace_files": swap} if swap else {})}
 
-    def rid(self, record) -> str:
-        return f"{self.prefix}-{record.ident}-{secrets.token_hex(8)}"
+    def rid(self, ident: str) -> str:
+        return f"{self.prefix}-{ident}-{secrets.token_hex(8)}"
 
     def reason(self, record) -> str:
         if record.state == "completed":
@@ -497,7 +497,7 @@ class Importer:
 
     def send(self, record, acting, work, said: dict | None = None) -> list:
         operations, expect = self.operations(record, acting, work)
-        body = {"request_id": self.rid(record), "operations": operations, "reason": self.reason(record),
+        body = {"request_id": self.rid(record.ident), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
         notes = []
 
@@ -515,7 +515,7 @@ class Importer:
             if fixed is None:
                 return each("error", f"{problem['code']}: {problem.get('message', '')}")
             notes.append(fixed)
-            body = {**body, "request_id": self.rid(record)}
+            body = {**body, "request_id": self.rid(record.ident)}
         else:
             return each("error", "refused repeatedly: " + "; ".join(notes))
         results = answer["data"]["results"]
