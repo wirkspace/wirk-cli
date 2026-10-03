@@ -10,9 +10,9 @@ This is the second version, revised after the plan review of 3 October:
 
 — importer-implementer
 
-## Release gate: settle restricted projects first (§5.1)
+## Release gate: settle restricted projects first (§6.1)
 
-**Jira is not released until Samuel rules on §5.1.** Slice 1's default selection, used when no project is named, already includes every project the token browses, restricted ones too. Project docs add each project's description, lead, components, versions and sprints to what a default run shows. Until that ruling, the importer stays unreleased, as slice 1 is.
+**Jira is not released until Samuel rules on §6.1.** Slice 1's default selection, used when no project is named, already includes every project the token browses, restricted ones too. Project docs add each project's description, lead, components, versions and sprints to what a default run shows. Until that ruling, the importer stays unreleased, as slice 1 is.
 
 ## 1. What becomes what
 
@@ -25,7 +25,7 @@ A Jira project is a container, like a GitHub repository or a Linear team. Those 
 | Version (release) | The `release` field (slice 1: unreleased fix versions only), and one line on the project doc | GitHub milestones: a field |
 | Component | The `component` field (slice 1), and one line on the project doc | Labels: a field |
 | Epic | An issue already, whose children `contribute_to` it (slice 1). Nothing new | Linear's and GitHub's parents |
-| Board | **Not in this slice.** It waits in the backlog until a team asks for boards and Samuel has ruled on §5.1 | — |
+| Board | **Not in this slice.** It waits in the backlog until a team asks for boards and Samuel has ruled on §6.1 | — |
 
 **A project selected as a project** is one in slice 1's `wanted`: one named, or every project the token browses when none is named. The project of an issue named on its own (`wirk import jira ENG SEC-5`) never gets a doc.
 
@@ -58,7 +58,7 @@ A Jira project is a container, like a GitHub repository or a Linear team. Those 
 ## 3. Privacy: fail closed, as slice 1 does
 
 - **Docs only for projects selected as projects (§1).** A named issue never brings its project's details along.
-- **Restricted projects** follow slice 1's selection unchanged, which is the release gate's question (§5.1).
+- **Restricted projects** follow slice 1's selection unchanged, which is the release gate's question (§6.1).
 - **No email is requested or written.** Leads are written by display name only.
 - **Each archive is an allowlist:** the fields the doc shows, plus IDs. The project archive holds:
   - from the project: `id`, `key`, `name`, `description`, and the lead's `accountId` and `displayName`;
@@ -88,7 +88,11 @@ A read of a project's components or versions can fail: Jira refuses it, or does 
 
 ## 6. No interface change
 
-Only what `wirk import jira` does changes: no new flag, argument, selection word, default or scope. **One question stays open for Samuel (§5.1):** whether restricted projects are left out by default. Telling them apart needs each project's permission scheme, which needs project-administrator reads; and leaving them out would change slice 1's default. It is the release gate.
+Only what `wirk import jira` does changes: no new flag, argument, selection word, default or scope.
+
+### 6.1 Open for Samuel: restricted projects (§5.1 of the first version)
+
+Should restricted projects be left out by default? Telling them apart needs each project's permission scheme, and reading a scheme needs project-administrator rights. Leaving them out would also change slice 1's default. This is the release gate.
 
 ## 7. Size
 
