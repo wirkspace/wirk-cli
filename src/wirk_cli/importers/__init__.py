@@ -214,7 +214,8 @@ class Run:
                      f"images on other hosts left as links {census.external_images}")
         text = importer.counts
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
-                     f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld")
+                     f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld · "
+                     f"{text['addresses']} email addresses typed in text, kept as written")
         lines.append(f"cost: {census.points} GraphQL points · {self.module.SOURCE} read and WIRK {'checked' if self.dry_run else 'written'}")
         lines += [f"note: {note}" for note in census.notes]
         if importer.index.forged:

@@ -191,3 +191,11 @@ def test_addresses_typed_in_text_are_kept_and_counted():
     rendered = render.work_item(SELECTED, record(body='curl -d \'{"email": "ada@example.com"}\' and write to ben@example.org'),
                                 users={}, notes={})
     assert "ada@example.com" in rendered.body and rendered.counts["addresses"] == 2
+
+
+def test_long_runs_of_text_render_in_one_pass():
+    import time
+    started = time.perf_counter()
+    for text in ("漢" * 600000, "a" * 600000):
+        render.work_item(SELECTED, record(body=text), users={}, notes={})
+    assert time.perf_counter() - started < 2

@@ -29,8 +29,11 @@ CREDENTIALS = re.compile(r"""
 REDACTED = "[redacted: possible credential]"
 # C0 except tab and newline, DEL, C1, bidi controls, the zero-width space, word joiners and the BOM; the zero-width
 # non-joiner and joiner stay, as the Granola connector keeps them.
-CONTROLS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f؜​‎‏‪-‮⁠-⁩﻿]")
+CONTROLS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
 MARKER = re.compile(r"\[(github )", re.I)
+# typed in text: kept as written, counted (choice 10); tried only where a run of such characters starts, so a long
+# run without an @ costs one pass, not one per character
+ADDRESS = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 HEADING = re.compile(r"^(\s*)(#{1,6}\s+@)", re.M)
 EMAIL_KEY = re.compile(r"e-?mail", re.I)
 SPAM = {"spam", "abuse"}
@@ -114,8 +117,9 @@ class Clean:
         value = CONTROLS.sub("", (value or "").replace("\r\n", "\n").replace("\r", "\n"))
         value, found = CREDENTIALS.subn(REDACTED, value)
         self.counts["redacted"] += found
-        value, found = MARKER.subn("[⁠\\1", value)
+        value, found = MARKER.subn("[\u2060\\1", value)  # a word joiner after the bracket
         self.counts["guarded"] += found
+        self.counts["addresses"] += len(ADDRESS.findall(value))
         return value
 
     def line(self, value: str) -> str:
