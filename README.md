@@ -25,7 +25,7 @@ MCP and the agent skill are separate setup steps. Install and register [wirk-mcp
 
 ## Use
 
-Start with `wirk status`. `wirk --help` lists every command with an example you can run as printed.
+Start with `wirk status`. `wirk --help` lists commands and examples. Replace placeholders and sample item IDs, revisions and file paths with the values for your work.
 
 ```
 wirk status 'fix the webhook retries'          who you are, your wirk, what needs you, and what matters for the task
