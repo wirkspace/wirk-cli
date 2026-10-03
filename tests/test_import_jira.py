@@ -366,11 +366,18 @@ def test_a_move_from_a_project_not_selected_keeps_its_name_out_of_the_history(fo
     moved = {"20005": [{"id": "1", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [
         {"field": "Key", "fieldtype": "jira", "fromString": "OPS-3", "toString": "SEED-5"},
         {"field": "project", "fieldtype": "jira", "from": "10001", "fromString": "Operations", "to": "10000", "toString": "Seed project"},
-        {"field": "Workflow", "fieldtype": "jira", "from": "30001", "fromString": "OPS ops workflow", "to": "30000", "toString": "SEED workflow"}]}]}
+        {"field": "Workflow", "fieldtype": "jira", "from": "30001", "fromString": "OPS ops workflow", "to": "30000", "toString": "SEED workflow"},
+        {"field": "status", "fieldtype": "jira", "from": "4", "fromString": "OPS triage", "to": "1", "toString": "To Do"},
+        {"field": "Component", "fieldtype": "jira", "from": "7", "fromString": "OPS backend", "to": None, "toString": None},
+        {"field": "Fix Version", "fieldtype": "jira", "from": "8", "fromString": "OPS 1.0", "to": None, "toString": None},
+        {"field": "Sprint", "fieldtype": "custom", "from": "9", "fromString": "OPS sprint 3", "to": None, "toString": None}]},
+        {"id": "2", "author": ADA, "created": "2026-09-04T00:00:00.000+0000", "items": [
+            {"field": "summary", "fieldtype": "jira", "fromString": "Old words", "toString": "Issue 5"}]}]}
     found, census, records = read(FakeJira([issue(5)], moved), folder, ["SEED"])
     archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
-    assert b"Operations" not in archive and b"OPS ops workflow" not in archive and b"OPS-3" not in archive
-    assert b"Seed project" in archive or b"withheld" in archive
+    for name in (b"Operations", b"OPS ops workflow", b"OPS-3", b"OPS triage", b"OPS backend", b"OPS 1.0", b"OPS sprint 3"):
+        assert name not in archive, name
+    assert b"Old words" in archive  # a later change of the issue's own keeps its history
 
 
 def test_cancelled_resolutions_come_from_the_map_with_broad_defaults(folder):
