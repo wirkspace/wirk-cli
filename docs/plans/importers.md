@@ -745,6 +745,11 @@ The first real dry run names any field the schema lacks.
 
 **Size.** The Linear adapter is 518 lines. Shared code is 1,271.
 
+**After the review of the projects slice**, three lows fixed RED, then GREEN:
+- An update's key carries its ID (`Checkout v2 update 2026-09-20 (<id>)`), so two updates of one parent on one day stay distinct. The title stays without the ID.
+- A `]` in a name is escaped in its key, so an exact search finds only that object. Titles keep the name as written.
+- A project, milestone, initiative, document or update that Linear no longer shows anywhere is reported `missing`, as a missing issue is. One that Linear still shows outside a narrower selection is not.
+
 ## 6. Jira, third
 
 Settled now from the Jira note and the rulings; it needs a Jira Cloud site the person creates.
