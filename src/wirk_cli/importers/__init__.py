@@ -129,7 +129,7 @@ class Run:
         you = status["data"]["you"]
         if (files := you.get("files")) and not files["ready"]:  # status names it only when unavailable
             raise Stop(f"this WIRK service has no file storage ({files.get('reason')}), and each imported issue keeps "
-                       "its raw archive there. Nothing was read from GitHub or written to WIRK, and no setup was made",
+                       f"its raw archive there. Nothing was read from {self.adapter.source} or written to WIRK, and no setup was made",
                        "ask your WIRK administrator to make file storage available, then run the same command again",
                        "files_unavailable")
         person = you.get("person") or you["principal"]

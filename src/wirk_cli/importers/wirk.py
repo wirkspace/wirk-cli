@@ -579,8 +579,8 @@ class Importer:
                 else:
                     reason = f"No longer needed: the discussion of [{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"
                     answer = self.wirk.write(self.archiving(record, "archive", [found], reason))
-                    outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error",
-                                            "" if answer["ok"] else answer["errors"][0]["code"], found.item))
+                    message = "" if answer["ok"] else f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}"
+                    outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error", message, found.item))
         return outcomes
 
     def gone(self, present: set) -> list:

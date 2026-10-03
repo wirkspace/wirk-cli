@@ -490,3 +490,29 @@ def test_history_is_ordered_by_instant_then_id_across_offsets_and_ties(folder):
         {"id": "60", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("summary", "Early words", "Issue 5")]}]}
     found, census, records = read(FakeJira([issue(5)], same_time), folder, ["SEED"])
     assert b"Early words" in render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+
+
+def test_a_history_entry_without_a_readable_time_or_id_is_withheld_and_the_read_goes_on(folder):
+    status = lambda words: [history_item("status", "To Do", words)]
+    entries = {"20005": [
+        {"id": "71", "author": ADA, "items": status("No time")},
+        {"id": "72", "author": ADA, "created": "yesterday", "items": status("Bad time")},
+        {"id": "73", "author": ADA, "created": None, "items": status("Null time")},
+        {"id": "x74", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": status("Bad id")},
+        {"author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": status("No id")},
+        {"id": "75", "author": ADA, "created": "2026-09-04T00:00:00.000+0000", "items": [history_item("summary", "Good words", "Issue 5")]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Good words" in archive
+    assert not [words for words in (b"No time", b"Bad time", b"Null time", b"Bad id", b"No id") if words in archive]
+
+
+def test_a_move_at_a_time_that_cannot_be_read_withholds_the_whole_history(folder):
+    entries = {"20005": [
+        {"id": "81", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("status", "To Do", "Outside legal hold")]},
+        {"id": "82", "author": ADA, "created": "not a time", "items": [
+            history_item("project", "Seed project", "Outside", **{"from": "10000", "to": "10002"})]},
+        {"id": "83", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [history_item("summary", "Later words", "Issue 5")]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Outside" not in archive and b"legal hold" not in archive and b"Later words" not in archive
