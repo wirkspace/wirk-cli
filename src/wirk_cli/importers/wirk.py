@@ -582,8 +582,8 @@ class Importer:
         return outcomes
 
     def missing_one(self, ident: str, found: Held) -> list:
-        key_line = self.wirk.item(found.item, "full")["body"].split("\n")[1]
-        key = key_line.split("[", 1)[1].split("]", 1)[0] if "[" in key_line else ident
+        lines = self.wirk.item(found.item, "full")["body"].split("\n")
+        key = next((line.split("[", 1)[1].split("]", 1)[0] for line in lines if line.startswith(f"{self.ctx.source} issue [")), ident)
         return [Outcome(key, "issue", "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; "
                                                  "nothing was archived", found.item)] if key.split("#")[0] in self.ctx.selected else []
 
