@@ -171,7 +171,8 @@ class Jira:
 
     def read(self, selection: list) -> tuple[render.Census, list]:
         projects = {p["key"]: p for p in self.paged("/rest/api/3/project/search", "values", 50, expand="description,lead")}
-        self.seen = frozenset("p" + p["id"] for p in projects.values())  # every project still there, selected or not
+        # every project still there, selected or not; its doc's ID is "p" + its ID, since issue and project IDs meet
+        self.seen = frozenset("p" + p["id"] for p in projects.values())
         self.fields = {f["id"]: f for f in self.call("GET", "/rest/api/3/field")}
         named = {word for word in selection if ISSUE_KEY.fullmatch(word)}
         wanted = [word for word in selection if word not in named] or ([] if named else sorted(projects))
@@ -220,12 +221,12 @@ class Jira:
     def projects(self, chosen: list, issues: list, census: render.Census) -> list:
         """One doc per project selected as a project, with the sprints of its issues kept; one whose components or
         versions Jira will not give is left for a later run."""
-        sprints = defaultdict(dict)
+        marked = [ident for ident, definition in self.fields.items()
+                  if ((definition.get("schema") or {}).get("custom") or "").rsplit(":", 1)[-1] == "gh-sprint"]
+        sprints = defaultdict(dict)  # one snapshot per sprint ID
         for node in issues:
-            for ident, definition in self.fields.items():
-                if ((definition.get("schema") or {}).get("custom") or "").endswith(":gh-sprint"):
-                    for found in node["fields"].get(ident) or []:
-                        sprints[node["fields"]["project"]["id"]].setdefault(found["id"], found)
+            for found in (sprint for ident in marked for sprint in node["fields"].get(ident) or []):
+                sprints[node["fields"]["project"]["id"]].setdefault(found["id"], found)
         docs, unread = [], []
         for project in chosen:
             try:
