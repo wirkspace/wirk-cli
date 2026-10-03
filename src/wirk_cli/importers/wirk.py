@@ -428,14 +428,17 @@ class Importer:
         word = "archive" if want else "restore"
         if not found or self.dry_run:
             return [Outcome(record.key, kind, f"would {word}", item=h.item) for kind, h in found]
-        answer = self.wirk.write({"request_id": self.rid(record), "reason": record.archived or f"Active again in {self.ctx.source}",
-                                  "expect": {h.item: h.r for _, h in found},
-                                  "operations": [{"op": f"item.{word}", "id": h.item} for _, h in found]})
+        answer = self.wirk.write(self.archiving(record, word, [h for _, h in found],
+                                                record.archived or f"Active again in {self.ctx.source}"))
         if not answer["ok"]:
             return [Outcome(record.key, record.kind, "error", f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}")]
         for (kind, h), result in zip(found, answer["data"]["results"]):
             self.index.add(kind, record.ident, replace(h, r=result["revision"], archived=want))
         return [Outcome(record.key, kind, f"{word}d", item=h.item) for kind, h in found]
+
+    def archiving(self, record, word: str, held: list, reason: str) -> dict:
+        return {"request_id": self.rid(record), "reason": reason, "expect": {h.item: h.r for h in held},
+                "operations": [{"op": f"item.{word}", "id": h.item} for h in held]}
 
     def operations(self, record, acting, work):
         operations, expect = [], {}
@@ -575,10 +578,8 @@ class Importer:
                 elif self.dry_run:
                     outcomes.append(Outcome(record.key, kind, "would archive", item=found.item))
                 else:
-                    answer = self.wirk.write({"request_id": self.rid(record), "expect": {found.item: found.r},
-                                              "reason": f"No longer needed: the discussion of [{record.key}] now fits in "
-                                                        f"{parts} part{'s' if parts != 1 else ''}",
-                                              "operations": [{"op": "item.archive", "id": found.item}]})
+                    answer = self.wirk.write(self.archiving(record, "archive", [found], f"No longer needed: the discussion of "
+                                                            f"[{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"))
                     outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error",
                                             "" if answer["ok"] else answer["errors"][0]["code"], found.item))
         return outcomes
