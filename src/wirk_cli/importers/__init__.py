@@ -89,7 +89,8 @@ class Run:
             except BlockingIOError:
                 raise Stop(f"another wirk import {self.source} is running on this machine; wait for it to finish") from None
             client, registered = self.connect()
-            self.mapped = mapped = self.read_map()
+            mapped = self.read_map()
+            self.limit = mapped.get("field_limit", 50)
             adapter = self.adapter
             if "cancelled" in mapped:  # Jira's resolutions that mean done work was not done
                 adapter.cancelled = mapped["cancelled"]  # checked by the adapter that reads it
@@ -177,11 +178,10 @@ class Run:
     # ---------------------------------------------------------------- what the dry run leaves for the person
 
     def write_setup(self, importer, plan: dict, records: list, registered: bool) -> Path | None:
-        limit = self.mapped.get("field_limit", 50)
         fields = [{"op": "field.create", "field": {
             "key": field.key, "name": field.name, "applies_to": "item", "selection": field.selection, "required": False,
             "options": [{"key": key, "name": name, "order": order} for order, (name, key) in enumerate(field.options.items(), 1)]}}
-            for field in plan.values() if 0 < len(field.options) <= limit and field.key not in importer.vocab]
+            for field in plan.values() if 0 < len(field.options) <= self.limit and field.key not in importer.vocab]
         operations = fields
         if not registered:
             if not self.token_file.exists():
@@ -208,8 +208,7 @@ class Run:
     def report(self, census, importer, outcomes: list, you: dict, setup: Path | None, stopped=None) -> None:
         counts = Counter(o.outcome for o in outcomes)
         attention = [o for o in outcomes if o.outcome in ATTENTION or o.message]
-        limit = self.mapped.get("field_limit", 50)
-        large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > limit}
+        large = {plan.key: len(plan.options) for plan in importer.plan.values() if len(plan.options) > self.limit}
         summary = {"source": self.adapter.source, "principal": self.principal, "dry_run": self.dry_run,
                    "selected": census.selected, "skipped_not_public": census.skipped, "named_not_public": census.named_private,
                    "issues": census.issues, "comments": census.comments, "pull_requests_skipped": census.pulls,
@@ -239,7 +238,7 @@ class Run:
                                      *(name for name, _ in census.skipped), "--dry-run")]
         lines.append("items: " + (" · ".join(f"{outcome}: {count}" for outcome, count in sorted(counts.items())) or "none"))
         lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in failed]
-        fields = [f"header only: {key} ({count} values, over the limit of {limit})" for key, count in large.items()]
+        fields = [f"header only: {key} ({count} values, over the limit of {self.limit})" for key, count in large.items()]
         fields += [f"missing options in {key}: {', '.join(sorted(values)[:5])}" for key, values in importer.missing.items()]
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
         if fields:
