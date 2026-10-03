@@ -56,6 +56,14 @@ def bare(found: dict | None) -> dict | None:
     return found and {**found, "fields": {key: value for key, value in (found.get("fields") or {}).items() if key != "summary"}}
 
 
+def placed(entry: dict) -> tuple:
+    """A history entry's place: its instant, then Jira's order; one without both goes last and is withheld."""
+    try:
+        return 0, render.compact(entry["created"]), int(entry["id"])
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return 1, "", 0
+
+
 class Jira:
     source, noun, unit, needs_selection = SOURCE, NOUN, "Jira requests", False
     # resolutions of done work that mean it was not done (§6); the map file's "cancelled" replaces them
@@ -237,12 +245,13 @@ class Jira:
         gone = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in zip(
             hidden + [len(f.get("attachment") or []) - len(attachments)], ("restricted comment", "restricted worklog", "attachment")) if n]
         facts += [f"Web links: {', '.join(web)}"] * bool(web) + [f"Not imported: {', '.join(gone)}"] * bool(gone)
-        ordered = sorted(history, key=lambda e: (render.compact(e["created"]), int(e["id"])))  # the instant, then Jira's order
+        ordered = sorted(history, key=placed)
         moves = [next((i for i in e.get("items", []) if i.get("field") == "project"), None) for e in ordered]
         where = next((m.get("from") for m in moves if m is not None), f["project"]["id"])  # where it began; unknown fails closed
+        lost = any(placed(e)[0] and m is not None for e, m in zip(ordered, moves))  # a move at an unknown time: none is shown
         for entry, move in zip(ordered, moves):  # a change made in, or moving into or out of, a project not selected names it (§3.9)
             before, where = (move.get("from"), move.get("to")) if move is not None else (where, where)
-            self.outside |= {entry.get("id")} if {before, where} - self.shown_projects else set()
+            self.outside |= {entry.get("id")} if lost or placed(entry)[0] or {before, where} - self.shown_projects else set()
         raw = {"issue": clean({**node, "fields": self.archived(f, attachments)}), "worklogs": clean(worklogs),
                "changelog": clean(history), "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)

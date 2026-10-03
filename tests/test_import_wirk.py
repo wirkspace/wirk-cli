@@ -8,7 +8,7 @@ import pytest
 
 from import_fakes import FakeWirk, refusal
 from wirk_cli.client import Service
-from wirk_cli.importers import render, wirk
+from wirk_cli.importers import errors_of, render, wirk
 from wirk_cli.importers.render import Comment, Context, Record, Ref
 
 CTX = Context(source="GitHub", selected=frozenset({"acme/api"}), noun=("repository", "repositories"),
@@ -502,7 +502,9 @@ def test_a_stale_part_in_a_dry_run_when_wirk_refuses_and_once_archived(fake):
     stale = lambda result: [(o.outcome, o.message, o.item) for o in result if o.kind == "comments-2"]
     assert stale(make(fake, dry_run=True).run([issue(1, comments=big[:2])])) == [("would archive", "", part)]
     write = refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409))
-    assert stale(make(fake).run([issue(1, comments=big[:2])])) == [("error", "basis_changed", part)]
+    refused = make(fake).run([issue(1, comments=big[:2])])
+    assert stale(refused) == [("error", "basis_changed: moved on", part)]
+    assert errors_of(refused) == [{"code": "basis_changed", "count": 1, "message": "moved on"}]  # summarized like other refusals
     fake.write = write
     archive = fake.writes()[-1]
     assert archive["operations"] == [{"op": "item.archive", "id": part}] and archive["expect"] == {part: 1}

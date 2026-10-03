@@ -401,3 +401,11 @@ def test_an_empty_workspace_id_is_sent_as_given_so_wirk_refuses_it(world):
     code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run")
     assert (code, out, err) == (2, "", "Error import: Workspace is unavailable\n")
     assert [body for route, body in world["fake"].requests] == [{"format": "json", "max_bytes": 1024, "workspace_id": ""}]
+
+
+@pytest.mark.parametrize("which, source", [("linear_world", "Linear"), ("jira_world", "Jira")])
+def test_without_file_storage_the_stop_names_the_source_it_did_not_read(which, source, request):
+    world = request.getfixturevalue(which)
+    world["fake"].no_files = "No file store is configured"
+    code, out, err = world["run"]("--dry-run")
+    assert code == 2 and f"Nothing was read from {source} or written to WIRK" in err and "GitHub" not in err
