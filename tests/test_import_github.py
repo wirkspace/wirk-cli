@@ -103,6 +103,7 @@ def test_an_owner_means_its_public_repositories_and_names_the_rest():
     assert census.pulls == 3
     _, census, _ = read(FakeGh([repo("acme/web"), repo("acme/api", "PRIVATE")], {}), ("acme", "acme/api"))
     assert census.selected == ["acme/api", "acme/web"] and census.skipped == []
+    assert census.named_private == [("acme/api", "private", 2)]
 
 
 def test_projects_are_reported_unread_without_the_scope():

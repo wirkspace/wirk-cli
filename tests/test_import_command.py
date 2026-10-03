@@ -124,3 +124,14 @@ def test_unknown_words_and_sources_are_usage_errors(world):
     assert world["run"]("gitlab", "acme")[0] == 2
     assert world["run"]("github", "acme", "colour=blue")[0] == 2
     assert world["run"]("github")[0] == 2
+
+
+def test_naming_a_private_repository_warns_who_will_read_it(world):
+    warning = "acme/api is private on GitHub: everyone in the wirkspace will read its 812 issues"
+    code, out, err = world["run"]("github", "acme", "acme/api", "--dry-run")
+    assert code == 0 and warning in out
+    register(world)
+    code, out, err = world["run"]("github", "acme", "acme/api")
+    assert code == 0 and warning in out
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert "private on GitHub" not in out
