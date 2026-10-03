@@ -191,10 +191,15 @@ class Gate:
             self.until = max(self.until, self.clock() + seconds)
 
     def wait(self) -> None:
-        with self.lock:
-            left = self.until - self.clock()
-        if left > 0:
+        """Sleep out the pause, and again if another reader extends it meanwhile."""
+        slept = None
+        while True:
+            with self.lock:
+                until, left = self.until, self.until - self.clock()
+            if left <= 0 or until == slept:
+                return
             self.sleep(left)
+            slept = until
 
 
 class GitHub:
