@@ -18,10 +18,10 @@ from .. import grammar
 from ..client import Failure, Service, config_dir, digest, new_token, read_token, saved_url
 from ..grammar import UsageError, command
 from ..help import HELP
-from . import github, linear, render, wirk
+from . import github, jira, linear, render, wirk
 from .render import Stop
 
-SOURCES = {"github": github.GitHub, "linear": linear.Linear}
+SOURCES = {"github": github.GitHub, "linear": linear.Linear, "jira": jira.Jira}
 DEFAULT_STATUSES = {"open": "open", "in_progress": "in_progress", "completed": "completed", "cancelled": "cancelled"}
 ATTENTION = {"skipped", "blocked", "ambiguous", "missing", "error"}
 PERSON_STEP = "a person who administers the account applies it, at their own terminal after wirk login --person (an agent cannot)"
@@ -66,7 +66,7 @@ class Run:
     def __init__(self, words: list, options: dict, transport):
         source, rest = words[0], words[1:]
         if source not in SOURCES:
-            raise UsageError(f"import takes {', '.join(SOURCES)}; Jira comes later")
+            raise UsageError(f"import takes {', '.join(SOURCES)}")
         selection, pairs = grammar.split(rest)
         if set(pairs) - {"workspace_id", "map"}:
             raise UsageError(f"import takes workspace_id= and map=, not {', '.join(sorted(set(pairs) - {'workspace_id', 'map'}))}")
@@ -161,8 +161,8 @@ class Run:
             mapped = json.loads(path.read_text())
         except ValueError as error:
             raise Stop(f"{path} is not JSON: {error}") from None
-        if not isinstance(mapped, dict) or set(mapped) - {"users", "field_limit", "status"}:
-            raise Stop(f"{path} holds users, field_limit and status only")
+        if not isinstance(mapped, dict) or set(mapped) - {"users", "names", "field_limit", "status"}:
+            raise Stop(f"{path} holds users, names, field_limit and status only")
         return mapped
 
     def check_statuses(self, importer) -> None:
@@ -195,9 +195,10 @@ class Run:
                           {"op": "member.set", "principal_id": self.principal, "role": "editor"}, *fields,
                           {"op": "token.add", "principal_id": self.principal, "sha256": digest(token), "label": f"{self.source} import"}]
         if not self.map_file.exists():
-            users = sorted({user for record in records for user, _ in record.assignees})
-            self.map_file.write_text(json.dumps({"users": dict.fromkeys(users), "field_limit": 50, "status": DEFAULT_STATUSES},
-                                                indent=1) + "\n")
+            users = dict(sorted({user: shown for record in records for user, shown in record.assignees}.items()))
+            names = {user: shown for user, shown in users.items() if shown != f"@{user}"}  # IDs say nothing to a person
+            self.map_file.write_text(json.dumps({"users": dict.fromkeys(users), **({"names": names} if names else {}),
+                                                 "field_limit": 50, "status": DEFAULT_STATUSES}, indent=1) + "\n")
         if not operations:
             return None
         self.setup_file.write_text(json.dumps({"request_id": f"{self.source}-import-setup-{secrets.token_hex(4)}",
