@@ -74,7 +74,8 @@ def due_at(day: str, zone: str | None) -> str:
 def reactions(data) -> str:
     counts = Counter()
     for entry in data or []:
-        counts[entry.get("emoji") or "?"] += entry.get("count") or len(entry.get("userIds") or entry.get("users") or []) or 1
+        many = entry.get("reactions") or entry.get("userIds") or entry.get("users") or []  # the shapes Linear's JSON may take
+        counts[entry.get("emoji") or "?"] += entry.get("count") or len(many) or 1
     return " · ".join(f"{emoji} {count}" for emoji, count in counts.items())
 
 
