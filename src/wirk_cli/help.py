@@ -117,7 +117,7 @@ Save a stored file, checked against its SHA-256. FILE is the file ID on the item
 
   download 5c1e7a90 file_4e1f0a2b
   download 5c1e7a90@2 file_4e1f0a2b -o old.pdf""",
-        "login": """usage: wirk login [--url URL] [--new] | wirk login --person
+        "login": """usage: wirk login [--person] [--url URL] [--new]
 
 Connect this machine. It makes this machine's token, keeps it in ~/.config/wirk (or $WIRK_CONFIG_DIR),
 readable only by you, and asks WIRK to approve the machine: open the link it prints, sign in and approve.
@@ -140,7 +140,7 @@ A batch that brings a person and their agents in:
     {"op": "token.add", "principal_id": "alice-agents", "sha256": "<the digest Alice sent>", "label": "laptop"},
     {"op": "member.set", "principal_id": "alice", "role": "editor"}]}
 An agent with no membership of its own acts with its person's role and their authority over context.
-A membership of its own narrows it to that row alone, so it must propose context its person maintains.
+A membership of its own limits it to that row: it then changes only open context and proposes the rest.
 
 Other operations: token.revoke, admin.set, wirkspace.create, field.create, field.edit, account.create.""",
         "import": """usage: wirk import github OWNER|OWNER/REPO… [workspace_id=ID] [map=FILE] [--dry-run] [--overwrite] [--json]
