@@ -76,7 +76,7 @@ def test_inline_nodes_media_and_unknown_nodes():
                          {"type": "mediaSingle", "content": [{"type": "media", "attrs": {"id": "m-2"}}]},
                          {"type": "futureThing", "content": [para(text("kept text"))]}),
                      files={"shot.png"})
-    assert out == ("@Ada Example 🎉 2026-09-30 [IN REVIEW] <https://acme.atlassian.net/browse/SEED-1>\n\n[attached: shot.png]\n\n"
+    assert out == ("@Ada Example 🎉 2026-10-01 [IN REVIEW] <https://acme.atlassian.net/browse/SEED-1>\n\n[attached: shot.png]\n\n"
                    "[image not resolved]\n\nkept text")
     assert counts["unresolved images"] == 1 and counts["unknown ADF nodes"] == 1
 
