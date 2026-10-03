@@ -183,6 +183,12 @@ def test_a_line_a_person_writes_above_the_first_keeps_the_item_the_importers(fak
     assert len(fake.mine()) == 1
 
 
+def test_an_issue_gone_from_the_source_is_named_under_a_persons_line_too(fake):
+    make(fake).run([issue(1), issue(2)])
+    item = item_of_issue(fake, 1)
+    edit_as(fake, "bob", item, "Triage note from Bob.\n" + fake.items[item]["revisions"][-1]["body"])
+    assert outcomes(make(fake).run([issue(2)])) == {("acme/api#1", "issue"): "missing", ("acme/api#2", "issue"): "current"}
+
 def test_a_duplicate_choice_the_importer_made_is_never_overridden(fake):
     make(fake).run([issue(1, title="Same words")])
     item = next(iter(fake.mine()))
