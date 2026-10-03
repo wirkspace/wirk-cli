@@ -88,7 +88,7 @@ class Run:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise Stop(f"another wirk import {self.source} is running on this machine; wait for it to finish") from None
-            service, registered = self.connect()
+            client, registered = self.connect()
             self.mapped = mapped = self.read_map()
             adapter = self.adapter
             if "cancelled" in mapped:  # Jira's resolutions that mean done work was not done
@@ -97,7 +97,7 @@ class Run:
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
             plan = render.plan_fields(records, adapter.selections(records), adapter.source)
-            importer = wirk.Importer(wirk.Wirk(service, self.pairs.get("workspace_id")), ctx, users=mapped.get("users", {}),
+            importer = wirk.Importer(client, ctx, users=mapped.get("users", {}),
                                      statuses={**DEFAULT_STATUSES, **mapped.get("status", {})}, plan=plan,
                                      withheld=adapter.withheld(ctx), download=adapter.download, dry_run=self.dry_run,
                                      overwrite=bool(self.options.get("--overwrite")), progress=self.progress)
@@ -117,14 +117,14 @@ class Run:
             self.report(census, importer, outcomes, you, setup)
             return 1 if any(o.outcome == "error" for o in outcomes) else 0
 
-    def connect(self) -> tuple[Service, bool]:
+    def connect(self) -> tuple[wirk.Wirk, bool]:
         """The importer's own token once a person registered it; until then the dry run reads with the agent's."""
         directory = config_dir()
         url = saved_url(directory)
         if url is None:
             raise Stop("WIRK is not set up on this machine", "wirk login")
-        agent = Service(url, read_token(directory / "agent-token"), self.transport)
-        status = agent.post("/v2/status", self.scoped({"format": "json", "max_bytes": 1024}))
+        agent = wirk.Wirk(Service(url, read_token(directory / "agent-token"), self.transport), self.pairs.get("workspace_id"))
+        status = agent.post("/v2/status", {"max_bytes": 1024})
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))
         you = status["data"]["you"]
@@ -140,18 +140,14 @@ class Run:
                        "ask your administrator for a shorter person ID")
         self.workspace = you["wirkspace"]["id"]
         if self.token_file.exists():
-            mine = Service(url, read_token(self.token_file), self.transport)
-            answer = mine.post("/v2/status", self.scoped({"format": "json", "max_bytes": 1024}))
-            if answer["ok"]:
+            mine = wirk.Wirk(Service(url, read_token(self.token_file), self.transport), self.pairs.get("workspace_id"))
+            if mine.post("/v2/status", {"max_bytes": 1024})["ok"]:
                 return mine, True
         if not self.dry_run:
             fix = (f"{PERSON_STEP}: wirk admin --request {self.setup_file}" if self.setup_file.exists()
                    else command("wirk", "import", self.source, *self.selection, "--dry-run"))
             raise Stop(f"the {self.source} importer is not set up for this wirkspace yet", fix)
         return agent, False
-
-    def scoped(self, body: dict) -> dict:
-        return {**body, **({"workspace_id": self.pairs["workspace_id"]} if "workspace_id" in self.pairs else {})}
 
     def read_map(self) -> dict:
         path = Path(self.pairs["map"]) if "map" in self.pairs else self.map_file

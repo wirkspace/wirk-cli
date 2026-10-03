@@ -55,7 +55,7 @@ class Wirk:
         self.service, self.workspace = service, workspace
 
     def post(self, route: str, body: dict, uncertain: str | None = None) -> dict:
-        body = {**body, "format": "json", **({"workspace_id": self.workspace} if self.workspace else {})}
+        body = {**body, "format": "json", **({"workspace_id": self.workspace} if self.workspace is not None else {})}
         return self.service.post(route, body, uncertain=uncertain)
 
     def ok(self, route: str, body: dict) -> dict:
