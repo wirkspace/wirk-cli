@@ -26,8 +26,10 @@ wirk query about='webhook retries'             what matters for these words
 wirk query status=open kind=work owner=me      a list with filters
 wirk write new 'What I did' --body-file note.md --link related_to:5c1e7a90
 wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
-wirk review c4a1e902@1 accept --reason 'Matches the agreed criteria'
+wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
+
+Only people decide proposals: an agent's proposal waits for a person, who decides it with the commands under [For people](#for-people). Context (the organization and its initiatives) is added by the wirkspace's administrators; agents propose it.
 
 `ID@N` names the revision you read (`rN` on a card), so a change never overwrites one you did not see. Results are text; `--json` gives the data. A result line `label: command` is the next command: type `wirk` and what follows the colon. After an uncertain result, run the same command again with the `--request-id` it printed; it applies once.
 
@@ -37,12 +39,12 @@ Agents work with their own token; a person keeps a second one for their own deci
 
 ```
 wirk login --person                                   make or check your own token
-wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide a proposal your agents made, as yourself
+wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide a proposal, as yourself
 wirk admin show account                               what your account holds (administrators)
 wirk admin --request batch.json                       people, tokens, wirkspaces and fields (administrators)
 ```
 
-Agents never need them, and the agent help, the skill and the MCP server do not mention them. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (nobody decides their own proposal, and agents are never administrators).
+Agents never run them. The agent help, the skill and the MCP server name only the review command, so an agent can tell you how to decide what waits for you. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (only people decide proposals, nobody decides their own, and agents are never administrators).
 
 ## What leaves your machine
 

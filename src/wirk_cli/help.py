@@ -1,27 +1,27 @@
 """What `wirk --help` and each command's help say: examples an agent can run as printed."""
 
-HELP = {"": """usage: wirk COMMAND [ARGS] [--json]
+HELP = {"": """usage: wirk COMMAND [ARGS] [--json] | wirk --version
 
 WIRK keeps people and agents aligned on their wirk: tasks, notes, decisions and evidence in one wirkspace.
 Start with: wirk status
 
-  status                               who you are, your wirk, what is in progress or needs review
+  status                               who you are, your wirk, what is in progress and what waits
   status 'fix the login bug'           the same, with what matters for your task
   query ID                             fetch an item; short IDs and exact titles work; ID@N is revision N
   query about='hook drain'             what matters for these words, ranked by meaning
   query status=open kind=work          list with filters; status shows the keys and values
   query kind=context                   the organization's context and its initiatives
   query proposal=proposed,deferred     proposals waiting for a decision
-  query receipt=REQUEST_ID             the stored receipt of a write or review
   write new 'Title' --link related_to:ID          a doc; add kind=work for a task
   write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
   write --request FILE                 any write as JSON; - reads standard input
-  review ID@N ACTION --reason 'Why'    ACTION is accept, reject or defer
-  show status                          a live page a person can open
   upload PATH                          store a file and print how to attach it
   download ITEM FILE                   save a stored file
   login                                connect this machine to https://api.wirk.life
+
+Only people decide proposals: yours wait for a person, who decides at their own terminal with
+  wirk review ID@N accept --reason 'Why' --person      after making their token once: wirk login --person
 
 Results are text; add --json for data. To run a result line "label: command", type wirk and what follows the colon.""",
         "status": """usage: wirk status [TASK WORDS] [task=… max_bytes=N workspace_id=ID] [--json]
@@ -61,10 +61,12 @@ Quote a title or words with spaces. A result line "label: command" is the next c
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e@7
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
-  write new 'Plan' kind=context level=initiative --body-file plan.md        an initiative
+  write new 'Plan' kind=context level=initiative --body-file plan.md --propose --reason 'Agreed in planning'
 
 KEY=VALUE: kind=work|doc|context, level (with kind=context), owner (me or an ID), workspace_id,
 and the wirkspace's fields (status=open; a comma list for several; KEY= clears on edit).
+Context (kind=context) is the organization and its initiatives: administrators add it, and agents
+propose it with --propose --reason.
 --link TYPE is related_to, contributes_to or requires. --evidence is a completion's note: the tests
 that pass, a link, a file path, or a file attached with --upload. --propose needs --reason.
 Every result names the IDs it created. After an uncertain result, run the same command again with
@@ -75,16 +77,24 @@ the --request-id it printed.
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
   {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"
+     cites also takes target_revision, selector, relation and quotation: the exact text it cites at that
+     revision, or the link is refused as quotation_mismatch
   {"op": "link.remove", "id": LINK_ID}
-Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}""",
-        "review": """usage: wirk review ID@N… ACTION --reason TEXT [--request-id ID] [--json]
+Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
+expect holds the rN you read of every existing item you edit, archive or link from; one left out is
+refused as basis_changed, naming its current revision.""",
+        "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
-Nobody decides their own proposal.
+Only people decide proposals: an agent's review is refused with person_required and the proposal waits.
+A person decides at their own terminal, as themselves: wirk review ID@N accept --reason 'Why' --person,
+after making their token once with wirk login --person. It asks them to type the decision back.
 
-  review c4a1e902@1 accept --reason 'Matches the agreed criteria'
-  review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test'""",
+  review c4a1e902@1 accept --reason 'Matches the agreed criteria' --person
+  review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test' --person""",
         "show": """usage: wirk show status | --file FILE | --revoke LINK [--no-open] [--json]
+
+Not live yet: api.wirk.life has no address for views and answers views_unavailable.
 
 A live, read-only page a person can open; the link comes first and anyone holding it can open it
 until it expires.
