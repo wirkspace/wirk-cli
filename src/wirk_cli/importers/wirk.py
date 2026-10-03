@@ -282,8 +282,9 @@ class Importer:
             if not source or source.archived or not targets:
                 continue
             view = self.wirk.item(source.item, "full")
-            have = self.existing(view)
-            missing = [(link, target) for link, target in targets if link not in have]
+            have = self.existing(view)  # a related_to meets a requires: it is what WIRK kept when it refused the gate
+            missing = [(link, target) for link, target in targets
+                       if link not in have and not (link[0] == "requires" and normal("related_to", *link[1:]) in have)]
             for start in range(0, len(missing), 31):
                 outcomes += self.write_links(ident, source.item, view["r"], missing[start:start + 31])
         return outcomes
