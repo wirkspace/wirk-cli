@@ -299,3 +299,10 @@ def test_jira_every_project_with_restricted_issues_named_then_the_import(jira_wo
     assert jira_world["token"] not in out + err
     from wirk_cli.help import HELP
     assert "wirk import jira [PROJECT|ISSUE_KEY…]" in HELP["import"] and "import/jira-key" in HELP["import"]
+
+
+
+def test_a_map_whose_cancelled_is_not_a_list_of_names_stops_with_the_shape_it_wants(jira_world):
+    (jira_world["home"] / "import" / "jira-map.json").write_text(json.dumps({"cancelled": "Won't Do"}))
+    code, out, err = jira_world["run"]("--dry-run")
+    assert code == 2 and "cancelled" in err and "list" in err
