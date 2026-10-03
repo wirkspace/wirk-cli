@@ -392,3 +392,12 @@ def test_a_run_whose_outcomes_hold_no_issue_has_no_find_one_line(linear_world, m
     monkeypatch.setattr(linear, "TRANSPORT", httpx.MockTransport(FakeLinear([])))
     code, out, err = linear_world["run"]("--dry-run")
     assert code == 0 and "would create: " in out and "find one:" not in out, out + err
+
+
+def test_an_empty_workspace_id_is_sent_as_given_so_wirk_refuses_it(world):
+    status = world["fake"].status
+    world["fake"].status = lambda body: (refusal("not_available", "Workspace is unavailable", 404) if body.get("workspace_id") == ""
+                                         else status(body))  # as core answers a wirkspace ID that names none
+    code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run")
+    assert (code, out, err) == (2, "", "Error import: Workspace is unavailable\n")
+    assert [body for route, body in world["fake"].requests] == [{"format": "json", "max_bytes": 1024, "workspace_id": ""}]
