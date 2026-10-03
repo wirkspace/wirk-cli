@@ -234,12 +234,8 @@ class Jira:
         for entry in history:  # a move from a project not selected: its project and workflow stay unnamed (§3.9)
             if any(i.get("field") == "project" and i.get("from") not in self.shown_projects for i in entry.get("items", [])):
                 self.moved_from |= {i.get("from") for i in entry["items"] if i.get("field") == "Workflow"}
-        kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
-        kept.update(attachment=attachments, parent=bare(f.get("parent")), subtasks=[bare(s) for s in f.get("subtasks") or []],
-                    issuelinks=[{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
-                                for link in f.get("issuelinks") or []])
-        raw = {"issue": clean({**node, "fields": kept}), "worklogs": clean(worklogs), "changelog": clean(history),
-               "remotelinks": clean(links)}
+        raw = {"issue": clean({**node, "fields": self.archived(f, attachments)}), "worklogs": clean(worklogs),
+               "changelog": clean(history), "remotelinks": clean(links)}
         body = "\n\n".join(part for part in [adf.markdown(f.get("description"), self.counts, files), *sections] if part)
         assignee = f.get("assignee")
         return render.Record(
@@ -254,6 +250,15 @@ class Jira:
             [render.Attachment(render.attachment_name(SOURCE, a["id"], a["filename"]), f"{self.base}/rest/api/3/attachment/content/{a['id']}",
                                False) for a in attachments],
             raw, clean(comments))
+
+    @staticmethod
+    def archived(f: dict, attachments: list) -> dict:
+        """The issue's fields for its archive: without what moves with comments, the files left out, and the titles of the
+        issues it embeds."""
+        kept = {k: v for k, v in f.items() if k not in ("comment", "worklog", "updated")}
+        return {**kept, "attachment": attachments, "parent": bare(f.get("parent")), "subtasks": [bare(s) for s in f.get("subtasks") or []],
+                "issuelinks": [{**link, **{side: bare(link[side]) for side in ("inwardIssue", "outwardIssue") if side in link}}
+                               for link in f.get("issuelinks") or []]}
 
     def relations(self, f: dict, history: list, children: list) -> list:
         """The parent, the children, each link as seen from this issue, and the keys it had before a move."""
