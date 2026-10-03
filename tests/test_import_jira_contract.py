@@ -68,7 +68,7 @@ def item(folder, text):
 
 def test_jira_import_links_comments_and_a_rerun_that_writes_nothing(imported):
     code, out = imported["run"]()
-    assert code == 0 and "created: 5" in out, out  # four issues and one discussion; the restricted one is skipped
+    assert code == 0 and "created: 8" in out, out  # four issues, one discussion and three project docs; the restricted one is skipped
     folder = imported["dir"]
     one, two, three, four = (item(folder, f"Jira issue [SEED-{n}]") for n in (1, 2, 3, 4))
     assert item(folder, "Jira issue [SEED-9]") is None
@@ -77,5 +77,7 @@ def test_jira_import_links_comments_and_a_rerun_that_writes_nothing(imported):
     assert "Is blocked by: [SEED-1] (kept as related: completed here)" in four["body"] and four["fields"]["status"] == "completed"
     discussion = item(folder, "Jira comments on [SEED-1]")
     assert "\\## Looks right" in discussion["body"] and "### Ben Sample" in discussion["body"]
+    project = item(folder, "Jira project [SEED]")
+    assert project["title"] == "Seed project" and "## Versions" in project["body"] and "@example.com" not in json.dumps(project)
     code, out = imported["run"]("--json")
     assert {o["outcome"] for o in json.loads(out)["data"]["outcomes"]} == {"current"}
