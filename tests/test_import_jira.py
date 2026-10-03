@@ -464,3 +464,29 @@ def test_a_round_trip_through_a_project_not_selected_withholds_the_whole_stay(fo
     archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
     assert b"Outside" not in archive and b"OUT-9" not in archive and b"legal hold" not in archive
     assert b"First words" in archive and b"Later words" in archive
+
+
+def test_a_move_whose_from_is_missing_fails_closed(folder):
+    entries = {"20005": [
+        {"id": "41", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("status", "To Do", "Outside legal hold")]},
+        {"id": "42", "author": ADA, "created": "2026-09-02T00:00:00.000+0000", "items": [
+            history_item("project", "Outside", "Seed project", to="10000")]},
+        {"id": "43", "author": ADA, "created": "2026-09-03T00:00:00.000+0000", "items": [history_item("summary", "Later words", "Issue 5")]}]}
+    found, census, records = read(FakeJira([issue(5)], entries), folder, ["SEED"])
+    archive = render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    assert b"Outside" not in archive and b"Later words" in archive
+
+
+def test_history_is_ordered_by_instant_then_id_across_offsets_and_ties(folder):
+    move = lambda ident, when, before, after: {"id": ident, "author": ADA, "created": when, "items": [
+        history_item("project", None, None, **{"from": before, "to": after})]}
+    fall_back = {"20005": [  # 01:30-07:00 is 08:30Z, before the 01:15-08:00 move at 09:15Z, though it sorts after it as text
+        move("52", "2026-11-01T01:15:00.000-0800", "10002", "10000"),
+        {"id": "51", "author": ADA, "created": "2026-11-01T01:30:00.000-0700", "items": [history_item("status", "To Do", "Outside legal hold")]}]}
+    found, census, records = read(FakeJira([issue(5)], fall_back), folder, ["SEED"])
+    assert b"Outside legal hold" not in render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
+    same_time = {"20005": [  # two moves in one second, newest first: the id orders them
+        move("62", "2026-09-02T00:00:00.000+0000", "10002", "10000"), move("61", "2026-09-02T00:00:00.000+0000", "10000", "10002"),
+        {"id": "60", "author": ADA, "created": "2026-09-01T00:00:00.000+0000", "items": [history_item("summary", "Early words", "Issue 5")]}]}
+    found, census, records = read(FakeJira([issue(5)], same_time), folder, ["SEED"])
+    assert b"Early words" in render.archive(records[0].raw, found.withheld(found.context(census.selected)), {})
