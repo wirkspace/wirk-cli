@@ -301,7 +301,7 @@ class Importer:
 
     def links_of(self, ident: str, wanted: list) -> list:
         source = self.single(ident)
-        targets = [(link, target) for link in wanted for target in [self.single(link[2])] if target and not target.archived]
+        targets = [(link, target) for link in wanted if (target := self.single(link[2])) and not target.archived]
         if not source or source.archived or not targets:
             return []
         view = self.wirk.item(source.item, "full")
@@ -577,8 +577,8 @@ class Importer:
                 elif self.dry_run:
                     outcomes.append(Outcome(record.key, kind, "would archive", item=found.item))
                 else:
-                    answer = self.wirk.write(self.archiving(record, "archive", [found], f"No longer needed: the discussion of "
-                                                            f"[{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"))
+                    reason = f"No longer needed: the discussion of [{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"
+                    answer = self.wirk.write(self.archiving(record, "archive", [found], reason))
                     outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error",
                                             "" if answer["ok"] else answer["errors"][0]["code"], found.item))
         return outcomes
