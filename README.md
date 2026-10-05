@@ -10,7 +10,7 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo, and running it again is safe. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and asks WIRK to approve the machine: open the link it prints, sign in and approve. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
@@ -59,6 +59,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
 - Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
 
