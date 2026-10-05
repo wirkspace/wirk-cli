@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -91,21 +92,34 @@ packages = ["src/wirk_mcp"]
 
 
 def shims(tmp_path):
-    """claude and codex that record their calls and remember an MCP registration."""
+    """claude and codex that record their calls and keep a server named wirk the way the real ones do:
+    Claude Code's add refuses an existing user entry and its remove fails when there is none; Codex's add replaces."""
     shim_dir = tmp_path / "shims"
     shim_dir.mkdir(exist_ok=True)
-    for name in ("claude", "codex"):
+    for name, label, exists in (("claude", "Command", 'echo "MCP server wirk already exists in user config" >&2; exit 1'),
+                                ("codex", "command", ":")):
         shim = shim_dir / name
         shim.write_text(f"""#!/bin/sh
 echo "{name} $*" >> "{tmp_path}/calls"
+state="{tmp_path}/{name}-wirk"
 case "$*" in
-  "mcp get wirk") [ -f "{tmp_path}/{name}-registered" ] && exit 0 || exit 1 ;;
-  "mcp add"*) touch "{tmp_path}/{name}-registered" ;;
+  "mcp get wirk")  # a project's own entry (marked by .local-wirk) wins over the user entry, as in Claude Code
+    if [ -f .local-wirk ]; then echo "  {label}: $(cat .local-wirk)"; exit 0; fi
+    [ -f "$state" ] || exit 1
+    case "$(cat "$state")" in http*) echo "  URL: $(cat "$state")" ;; *) echo "  {label}: $(cat "$state")" ;; esac ;;
+  "mcp add"*" wirk -- "*) if [ -f "$state" ]; then {exists}; fi; all="$*"; printf '%s' "${{all##* -- }}" > "$state" ;;
+  "mcp remove"*" wirk") [ -f "$state" ] && rm "$state" && exit 0; exit 1 ;;
 esac
 exit 0
 """)
         shim.chmod(0o755)
     return str(shim_dir)
+
+
+def registered(tmp_path, host):
+    """The command a host would run for its server named wirk, or None."""
+    state = tmp_path / f"{host}-wirk"
+    return state.read_text() if state.exists() else None
 
 
 def service():
@@ -129,14 +143,14 @@ def service():
     return f"http://127.0.0.1:{server.server_address[1]}", server
 
 
-def install(tmp_path, base, *extra):
+def install(tmp_path, base, *extra, cwd=None):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     uv = shutil.which("uv")
     env = {"HOME": str(home), "PATH": f"{shims(tmp_path)}:{os.path.dirname(uv)}:{basic_path(tmp_path)}",
            "WIRK_RELEASE_BASE": f"file://{base}", "UV_TOOL_DIR": str(tmp_path / "tools"),
            "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_PYTHON_PREFERENCE": "only-system", "UV_PYTHON": sys.executable}
-    return subprocess.run(["sh", str(SCRIPT), "--yes", *extra], capture_output=True, text=True, timeout=300, env=env)
+    return subprocess.run(["sh", str(SCRIPT), "--yes", *extra], capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
 
 
 needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="uv is needed to build and install the wheels")
@@ -159,12 +173,109 @@ def test_a_real_install_from_verified_release_wheels_is_idempotent(tmp_path):
     assert ".whl" not in before_login and ".sums" not in before_login  # no download paths or commands
     assert "Their SHA-256 sums match" in before_login or "SHA-256 sums match the release" in before_login
     home = tmp_path / "home"
-    assert (home / ".claude" / "skills" / "wirk" / "SKILL.md").exists() and (home / ".codex" / "skills" / "wirk" / "SKILL.md").exists()
+    assert (home / ".claude" / "skills" / "wirk" / "SKILL.md").exists() and (home / ".agents" / "skills" / "wirk" / "SKILL.md").exists()
+    assert not (home / ".codex" / "skills").exists()  # Codex reads ~/.agents/skills too; one copy, not two
     second = install(tmp_path, base, "--url", url)
     server.shutdown()
     assert second.returncode == 0, second.stdout + second.stderr
-    assert "already installed" in second.stdout and "already has an MCP server named wirk" in second.stdout
-    assert (tmp_path / "calls").read_text().count("mcp add") == 2
+    assert "already installed" in second.stdout and "replacing" not in second.stdout
+    for tool, source in receipt_sources(tmp_path):  # uv upgrades from where it installed; that must outlive the installer
+        assert source.exists(), (tool, source)
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{bin_dir}/wirk-mcp"
+    assert (tmp_path / "calls").read_text().count("mcp add") == 2  # a current registration is left as it is
+
+
+def earlier_install(tmp_path, codex_copy):
+    """What an earlier install left: registrations and skill links into an old deployment, which must stay as it was."""
+    old = tmp_path / "old-deployment"
+    (old / "skill").mkdir(parents=True)
+    (old / "skill" / "SKILL.md").write_text("old skill\n")
+    for host in ("claude", "codex"):
+        (tmp_path / f"{host}-wirk").write_text(f"{old}/.venv/bin/wirk-mcp")
+    home = tmp_path / "home"
+    (home / ".claude" / "skills").mkdir(parents=True)
+    (home / ".claude" / "skills" / "wirk").symlink_to(old / "skill")
+    codex = home / codex_copy
+    codex.parent.mkdir(parents=True)
+    if codex_copy == ".agents/skills/wirk":  # linked to the old folder
+        codex.symlink_to(old / "skill")
+    else:  # a real folder whose SKILL.md links to the old file
+        codex.mkdir()
+        (codex / "SKILL.md").symlink_to(old / "skill" / "SKILL.md")
+    return old, home
+
+
+@needs_uv
+@pytest.mark.parametrize("codex_copy", [".agents/skills/wirk", ".codex/skills/wirk"])
+def test_a_reinstall_replaces_what_an_earlier_install_left(tmp_path, codex_copy):
+    """An old registration and skill links into an old deployment are replaced; the old files stay as they were."""
+    url, server = service()
+    base = release(tmp_path)
+    old, home = earlier_install(tmp_path, codex_copy)
+    result = install(tmp_path, base, "--url", url)
+    server.shutdown()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{tmp_path}/bin/wirk-mcp"
+    assert result.stdout.count(f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp") == 2
+    release_skill = (base / "wirk-skill" / "releases" / "download" / f"v{VERSION}" / "SKILL.md").read_text()
+    for folder in (home / ".claude" / "skills" / "wirk", home / codex_copy):
+        assert not folder.is_symlink() and not (folder / "SKILL.md").is_symlink(), folder
+        assert (folder / "SKILL.md").read_text() == release_skill, folder
+    other = ".codex/skills/wirk" if codex_copy == ".agents/skills/wirk" else ".agents/skills/wirk"
+    assert not (home / other).exists()  # Codex lists each copy, so no second one is made
+    assert (old / "skill" / "SKILL.md").read_text() == "old skill\n"  # never written through a link
+
+
+@needs_uv
+def test_the_user_entry_is_read_outside_any_project_and_a_url_entry_is_replaced(tmp_path):
+    """Run from a project with its own wirk entry, the installer still judges the user entry; a URL entry is named."""
+    url, server = service()
+    base = release(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".local-wirk").write_text("/somewhere/else/wirk-mcp")
+    (tmp_path / "claude-wirk").write_text(f"{tmp_path}/bin/wirk-mcp")  # already current
+    (tmp_path / "codex-wirk").write_text("https://old.example/mcp")
+    result = install(tmp_path, base, "--url", url, cwd=project)
+    server.shutdown()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Claude Code: replacing" not in result.stdout
+    assert "Codex: replacing the wirk MCP server that ran https://old.example/mcp" in result.stdout
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{tmp_path}/bin/wirk-mcp"
+
+
+def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
+    old, home = earlier_install(tmp_path, ".agents/skills/wirk")
+    result = subprocess.run(["sh", str(SCRIPT), "--dry-run"], capture_output=True, text=True, timeout=60,
+                            env={"HOME": str(home), "PATH": f"{shims(tmp_path)}:{basic_path(tmp_path)}"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp" in result.stdout
+    assert "would run: claude mcp remove --scope user wirk" in result.stdout
+    calls = (tmp_path / "calls").read_text()
+    assert "mcp add" not in calls and "mcp remove" not in calls
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
+    assert (home / ".claude" / "skills" / "wirk").is_symlink() and (home / ".agents" / "skills" / "wirk").is_symlink()
+
+
+def receipt_sources(tmp_path):
+    """Where uv would look for each installed tool when upgrading it."""
+    for tool in ("wirk", "wirk-mcp"):
+        receipt = (tmp_path / "tools" / tool / "uv-receipt.toml").read_text()
+        for source in re.findall(r'(?:path|url|directory) = "([^"]+)"', receipt):
+            yield tool, Path(source.removeprefix("file://"))
+
+
+@needs_uv
+def test_a_rerun_repairs_an_install_whose_wheels_are_gone(tmp_path):
+    """An install made by an earlier installer points uv at wheels that no longer exist; running again repairs it."""
+    url, server = service()
+    base = release(tmp_path)
+    assert install(tmp_path, base, "--url", url).returncode == 0
+    shutil.rmtree(tmp_path / "home" / ".local" / "share" / "wirk" / "wheels")
+    again = install(tmp_path, base, "--url", url)
+    server.shutdown()
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert all(source.exists() for _, source in receipt_sources(tmp_path))
 
 
 @needs_uv

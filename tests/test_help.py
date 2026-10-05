@@ -141,21 +141,22 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.0"
+    assert project == __version__ == "0.4.1"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
+    """Decision 85: an agent whose role may review decides with its own token; a background agent only proposes."""
     text = help_of(capsys)
     assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
-    assert "only people decide proposals" in text.lower()
-    assert "wirk review ID@N accept --reason 'Why' --person" in text  # what your person runs at their own terminal
+    assert "\n  review ID@N accept --reason 'Why'  " in text and "only people" not in text.lower()
+    assert "a background agent only proposes" in text and "--person" not in text
 
-
-def test_review_help_says_agents_are_refused_and_how_a_person_decides(capsys):
+def test_review_help_says_who_decides_and_what_person_means(capsys):
     text = help_of(capsys, "review")
-    assert "person_required" in text and "wirk login --person" in text and "--reason 'Why' --person" in text
-    assert "not_authorized for its own" in text  # an agent's own proposal is refused before its kind is
-
+    assert "Anyone whose role may review decides" in text and "not_authorized: your role (editor) cannot review" in text
+    assert "person_required" not in text and "only people" not in text.lower() and "you proposed" not in text
+    assert "--person decides as yourself" in text and "wirk login --person" in text
+    assert [line for line in text.split("\n") if line.startswith("  review ") and "--person" in line] == []
 
 def test_show_help_says_it_is_not_live_yet(capsys):
     text = help_of(capsys, "show")
@@ -170,4 +171,11 @@ def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
 
 def test_the_readme_says_what_this_release_changed():
     changes = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
-    assert f"### {__version__}" in changes and "wirk import github" in changes.split("\n### ", 2)[1]
+    assert f"### {__version__}" in changes and "catch-ups" in changes.split("\n### ", 2)[1]
+
+
+def test_ranking_by_meaning_always_names_pro(capsys):
+    """Free and Team rank by words (decision 65); help never promises meaning ranking without the plan."""
+    for text in [help_of(capsys), *(help_of(capsys, command) for command in COMMANDS)]:
+        for line in text.split("\n"):
+            assert "by meaning" not in line or "Pro" in line, line

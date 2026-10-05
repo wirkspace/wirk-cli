@@ -10,7 +10,7 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo, and running it again is safe. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and asks WIRK to approve the machine: open the link it prints, sign in and approve. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
@@ -29,7 +29,7 @@ wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py pass
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 
-Only people decide proposals: an agent's proposal waits for a person, who decides it with the commands under [For people](#for-people). A change to context (the organization and its initiatives) applies directly when you may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
+Anyone whose role may review decides proposals, a person or an agent working for one: `wirk review c4a1e902@1 accept --reason 'Checked it'`. A background agent only proposes. A change to context (the organization and its initiatives) applies directly when you may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
 
 `ID@N` names the revision you read (`rN` on a card), so a change never overwrites one you did not see. Results are text; `--json` gives the data. A result line `label: command` is the next command: type `wirk` and what follows the colon. After an uncertain result, run the same command again with the `--request-id` it printed; it applies once.
 
@@ -39,12 +39,12 @@ Agents work with their own token; a person keeps a second one for their own deci
 
 ```
 wirk login --person                                   make or check your own token
-wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide a proposal, as yourself
+wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide as yourself, not as your agent
 wirk admin show account                               what your account holds (administrators)
 wirk admin --request batch.json                       people, tokens, wirkspaces and fields (administrators)
 ```
 
-Agents never run them. The agent help, the skill and the MCP server name only the review command, so an agent can tell you how to decide what waits for you. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (only people decide proposals, nobody decides their own, and agents are never administrators).
+Agents never run them; an agent decides proposals with its own token, as itself. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (only a role that may review decides proposals, and agents are never administrators).
 
 ## What leaves your machine
 
@@ -56,6 +56,12 @@ Agents never run them. The agent help, the skill and the MCP server name only th
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
 
 ## Changes
+
+### 0.4.1
+
+- Project catch-ups start from WIRK and linked records, with direct MCP preferred when available. Read-only catch-ups do not claim or change work; focused checks can verify stale or conflicting evidence.
+- Help reflects the current service: people and personal agents whose role may review can decide proposals. Background agents only propose. Meaning ranking is available on Pro; other plans rank by words.
+- The installer replaces stale MCP registrations and skills, without writing through skill symlinks. Verified wheels stay in `~/.local/share/wirk/wheels` so reinstalling can repair earlier temporary origins. Rerun the installer to update the pinned release.
 
 ### 0.4.0
 
