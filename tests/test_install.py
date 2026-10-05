@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -178,6 +179,10 @@ def test_a_real_install_from_verified_release_wheels_is_idempotent(tmp_path):
     server.shutdown()
     assert second.returncode == 0, second.stdout + second.stderr
     assert "already installed" in second.stdout and "replacing" not in second.stdout
+    for tool in ("wirk", "wirk-mcp"):  # uv upgrades from where it installed; that place must outlive the installer
+        receipt = (tmp_path / "tools" / tool / "uv-receipt.toml").read_text()
+        for source in re.findall(r'(?:path|url|directory) = "([^"]+)"', receipt):
+            assert Path(source.removeprefix("file://")).exists(), (tool, source)
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{bin_dir}/wirk-mcp"
     assert (tmp_path / "calls").read_text().count("mcp add") == 2  # a current registration is left as it is
 

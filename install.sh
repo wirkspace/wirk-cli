@@ -90,8 +90,12 @@ else
   fetch wirk-cli "$CLI"
   fetch wirk-mcp "$MCP"
   ok "Downloaded wirk and wirk-mcp $VERSION; their SHA-256 sums match the release"
-  quietly "$UV" tool install --force "$TMP/$CLI"
-  quietly "$UV" tool install --force "$TMP/$MCP" --with "$TMP/$CLI"
+  # uv upgrades from where a tool came from, so the verified wheels stay where uv can find them again
+  WHEELS="${XDG_DATA_HOME:-$HOME/.local/share}/wirk/wheels"
+  quietly mkdir -p "$WHEELS"
+  quietly cp "$TMP/$CLI" "$TMP/$MCP" "$WHEELS/"
+  quietly "$UV" tool install --force "$WHEELS/$CLI"
+  quietly "$UV" tool install --force "$WHEELS/$MCP" --with "$WHEELS/$CLI"
   ok "Installed wirk and wirk-mcp"
 fi
 BIN=$("$UV" tool dir --bin 2> /dev/null || printf '%s' "$HOME/.local/bin")
