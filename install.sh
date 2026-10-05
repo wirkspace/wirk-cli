@@ -111,13 +111,16 @@ for host in claude codex; do
     continue
   fi
   if ! ask "Set up $name with the WIRK MCP server and skill?"; then
-    note "$name left as it is (later: run this again)"
+    note "$name left as it is (later: run this again, or with --yes)"
     continue
   fi
-  was=$("$host" mcp get wirk 2> /dev/null | sed -n 's/^ *[Cc]ommand: //p' | head -n 1)
+  # from an empty folder, so Claude Code reports its user entry rather than a project's own
+  was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
   if [ "$was" != "$BIN/wirk-mcp" ]; then
-    if [ -n "$was" ]; then note "$name: replacing the wirk MCP server that ran $was"; fi
-    if [ -n "$was" ] && [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's add replaces
+    if [ -n "$was" ]; then
+      note "$name: replacing the wirk MCP server that ran $was"
+      if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's add replaces
+    fi
     # shellcheck disable=SC2086  # $scope is zero or two words on purpose
     quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
   fi
