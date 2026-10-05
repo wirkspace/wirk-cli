@@ -10,7 +10,7 @@ Install the CLI from PyPI with [uv](https://docs.astral.sh/uv/getting-started/in
 uv tool install wirk
 ```
 
-This installs the `wirk` command. It requires Python 3.12 or later. If you need uv, use `brew install uv` with Homebrew or `pipx install uv` with pipx. If your shell cannot find `wirk`, follow the PATH guidance uv prints.
+This installs the `wirk` command. It requires Python 3.12 or later. If you need uv, use `brew install uv` with Homebrew or `pipx install uv`. If your shell cannot find `wirk`, follow the PATH guidance uv prints.
 
 Then authorize this machine and check the connection:
 
@@ -66,6 +66,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### 0.4.1
 
+- The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
 - Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
 
