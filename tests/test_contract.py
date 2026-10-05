@@ -175,18 +175,24 @@ def test_status_shows_the_wirkspace_context(agent, capsys):
     assert code == 0 and "context" in out
 
 
-def test_a_proposal_waits_for_a_person_who_decides_it(agent, capsys, monkeypatch):
-    code, out, err = wirk(capsys, "write", "new", "Nightly cleanup", "kind=work")
-    item = created(out)
-    code, out, err = wirk(capsys, "write", "edit", f"{item}@1", "status=cancelled", "--propose", "--reason", "Idle 30 days")
-    assert code == 0 and "Proposed" in out, out + err
-    proposal = re.search(r"proposal ([0-9a-f]{8}) r(\d+)", out)
-    decide = (f"{proposal[1]}@{proposal[2]}", "accept", "--reason", "Idle indeed")
+def test_an_agent_whose_role_may_review_decides_and_a_person_may_decide_as_themselves(agent, capsys, monkeypatch):
+    """Decision 85: an editor's review is refused by its role; a reviewer agent decides with its own token, and a
+    person decides as themselves with --person."""
+    proposals = []
+    for title in ("Nightly cleanup", "Weekly cleanup"):
+        code, out, err = wirk(capsys, "write", "new", title, "kind=work")
+        code, out, err = wirk(capsys, "write", "edit", f"{created(out)}@1", "status=cancelled", "--propose", "--reason",
+                              "Idle 30 days")
+        assert code == 0 and "Proposed" in out, out + err
+        proposal = re.search(r"proposal ([0-9a-f]{8}) r(\d+)", out)
+        proposals.append((f"{proposal[1]}@{proposal[2]}", "accept", "--reason", "Idle indeed"))
+    code, out, err = wirk(capsys, "review", *proposals[0])  # these agents have their own editor row
+    assert code == 1 and "your role (editor) cannot review" in out and "accepted" not in out, out + err
     person_with_agents(capsys, agent["tmp"] / "other", agent["workspace"], role="reviewer", person_role="editor")
-    code, out, err = wirk(capsys, "review", *decide)  # another person's agents, with the reviewer role
-    assert code == 1 and "person_required" in out and "accepted" not in out, out + err  # agents never decide
+    code, out, err = wirk(capsys, "review", *proposals[0])  # another person's agents, with the reviewer role
+    assert code == 0 and "accepted" in out, out + err
     monkeypatch.setenv("WIRK_CONFIG_DIR", str(agent["dir"]))
-    code, out, err = as_person(monkeypatch, capsys, agent["name"], "review", *decide)
+    code, out, err = as_person(monkeypatch, capsys, agent["name"], "review", *proposals[1])
     assert code == 0 and "accepted" in out, out + err
 
 

@@ -6,7 +6,8 @@ import logging
 import httpx
 import pytest
 
-from conftest import TOKEN, URL, envelope, refusal
+from conftest import PERSON_TOKEN, TOKEN, URL, envelope, refusal, write_token
+from wirk_cli import cli
 
 
 def test_text_by_default_and_the_envelope_with_json(run):
@@ -52,6 +53,58 @@ def test_two_failures_on_a_write_are_an_unknown_outcome_with_the_exact_retry(run
     assert code == 1 and len(fake.requests) == 2
     assert f"Error outcome_unknown: {URL} did not answer" in err and "--request-id w-1" in err
     assert "wirk query receipt=w-1" in err
+
+
+@pytest.mark.parametrize("verb, body", [
+    ("write", {"request_id": "w-9", "operations": [{"op": "item.create", "data": {"title": "T"}}]}),
+    ("review", {"request_id": "r-9", "decisions": [{"id": "c4a1e902", "revision": 1, "action": "accept", "reason": "Fine"}]})])
+def test_an_unknown_outcome_of_a_request_file_says_to_run_the_same_command_again(run, home, verb, body):
+    """--request takes no --request-id: the file carries it, so the retry is the same command; the receipt still helps."""
+    (home.parent / "body.json").write_text(json.dumps(body))
+    code, out, err, fake = run([verb, "--request", "body.json"], failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and len(fake.requests) == 2 and "Error outcome_unknown" in err
+    assert f"Run the same command again: wirk {verb} --request body.json" in err
+    assert f"wirk query receipt={body['request_id']}" in err and "--request-id" not in err
+
+
+@pytest.mark.parametrize("verb, body", [
+    ("write", {"request_id": "w-9", "operations": [{"op": "item.create", "data": {"title": "T"}}]}),
+    ("review", {"request_id": "r-9", "decisions": [{"id": "c4a1e902", "revision": 1, "action": "accept", "reason": "Fine"}]}),
+    ("admin", {"request_id": "a-1", "operations": [{"op": "principal.create", "id": "bob", "kind": "person", "name": "Bob"}]})])
+def test_the_retry_of_a_request_file_keeps_json(run, home, monkeypatch, verb, body):
+    """A retry printed without --json would answer in text to an agent that asked for JSON."""
+    if verb == "admin":
+        monkeypatch.setattr(cli, "at_terminal", lambda: None)
+        monkeypatch.setattr("builtins.input", lambda prompt: "admin a-1")
+        write_token(home / "person-token", PERSON_TOKEN)
+    (home.parent / "body.json").write_text(json.dumps(body))
+    code, out, err, fake = run([verb, "--request", "body.json", "--json"],
+                               failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and f"Run the same command again: wirk {verb} --request body.json --json" in out
+
+
+def test_an_unknown_admin_outcome_says_to_run_the_same_command_again(run, home, monkeypatch):
+    """wirk admin takes its request ID from the file and has no --request-id; resending the file replays the receipt,
+    while query receipt= finds only writes, reviews and uploads."""
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda prompt: "admin a-1")
+    write_token(home / "person-token", PERSON_TOKEN)
+    (home.parent / "batch.json").write_text(json.dumps({"request_id": "a-1", "operations": [
+        {"op": "principal.create", "id": "bob", "kind": "person", "name": "Bob"}]}))
+    code, out, err, fake = run(["admin", "--request", "batch.json"], failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and len(fake.requests) == 2 and "Error outcome_unknown" in err
+    assert "Run the same command again: wirk admin --request batch.json" in err
+    assert "--request-id" not in err and "receipt=" not in err
+
+
+def test_admin_show_with_a_stray_request_id_fails_cleanly_when_no_answer_comes(run, home, monkeypatch):
+    """A show is a read: no outcome is uncertain, whatever words it was given."""
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda prompt: "show wirkspace")
+    write_token(home / "person-token", PERSON_TOKEN)
+    code, out, err, fake = run(["admin", "show", "wirkspace", "request_id=x"],
+                               failing(httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")))
+    assert code == 1 and "Error service_unavailable" in err and "Traceback" not in err
 
 
 def test_an_unreachable_service_names_the_url_and_suggests_no_other_address(run):

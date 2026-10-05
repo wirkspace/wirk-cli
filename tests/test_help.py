@@ -145,16 +145,19 @@ def test_one_version_everywhere():
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
+    """Decision 85: an agent whose role may review decides with its own token; a background agent only proposes."""
     text = help_of(capsys)
     assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
-    assert "only people decide proposals" in text.lower()
-    assert "wirk review ID@N accept --reason 'Why' --person" in text  # what your person runs at their own terminal
+    assert "\n  review ID@N accept --reason 'Why'  " in text and "only people" not in text.lower()
+    assert "a background agent only proposes" in text and "--person" not in text
 
 
-def test_review_help_says_agents_are_refused_and_how_a_person_decides(capsys):
+def test_review_help_says_who_decides_and_what_person_means(capsys):
     text = help_of(capsys, "review")
-    assert "person_required" in text and "wirk login --person" in text and "--reason 'Why' --person" in text
-    assert "not_authorized for its own" in text  # an agent's own proposal is refused before its kind is
+    assert "Anyone whose role may review decides" in text and "not_authorized: your role (editor) cannot review" in text
+    assert "person_required" not in text and "only people" not in text.lower() and "you proposed" not in text
+    assert "--person decides as yourself" in text and "wirk login --person" in text
+    assert [line for line in text.split("\n") if line.startswith("  review ") and "--person" in line] == []
 
 
 def test_show_help_says_it_is_not_live_yet(capsys):
@@ -168,6 +171,54 @@ def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
     assert "basis_changed" in text and "quotation_mismatch" in text
 
 
+def changes() -> dict:
+    """The README's changelog: each section's heading (a version, or Next release) and its text."""
+    text = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
+    return dict(section.split("\n", 1) for section in text.split("\n### ")[1:])
+
+
 def test_the_readme_says_what_this_release_changed():
-    changes = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
-    assert f"### {__version__}" in changes and "wirk import github" in changes.split("\n### ", 2)[1]
+    assert "wirk import github" in changes()[__version__]
+
+
+def test_the_readme_says_what_the_next_release_changes():
+    """Decision 85's wording (#16) and the recovery hints (#13, #15) since 0.4.0."""
+    upcoming = changes()["Next release"]
+    assert "Anyone whose role may review decides" in upcoming and "--person" in upcoming
+    assert "run the same command again" in upcoming and "--json" in upcoming
+
+
+ALL = [*COMMANDS, "import"]
+
+
+def test_ranking_by_meaning_always_names_pro(capsys):
+    """Free and Team rank by words (decision 65); help never promises meaning ranking without the plan."""
+    for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
+        for line in text.split("\n"):
+            assert "by meaning" not in line or "Pro" in line, line
+
+
+def test_budgets_state_their_range(capsys):
+    assert "max_bytes (1024–65536)" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
+    assert "1024–65536" in help_of(capsys, "status")
+
+
+def test_download_says_file_is_a_file_id(capsys):
+    assert "file ID" in help_of(capsys, "download") and "file ID" in help_of(capsys)
+
+
+def test_write_help_retries_and_parent_revisions(capsys):
+    text = help_of(capsys, "write")
+    assert "contributes_to" in text and "TO@N" in text
+    assert "--request-id it printed" not in text  # --request takes no --request-id; the hint prints the retry
+    assert not [line for line in text.split("\n") if "kind=context" in line and "--propose" in line]
+
+
+def test_the_admin_example_gives_the_person_the_membership(capsys):
+    text = help_of(capsys, "admin")
+    assert '"member.set", "principal_id": "alice", "role"' in text and '"principal_id": "alice-agents", "role"' not in text
+
+
+def test_help_lines_stay_narrow(capsys):
+    for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
+        assert max(len(line) for line in text.split("\n")) <= 120
