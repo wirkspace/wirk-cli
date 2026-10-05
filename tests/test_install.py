@@ -91,21 +91,31 @@ packages = ["src/wirk_mcp"]
 
 
 def shims(tmp_path):
-    """claude and codex that record their calls and remember an MCP registration."""
+    """claude and codex that record their calls and keep a server named wirk the way the real ones do:
+    Claude Code's add refuses an existing user entry and its remove fails when there is none; Codex's add replaces."""
     shim_dir = tmp_path / "shims"
     shim_dir.mkdir(exist_ok=True)
-    for name in ("claude", "codex"):
+    for name, label, exists in (("claude", "Command", 'echo "MCP server wirk already exists in user config" >&2; exit 1'),
+                                ("codex", "command", ":")):
         shim = shim_dir / name
         shim.write_text(f"""#!/bin/sh
 echo "{name} $*" >> "{tmp_path}/calls"
+state="{tmp_path}/{name}-wirk"
 case "$*" in
-  "mcp get wirk") [ -f "{tmp_path}/{name}-registered" ] && exit 0 || exit 1 ;;
-  "mcp add"*) touch "{tmp_path}/{name}-registered" ;;
+  "mcp get wirk") [ -f "$state" ] && echo "  {label}: $(cat "$state")" && exit 0; exit 1 ;;
+  "mcp add"*" wirk -- "*) if [ -f "$state" ]; then {exists}; fi; all="$*"; printf '%s' "${{all##* -- }}" > "$state" ;;
+  "mcp remove"*" wirk") [ -f "$state" ] && rm "$state" && exit 0; [ {name} = codex ] && exit 0; exit 1 ;;
 esac
 exit 0
 """)
         shim.chmod(0o755)
     return str(shim_dir)
+
+
+def registered(tmp_path, host):
+    """The command a host would run for its server named wirk, or None."""
+    state = tmp_path / f"{host}-wirk"
+    return state.read_text() if state.exists() else None
 
 
 def service():
@@ -159,12 +169,68 @@ def test_a_real_install_from_verified_release_wheels_is_idempotent(tmp_path):
     assert ".whl" not in before_login and ".sums" not in before_login  # no download paths or commands
     assert "Their SHA-256 sums match" in before_login or "SHA-256 sums match the release" in before_login
     home = tmp_path / "home"
-    assert (home / ".claude" / "skills" / "wirk" / "SKILL.md").exists() and (home / ".codex" / "skills" / "wirk" / "SKILL.md").exists()
+    assert (home / ".claude" / "skills" / "wirk" / "SKILL.md").exists() and (home / ".agents" / "skills" / "wirk" / "SKILL.md").exists()
+    assert not (home / ".codex" / "skills").exists()  # Codex reads ~/.agents/skills too; one copy, not two
     second = install(tmp_path, base, "--url", url)
     server.shutdown()
     assert second.returncode == 0, second.stdout + second.stderr
-    assert "already installed" in second.stdout and "already has an MCP server named wirk" in second.stdout
-    assert (tmp_path / "calls").read_text().count("mcp add") == 2
+    assert "already installed" in second.stdout and "replacing" not in second.stdout
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{bin_dir}/wirk-mcp"
+    assert (tmp_path / "calls").read_text().count("mcp add") == 2  # a current registration is left as it is
+
+
+def earlier_install(tmp_path, codex_copy):
+    """What an earlier install left: registrations and skill links into an old deployment, which must stay as it was."""
+    old = tmp_path / "old-deployment"
+    (old / "skill").mkdir(parents=True)
+    (old / "skill" / "SKILL.md").write_text("old skill\n")
+    for host in ("claude", "codex"):
+        (tmp_path / f"{host}-wirk").write_text(f"{old}/.venv/bin/wirk-mcp")
+    home = tmp_path / "home"
+    (home / ".claude" / "skills").mkdir(parents=True)
+    (home / ".claude" / "skills" / "wirk").symlink_to(old / "skill")
+    codex = home / codex_copy
+    codex.parent.mkdir(parents=True)
+    if codex_copy == ".agents/skills/wirk":  # linked to the old folder
+        codex.symlink_to(old / "skill")
+    else:  # a real folder whose SKILL.md links to the old file
+        codex.mkdir()
+        (codex / "SKILL.md").symlink_to(old / "skill" / "SKILL.md")
+    return old, home
+
+
+@needs_uv
+@pytest.mark.parametrize("codex_copy", [".agents/skills/wirk", ".codex/skills/wirk"])
+def test_a_reinstall_replaces_what_an_earlier_install_left(tmp_path, codex_copy):
+    """An old registration and skill links into an old deployment are replaced; the old files stay as they were."""
+    url, server = service()
+    base = release(tmp_path)
+    old, home = earlier_install(tmp_path, codex_copy)
+    result = install(tmp_path, base, "--url", url)
+    server.shutdown()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{tmp_path}/bin/wirk-mcp"
+    assert result.stdout.count(f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp") == 2
+    release_skill = (base / "wirk-skill" / "releases" / "download" / f"v{VERSION}" / "SKILL.md").read_text()
+    for folder in (home / ".claude" / "skills" / "wirk", home / codex_copy):
+        assert not folder.is_symlink() and not (folder / "SKILL.md").is_symlink(), folder
+        assert (folder / "SKILL.md").read_text() == release_skill, folder
+    other = ".codex/skills/wirk" if codex_copy == ".agents/skills/wirk" else ".agents/skills/wirk"
+    assert not (home / other).exists()  # Codex lists each copy, so no second one is made
+    assert (old / "skill" / "SKILL.md").read_text() == "old skill\n"  # never written through a link
+
+
+def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
+    old, home = earlier_install(tmp_path, ".agents/skills/wirk")
+    result = subprocess.run(["sh", str(SCRIPT), "--dry-run"], capture_output=True, text=True, timeout=60,
+                            env={"HOME": str(home), "PATH": f"{shims(tmp_path)}:{basic_path(tmp_path)}"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp" in result.stdout
+    assert "would run: claude mcp remove --scope user wirk" in result.stdout
+    calls = (tmp_path / "calls").read_text()
+    assert "mcp add" not in calls and "mcp remove" not in calls
+    assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
+    assert (home / ".claude" / "skills" / "wirk").is_symlink() and (home / ".agents" / "skills" / "wirk").is_symlink()
 
 
 @needs_uv

@@ -8,7 +8,7 @@
 #
 # It installs uv if it is missing (after asking), installs the wirk command and the wirk-mcp server from the
 # release, checking their SHA-256 sums, sets up Claude Code and Codex when they are present (after asking), and
-# runs wirk login. It never uses sudo, and running it again is safe.
+# runs wirk login. It never uses sudo. Running it again is safe, and replaces an earlier wirk MCP server and skill.
 set -eu
 
 VERSION="${WIRK_VERSION:-0.4.0}"
@@ -96,26 +96,41 @@ else
 fi
 BIN=$("$UV" tool dir --bin 2> /dev/null || printf '%s' "$HOME/.local/bin")
 
-# the agent hosts on this machine: the MCP server and the WIRK skill
+put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier install left instead of writing through it
+  if [ -L "$1" ]; then quietly rm "$1"; fi
+  quietly mkdir -p "$1"
+  quietly rm -f "$1/SKILL.md"
+  quietly cp "$TMP/SKILL.md" "$1/SKILL.md"
+}
+
+# the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
 for host in claude codex; do
-  if [ "$host" = claude ]; then name="Claude Code"; add="claude mcp add --scope user"; else name="Codex"; add="codex mcp add"; fi
+  if [ "$host" = claude ]; then name="Claude Code"; scope="--scope user"; else name="Codex"; scope=""; fi
   if ! command -v "$host" > /dev/null 2>&1; then
     note "$name is not installed; skipped"
     continue
   fi
   if ! ask "Set up $name with the WIRK MCP server and skill?"; then
-    note "$name left as it is (later: $add wirk -- $BIN/wirk-mcp)"
+    note "$name left as it is (later: run this again)"
     continue
   fi
-  if [ "$DRY" -eq 0 ] && "$host" mcp get wirk > /dev/null 2>&1; then
-    note "$name already has an MCP server named wirk; left as it is"
-  else
-    # shellcheck disable=SC2086  # $add is two or three words on purpose
-    quietly $add wirk -- "$BIN/wirk-mcp"
+  was=$("$host" mcp get wirk 2> /dev/null | sed -n 's/^ *[Cc]ommand: //p' | head -n 1)
+  if [ "$was" != "$BIN/wirk-mcp" ]; then
+    if [ -n "$was" ]; then note "$name: replacing the wirk MCP server that ran $was"; fi
+    if [ -n "$was" ] && [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's add replaces
+    # shellcheck disable=SC2086  # $scope is zero or two words on purpose
+    quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
   fi
   if [ -z "${SKILL:-}" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
-  quietly mkdir -p "$HOME/.$host/skills/wirk"
-  quietly cp "$TMP/SKILL.md" "$HOME/.$host/skills/wirk/SKILL.md"
+  if [ "$host" = claude ]; then
+    put_skill "$HOME/.claude/skills/wirk"
+  else  # Codex reads both folders and lists each copy: refresh what an earlier install made, else use the shared one
+    made=""
+    for folder in "${CODEX_HOME:-$HOME/.codex}/skills/wirk" "$HOME/.agents/skills/wirk"; do
+      if [ -e "$folder" ] || [ -L "$folder" ]; then put_skill "$folder"; made=1; fi
+    done
+    if [ -z "$made" ]; then put_skill "$HOME/.agents/skills/wirk"; fi
+  fi
   ok "$name: the WIRK MCP server and skill"
 done
 
