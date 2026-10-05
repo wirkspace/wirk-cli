@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -175,9 +175,9 @@ def test_a_bad_checksum_stops_before_anything_is_installed(tmp_path):
     assert not (tmp_path / "bin" / "wirk").exists()
 
 
-def test_the_documented_command_is_the_sites_and_the_version_is_this_release():
-    command = "curl -fsSL https://wirk.life/install | sh"
-    for name in ("README.md", "install.sh", ".github/workflows/release.yml"):
-        assert command in (ROOT / name).read_text(), name
+def test_the_documented_install_leads_with_uv_and_the_version_is_this_release():
+    readme = (ROOT / "README.md").read_text()
+    assert "uv tool install wirk" in readme.split("## Use", 1)[0]
+    assert readme.index("uv tool install wirk") < readme.index("wirk login")
     project = (ROOT / "pyproject.toml").read_text()
     assert f'version = "{VERSION}"' in project and f'VERSION="${{WIRK_VERSION:-{VERSION}}}"' in SCRIPT.read_text()
