@@ -57,6 +57,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ## Changes
 
+### Next release
+
+- Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
+- After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
+
 ### 0.4.0
 
 - `wirk import github OWNER` brings a GitHub owner's issues into a wirkspace. Each issue becomes work, with its history as text, its comments in a linked doc and its raw record as a file, and running it again brings only what changed. Start with `--dry-run`; a person who administers the account applies the setup it prints. GitHub is only read, through your `gh` login. See `wirk import --help`.
