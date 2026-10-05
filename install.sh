@@ -83,15 +83,14 @@ fi
 # the wirk command and the wirk-mcp server
 CLI="wirk-$VERSION-py3-none-any.whl"
 MCP="wirk_mcp-$VERSION-py3-none-any.whl"
-installed() { [ "$DRY" -eq 0 ] && "$UV" tool list 2> /dev/null | grep -qx "$1 v$VERSION"; }
-if installed wirk && installed wirk-mcp; then
+WHEELS="${XDG_DATA_HOME:-$HOME/.local/share}/wirk/wheels"  # uv upgrades from where a tool came from: keep them there
+installed() { [ "$DRY" -eq 0 ] && [ -f "$WHEELS/$2" ] && "$UV" tool list 2> /dev/null | grep -qx "$1 v$VERSION"; }
+if installed wirk "$CLI" && installed wirk-mcp "$MCP"; then
   ok "wirk and wirk-mcp $VERSION are already installed"
 else
   fetch wirk-cli "$CLI"
   fetch wirk-mcp "$MCP"
   ok "Downloaded wirk and wirk-mcp $VERSION; their SHA-256 sums match the release"
-  # uv upgrades from where a tool came from, so the verified wheels stay where uv can find them again
-  WHEELS="${XDG_DATA_HOME:-$HOME/.local/share}/wirk/wheels"
   quietly mkdir -p "$WHEELS"
   quietly cp "$TMP/$CLI" "$TMP/$MCP" "$WHEELS/"
   quietly "$UV" tool install --force "$WHEELS/$CLI"

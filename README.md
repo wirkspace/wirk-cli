@@ -59,7 +59,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- The installer keeps the wheels it verified in `~/.local/share/wirk/wheels`, so `uv tool upgrade` no longer fails with "Distribution not found" after it.
+- The installer keeps the wheels it verified in `~/.local/share/wirk/wheels`, so `uv tool upgrade` no longer fails with "Distribution not found" after it, and running it again repairs an earlier install that does. It still pins the release: to update, run the installer again.
 - The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
 - Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
