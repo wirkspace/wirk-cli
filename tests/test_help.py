@@ -145,16 +145,19 @@ def test_one_version_everywhere():
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
+    """Decision 85: an agent whose role may review decides with its own token; a background agent only proposes."""
     text = help_of(capsys)
     assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
-    assert "only people decide proposals" in text.lower()
-    assert "wirk review ID@N accept --reason 'Why' --person" in text  # what your person runs at their own terminal
+    assert "\n  review ID@N accept --reason 'Why'  " in text and "only people" not in text.lower()
+    assert "a background agent only proposes" in text and "--person" not in text
 
 
-def test_review_help_says_agents_are_refused_and_how_a_person_decides(capsys):
+def test_review_help_says_who_decides_and_what_person_means(capsys):
     text = help_of(capsys, "review")
-    assert "person_required" in text and "wirk login --person" in text and "--reason 'Why' --person" in text
-    assert "not_authorized for its own" in text  # an agent's own proposal is refused before its kind is
+    assert "Anyone whose role may review decides" in text and "not_authorized: your role (editor) cannot review" in text
+    assert "person_required" not in text and "only people" not in text.lower() and "you proposed" not in text
+    assert "--person decides as yourself" in text and "wirk login --person" in text
+    assert [line for line in text.split("\n") if line.startswith("  review ") and "--person" in line] == []
 
 
 def test_show_help_says_it_is_not_live_yet(capsys):

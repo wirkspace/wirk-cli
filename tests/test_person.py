@@ -84,11 +84,9 @@ def test_at_a_terminal_only_the_exact_confirmation_proceeds(home, typed, decided
         assert code == 2 and seen == []
 
 
-def test_agent_help_names_the_persons_decision_and_nothing_else_of_theirs(run):
+def test_agent_help_names_nothing_of_the_persons(run):
     code, out, err, fake = run(["--help"])
-    person_lines = [line for line in out.split("\n") if "--person" in line]
-    assert person_lines and all("review" in line or "login" in line for line in person_lines)
-    assert "admin" not in out and "person-token" not in out
+    assert "--person" not in out and "admin" not in out and "person-token" not in out
 
 
 def serve_login():
