@@ -171,9 +171,21 @@ def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
     assert "basis_changed" in text and "quotation_mismatch" in text
 
 
+def changes() -> dict:
+    """The README's changelog: each section's heading (a version, or Next release) and its text."""
+    text = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
+    return dict(section.split("\n", 1) for section in text.split("\n### ")[1:])
+
+
 def test_the_readme_says_what_this_release_changed():
-    changes = (ROOT / "README.md").read_text().split("## Changes", 1)[1].split("\n## ", 1)[0]
-    assert f"### {__version__}" in changes and "wirk import github" in changes.split("\n### ", 2)[1]
+    assert "wirk import github" in changes()[__version__]
+
+
+def test_the_readme_says_what_the_next_release_changes():
+    """Decision 85's wording (#16) and the recovery hints (#13, #15) since 0.4.0."""
+    upcoming = changes()["Next release"]
+    assert "Anyone whose role may review decides" in upcoming and "--person" in upcoming
+    assert "run the same command again" in upcoming and "--json" in upcoming
 
 
 ALL = [*COMMANDS, "import"]
