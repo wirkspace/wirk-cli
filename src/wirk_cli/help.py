@@ -12,6 +12,7 @@ Start with: wirk status
   query status=open kind=work          list with filters; status shows the keys and values
   query kind=context                   the organization's context and its initiatives
   query proposal=proposed,deferred     proposals waiting for a decision
+  review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
   write new 'Title' --link related_to:ID          a doc; add kind=work for a task
   write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
@@ -21,8 +22,7 @@ Start with: wirk status
   login                                connect this machine to https://api.wirk.life
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
-Only people decide proposals: yours wait for a person, who decides at their own terminal with
-  wirk review ID@N accept --reason 'Why' --person      after making their token once: wirk login --person
+Decide proposals when your role may review; a background agent only proposes and never decides.
 
 Results are text; add --json for data. To run a result line "label: command", type wirk and what follows the colon.""",
         "status": """usage: wirk status [TASK WORDS] [task=… max_bytes=N workspace_id=ID] [--json]
@@ -88,13 +88,13 @@ its current revision.""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
-Only people decide proposals: an agent's review is refused (not_authorized for its own proposal,
-person_required for any other) and the proposal waits.
-A person decides at their own terminal, as themselves: wirk review ID@N accept --reason 'Why' --person,
-after making their token once with wirk login --person. It asks them to type the decision back.
+Anyone whose role may review decides: a person, or an agent working for one. Other roles are refused
+(not_authorized: your role (editor) cannot review). A background agent only proposes.
+--person decides as yourself, a person at your own terminal, with the token made once by
+wirk login --person; it asks you to type the decision back.
 
-  review c4a1e902@1 accept --reason 'Matches the agreed criteria' --person
-  review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test' --person""",
+  review c4a1e902@1 accept --reason 'Matches the agreed criteria'
+  review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test'""",
         "show": """usage: wirk show status | --file FILE | --revoke LINK [--no-open] [--json]
 
 Not live yet: api.wirk.life has no address for views and answers views_unavailable.

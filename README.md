@@ -29,7 +29,7 @@ wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py pass
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 
-Only people decide proposals: an agent's proposal waits for a person, who decides it with the commands under [For people](#for-people). A change to context (the organization and its initiatives) applies directly when you may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
+Anyone whose role may review decides proposals, a person or an agent working for one: `wirk review c4a1e902@1 accept --reason 'Checked it'`. A background agent only proposes. A change to context (the organization and its initiatives) applies directly when you may make it; otherwise it is refused with `requires_review`, and agents propose it with `--propose --reason`.
 
 `ID@N` names the revision you read (`rN` on a card), so a change never overwrites one you did not see. Results are text; `--json` gives the data. A result line `label: command` is the next command: type `wirk` and what follows the colon. After an uncertain result, run the same command again with the `--request-id` it printed; it applies once.
 
@@ -39,12 +39,12 @@ Agents work with their own token; a person keeps a second one for their own deci
 
 ```
 wirk login --person                                   make or check your own token
-wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide a proposal, as yourself
+wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide as yourself, not as your agent
 wirk admin show account                               what your account holds (administrators)
 wirk admin --request batch.json                       people, tokens, wirkspaces and fields (administrators)
 ```
 
-Agents never run them. The agent help, the skill and the MCP server name only the review command, so an agent can tell you how to decide what waits for you. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (only people decide proposals, nobody decides their own, and agents are never administrators).
+Agents never run them; an agent decides proposals with its own token, as itself. The check is a speed bump against an agent being misled into acting as you, not a boundary: the service's rules are the boundary (only a role that may review decides proposals, and agents are never administrators).
 
 ## What leaves your machine
 
