@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -178,6 +179,8 @@ def test_a_real_install_from_verified_release_wheels_is_idempotent(tmp_path):
     server.shutdown()
     assert second.returncode == 0, second.stdout + second.stderr
     assert "already installed" in second.stdout and "replacing" not in second.stdout
+    for tool, source in receipt_sources(tmp_path):  # uv upgrades from where it installed; that must outlive the installer
+        assert source.exists(), (tool, source)
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{bin_dir}/wirk-mcp"
     assert (tmp_path / "calls").read_text().count("mcp add") == 2  # a current registration is left as it is
 
@@ -252,6 +255,27 @@ def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
     assert "mcp add" not in calls and "mcp remove" not in calls
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
     assert (home / ".claude" / "skills" / "wirk").is_symlink() and (home / ".agents" / "skills" / "wirk").is_symlink()
+
+
+def receipt_sources(tmp_path):
+    """Where uv would look for each installed tool when upgrading it."""
+    for tool in ("wirk", "wirk-mcp"):
+        receipt = (tmp_path / "tools" / tool / "uv-receipt.toml").read_text()
+        for source in re.findall(r'(?:path|url|directory) = "([^"]+)"', receipt):
+            yield tool, Path(source.removeprefix("file://"))
+
+
+@needs_uv
+def test_a_rerun_repairs_an_install_whose_wheels_are_gone(tmp_path):
+    """An install made by an earlier installer points uv at wheels that no longer exist; running again repairs it."""
+    url, server = service()
+    base = release(tmp_path)
+    assert install(tmp_path, base, "--url", url).returncode == 0
+    shutil.rmtree(tmp_path / "home" / ".local" / "share" / "wirk" / "wheels")
+    again = install(tmp_path, base, "--url", url)
+    server.shutdown()
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert all(source.exists() for _, source in receipt_sources(tmp_path))
 
 
 @needs_uv
