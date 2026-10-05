@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -15,7 +16,8 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.4.0"
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+RELEASE = "0.4.1"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -49,10 +51,10 @@ def test_dry_run_prints_every_step_and_changes_nothing(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     out = result.stdout
     assert "https://astral.sh/uv/install.sh" in out
-    assert f"wirk-{VERSION}-py3-none-any.whl" in out and f"wirk_mcp-{VERSION}-py3-none-any.whl" in out
+    assert f"wirk-{RELEASE}-py3-none-any.whl" in out and f"wirk_mcp-{RELEASE}-py3-none-any.whl" in out
     assert "SHA256SUMS" in out and "wirk login" in out
     assert "Claude Code is not installed; skipped" in out and "Codex is not installed; skipped" in out
-    assert out.startswith(f"Installing WIRK {VERSION}\n(dry run: nothing will be changed)")
+    assert out.startswith(f"Installing WIRK {RELEASE}\n(dry run: nothing will be changed)")
     assert list(home.iterdir()) == []
 
 
@@ -148,7 +150,7 @@ def install(tmp_path, base, *extra, cwd=None):
     home.mkdir(exist_ok=True)
     uv = shutil.which("uv")
     env = {"HOME": str(home), "PATH": f"{shims(tmp_path)}:{os.path.dirname(uv)}:{basic_path(tmp_path)}",
-           "WIRK_RELEASE_BASE": f"file://{base}", "UV_TOOL_DIR": str(tmp_path / "tools"),
+           "WIRK_VERSION": VERSION, "WIRK_RELEASE_BASE": f"file://{base}", "UV_TOOL_DIR": str(tmp_path / "tools"),
            "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_PYTHON_PREFERENCE": "only-system", "UV_PYTHON": sys.executable}
     return subprocess.run(["sh", str(SCRIPT), "--yes", *extra], capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
 
@@ -286,9 +288,8 @@ def test_a_bad_checksum_stops_before_anything_is_installed(tmp_path):
     assert not (tmp_path / "bin" / "wirk").exists()
 
 
-def test_the_documented_command_is_the_sites_and_the_version_is_this_release():
+def test_documented_installer_pins_the_published_release():
     command = "curl -fsSL https://wirk.life/install | sh"
     for name in ("README.md", "install.sh", ".github/workflows/release.yml"):
         assert command in (ROOT / name).read_text(), name
-    project = (ROOT / "pyproject.toml").read_text()
-    assert f'version = "{VERSION}"' in project and f'VERSION="${{WIRK_VERSION:-{VERSION}}}"' in SCRIPT.read_text()
+    assert f'VERSION="${{WIRK_VERSION:-{RELEASE}}}"' in SCRIPT.read_text()

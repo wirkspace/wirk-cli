@@ -59,10 +59,15 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- The installer keeps the wheels it verified in `~/.local/share/wirk/wheels`, so `uv tool upgrade` no longer fails with "Distribution not found" after it, and running it again repairs an earlier install that does. It still pins the release: to update, run the installer again.
-- The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
-- Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
+Main is `0.4.2.dev0` and is unreleased. The published `0.4.1` tag is a narrow guidance patch based on `0.4.0`; Linear/Jira importers and other implementation changes on main are not in that release.
+
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
+
+### 0.4.1
+
+- Project catch-ups start from WIRK and linked records, with direct MCP preferred when available. Read-only catch-ups do not claim or change work; focused checks can verify stale or conflicting evidence.
+- Help reflects the current service: people and personal agents whose role may review can decide proposals. Background agents only propose. Meaning ranking is available on Pro; other plans rank by words.
+- The installer replaces stale MCP registrations and skills, without writing through skill symlinks. Verified wheels stay in `~/.local/share/wirk/wheels` so reinstalling can repair earlier temporary origins. Rerun the installer to update the pinned release.
 
 ### 0.4.0
 
