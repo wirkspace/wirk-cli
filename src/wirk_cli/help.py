@@ -66,7 +66,7 @@ Links lists the item's own links (links_out, a list); Linked from groups the lin
   every form also takes --reason TEXT, --propose, --request-id ID and --json
 
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a doc linked to wirk
-  write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e@7
+  write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
   write new 'Plan' kind=context level=initiative --body-file plan.md
@@ -89,8 +89,8 @@ Every result names the IDs it created. After an uncertain result, run the comman
   {"op": "link.remove", "id": LINK_ID}
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
 expect holds the rN you read of every existing item you edit, archive or link from, and of the parent
-work of a contributes_to link (give it as TO@N); one left out is refused as basis_changed, naming
-its current revision.""",
+work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link); one left
+out is refused as basis_changed, naming its current revision.""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.

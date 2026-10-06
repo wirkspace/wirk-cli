@@ -417,25 +417,23 @@ COMMANDS = {"status": status, "query": query, "write": write, "review": review, 
 def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     command, words = (argv[0], argv[1:]) if argv and not argv[0].startswith("-") else ("", argv)
-    if command in RETIRED:
-        print(f"wirk {command} is gone; use: {RETIRED[command]}", file=sys.stderr)
-        return 2
-    if command and command not in COMMANDS:
-        print(f"wirk: unknown command {command}; see wirk --help", file=sys.stderr)
-        return 2
-    if words == ["--version"] and not command:
-        print(f"wirk {__version__}")
-        return 0
-    if not command or "--help" in words or "-h" in words:
-        print(HELP[command])
-        return 0
     try:
+        if command in RETIRED:
+            raise Failure("invalid_input", f"wirk {command} is gone", f"Use: {RETIRED[command]}", 2)
+        if command and command not in COMMANDS:
+            raise Failure("invalid_input", f"unknown command {command}", "See: wirk --help", 2)
+        if words == ["--version"] and not command:
+            print(f"wirk {__version__}")
+            return 0
+        if not command or "--help" in words or "-h" in words:
+            print(HELP[command])
+            return 0
         positionals, options = parse(words, FLAGS[command])
         return COMMANDS[command](positionals, options, transport)
-    except UsageError as error:
-        print(f"wirk {command}: {error}", file=sys.stderr)
-        return 2
-    except Failure as failure:
-        print(json.dumps(failure.envelope()) if "--json" in words else failure.text(),
-              file=sys.stdout if "--json" in words else sys.stderr)
-        return failure.exit_code
+    except UsageError as error:  # said as the client's other errors are, with exit 2
+        failure = Failure("invalid_input", str(error), f"See: wirk {command} --help", 2)
+    except Failure as error:
+        failure = error
+    print(json.dumps(failure.envelope()) if "--json" in words else failure.text(),
+          file=sys.stdout if "--json" in words else sys.stderr)
+    return failure.exit_code

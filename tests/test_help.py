@@ -214,6 +214,15 @@ def test_write_help_retries_and_parent_revisions(capsys):
     assert not [line for line in text.split("\n") if "kind=context" in line and "--propose" in line]
 
 
+def test_write_help_teaches_one_link_form(capsys):
+    """WIRK 63fefe7c: the example links without @N, as write.md does; one clause says when @N matters."""
+    text = help_of(capsys, "write")
+    assert re.search(r"--link contributes_to:[0-9a-f]+  under an initiative", text)
+    assert not re.search(r"--link \w+:[0-9a-f]+@", text)
+    assert ("parent work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link)"
+            in " ".join(text.split()))
+
+
 def test_the_admin_example_gives_the_person_the_membership(capsys):
     text = help_of(capsys, "admin")
     assert '"member.set", "principal_id": "alice", "role"' in text and '"principal_id": "alice-agents", "role"' not in text
