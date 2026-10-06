@@ -42,7 +42,9 @@ def main(words: list, options: dict, transport=None) -> int:
 
 
 def problem(stop: Exception) -> dict:
-    return {"code": getattr(stop, "code", None) or "import_stopped", "count": 1, "message": str(stop)}
+    hint = getattr(stop, "fix", None) or getattr(stop, "hint", None)  # our Stop's fix, or WIRK's or the client's hint
+    return {"code": getattr(stop, "code", None) or "import_stopped", "count": 1, "message": str(stop),
+            **({"hint": hint} if hint else {})}
 
 
 def errors_of(outcomes: list) -> list:
@@ -58,8 +60,8 @@ def errors_of(outcomes: list) -> list:
 
 def tell(stop: Exception) -> None:
     """Why the run stopped: our Stop, WIRK's refusal or the client's failure, with what helps."""
-    code, fix = getattr(stop, "code", None), getattr(stop, "fix", None) or getattr(stop, "hint", None)
-    print(f"Error import: {f'{code}: ' if code else ''}{stop}" + (f"\n  {fix}" if fix else ""), file=sys.stderr)
+    code, hint = getattr(stop, "code", None), problem(stop).get("hint")
+    print(f"Error import: {f'{code}: ' if code else ''}{stop}" + (f"\n  {hint}" if hint else ""), file=sys.stderr)
 
 
 class Run:
