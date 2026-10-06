@@ -199,7 +199,7 @@ def test_ranking_by_meaning_always_names_pro(capsys):
 
 
 def test_budgets_state_their_range(capsys):
-    assert "max_bytes (1024–65536)" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
+    assert "max_bytes (1024–65536;" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
     assert "1024–65536" in help_of(capsys, "status")
 
 
@@ -222,3 +222,13 @@ def test_the_admin_example_gives_the_person_the_membership(capsys):
 def test_help_lines_stay_narrow(capsys):
     for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
         assert max(len(line) for line in text.split("\n")) <= 120
+
+
+def test_query_help_states_the_budget_and_what_a_read_leaves_out(capsys):
+    """wirk-core #36: the defaults and range of max_bytes, the three signals of a partial read and the two link shapes."""
+    text = " ".join(help_of(capsys, "query").split())
+    assert "max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all)" in text
+    for signal in ("page.complete", "body_complete", "left_out", "Left out for the budget", "not shown", "more:"):
+        assert signal in text, signal
+    for shape in ("links_out", "links_in", "by_status", "at most 5 entries", "query linked=ID"):
+        assert shape in text, shape
