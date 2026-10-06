@@ -417,22 +417,22 @@ COMMANDS = {"status": status, "query": query, "write": write, "review": review, 
 def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     command, words = (argv[0], argv[1:]) if argv and not argv[0].startswith("-") else ("", argv)
-    if words == ["--version"] and not command:
-        print(f"wirk {__version__}")
-        return 0
-    if command in COMMANDS and ("--help" in words or "-h" in words) or not command:
-        print(HELP[command])
-        return 0
     try:
         if command in RETIRED:
             raise UsageError(f"wirk {command} is gone; use: {RETIRED[command]}")
-        if command not in COMMANDS:
+        if command and command not in COMMANDS:
             raise UsageError(f"unknown command {command}")
+        if words == ["--version"] and not command:
+            print(f"wirk {__version__}")
+            return 0
+        if not command or "--help" in words or "-h" in words:
+            print(HELP[command])
+            return 0
         positionals, options = parse(words, FLAGS[command])
         return COMMANDS[command](positionals, options, transport)
-    except UsageError as error:  # the client's own error, as every other one is said, with exit 2: nothing was sent
-        failure = Failure("invalid_input", str(error), f"See: wirk {command} --help" if command in COMMANDS else
-                          "See: wirk --help", 2)
+    except UsageError as error:  # said as the client's other errors are; exit 2, since nothing was sent
+        failure = Failure("invalid_input", str(error), f"See: wirk {command} --help" if command in COMMANDS
+                          else "See: wirk --help", 2)
     except Failure as error:
         failure = error
     print(json.dumps(failure.envelope()) if "--json" in words else failure.text(),
