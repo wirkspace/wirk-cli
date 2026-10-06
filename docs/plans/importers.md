@@ -106,7 +106,7 @@ If the person skips the field operations, the import still runs with the fields 
 
 ### 2.3 Output and exit status
 
-Text output is a summary, then one line per object whose outcome needs attention: `skipped: …`, `blocked: …`, `ambiguous`, `missing in GitHub: …`, `error: …`, duplicates allowed, link fallbacks and unlinks. Routine `created`, `updated` and `current` outcomes are counted, not listed, because 4,000 lines would flood an agent's context. More than 50 such lines end with a count and the `--json` hint. Errors are also summed up once per code, `errors: 146 files_unavailable: …`; with `--json`, any error or stop makes `ok` false and fills the top-level `errors` with each code, its count and its first message. `--json` gives every outcome. A long run prints progress to standard error every 100 issues.
+Text output is a summary, then one line per object whose outcome needs attention: `skipped: …`, `blocked: …`, `ambiguous`, `missing in GitHub: …`, `error: …`, duplicates allowed, link fallbacks and unlinks. Routine `created`, `updated` and `current` outcomes are counted, not listed, because 4,000 lines would flood an agent's context. More than 50 such lines end with a count and the `--json` hint. Errors are also summed up once per code, `errors: 146 files_unavailable: …`; with `--json`, any error or stop makes `ok` false and fills the top-level `errors` with each code, its count and its first message; a stop's error also carries its `hint` when it has one. `--json` gives every outcome. A long run prints progress to standard error every 100 issues.
 
 ```
 GitHub Acme → wirkspace Acme (1a2b3c4d) as alice-github-import (agent of alice)
