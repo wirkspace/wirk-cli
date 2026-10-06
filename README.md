@@ -63,6 +63,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 - The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
 - Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
+- When `wirk import` stops on WIRK's refusal, it keeps WIRK's hint: on the line after the error, as `wirk query` prints it, and with `--json` as the error's `hint`, the optional key other commands' errors already carry.
 - `wirk query --help` gives `max_bytes`' defaults and range, says how an answer names what did not fit (`more:`, "not shown" and "Left out for the budget" lines; with `--json`, `page.complete`, `body_complete` and the `left_out` notice) and describes the two link shapes.
 
 ### 0.4.0
