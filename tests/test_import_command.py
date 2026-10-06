@@ -172,11 +172,14 @@ def test_without_file_storage_nothing_is_read_or_written_and_the_person_is_told_
 def test_file_storage_lost_during_a_run_stops_it_once(world):
     world["run"]("github", "acme", "--dry-run")
     register(world)
-    world["fake"].files = lambda body: refusal("files_unavailable", "No file store is configured", 503)
+    hint = "ask your WIRK administrator to make file storage available"
+    world["fake"].files = lambda body: refusal("files_unavailable", "No file store is configured", 503, hint=hint)
     code, out, err = world["run"]("github", "acme", "--json")
     answer = json.loads(out)
-    assert code == 2 and not answer["ok"] and answer["errors"][0]["code"] == "files_unavailable"
+    assert code == 2 and not answer["ok"] and answer["errors"][0] == {
+        "code": "files_unavailable", "count": 1, "message": "No file store is configured", "hint": hint}
     assert not any(o["outcome"] == "error" for o in answer["data"]["outcomes"])
+    assert err.endswith(f"Error import: files_unavailable: No file store is configured\n  {hint}\n")
 
 
 def test_when_every_issue_errors_the_json_names_the_error_once_with_its_count(world):
@@ -317,8 +320,19 @@ def test_a_refused_status_stops_with_wirks_hint_in_text_and_json(world):
     told = "Error import: Workspace is unavailable\n  wirk status names the wirkspaces you can reach\n"
     assert world["run"]("github", "acme", "--dry-run") == (2, "", told)
     code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
-    assert (code, err) == (2, told) and json.loads(out) == {
-        "ok": False, "data": {}, "errors": [{"code": "import_stopped", "count": 1, "message": "Workspace is unavailable"}]}
+    assert (code, err) == (2, told) and json.loads(out) == {"ok": False, "data": {}, "errors": [
+        {"code": "import_stopped", "count": 1, "message": "Workspace is unavailable",
+         "hint": "wirk status names the wirkspaces you can reach"}]}
+
+
+def test_a_refused_read_stops_with_wirks_code_and_hint_in_text_and_json(world):
+    hint = "wirk status names the wirkspaces you can reach"
+    world["fake"].query = lambda body: refusal("not_available", "Workspace is unavailable", 404, hint=hint)
+    told = f"Error import: not_available: Workspace is unavailable\n  {hint}\n"
+    assert world["run"]("github", "acme", "--dry-run") == (2, "", told)
+    code, out, err = world["run"]("github", "acme", "--dry-run", "--json")
+    assert (code, err) == (2, told) and json.loads(out) == {"ok": False, "data": {}, "errors": [
+        {"code": "not_available", "count": 1, "message": "Workspace is unavailable", "hint": hint}]}
 
 
 def test_a_status_the_wirkspace_lacks_passes_once_the_map_names_one_it_has(world):
@@ -402,6 +416,8 @@ def test_an_empty_workspace_id_is_sent_as_given_so_wirk_refuses_it(world):
     code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run")
     assert (code, out, err) == (2, "", "Error import: Workspace is unavailable\n")
     assert [body for route, body in world["fake"].requests] == [{"format": "json", "max_bytes": 1024, "workspace_id": ""}]
+    code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run", "--json")  # no hint, no hint key
+    assert json.loads(out)["errors"] == [{"code": "import_stopped", "count": 1, "message": "Workspace is unavailable"}]
 
 
 @pytest.mark.parametrize("which, source", [("linear_world", "Linear"), ("jira_world", "Jira")])

@@ -19,7 +19,7 @@ KEYED = re.compile(r"\[((?:\\.|[^\]\\])*)\]")  # a key in brackets, a ] inside i
 class WirkError(Exception):
     def __init__(self, problem: dict):
         super().__init__(problem.get("message", ""))
-        self.code, self.problem = problem.get("code", "error"), problem
+        self.code, self.hint = problem.get("code", "error"), problem.get("hint")
 
 
 class NotMember(Exception):
