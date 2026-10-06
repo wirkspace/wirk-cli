@@ -199,7 +199,7 @@ def test_ranking_by_meaning_always_names_pro(capsys):
 
 
 def test_budgets_state_their_range(capsys):
-    assert "max_bytes (1024–65536)" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
+    assert "max_bytes (1024–65536;" in help_of(capsys, "query") and "limit (1–100" in help_of(capsys, "query")
     assert "1024–65536" in help_of(capsys, "status")
 
 

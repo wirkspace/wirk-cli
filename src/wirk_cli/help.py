@@ -47,10 +47,16 @@ Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys yo
   query kind=context state=active      active initiatives
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
 
-Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), max_bytes (1024–65536),
-cursor, workspace_id.
+Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
+max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all).
 Every other KEY=VALUE is a filter; status lists the filters and their values.
-Quote a title or words with spaces. A result line "label: command" is the next command to run.""",
+Quote a title or words with spaces. A result line "label: command" is the next command to run.
+
+What did not fit is named: a cut body ends with … and its own more: line, blocks on a "not shown" line,
+refs shown as cards only on a "Left out for the budget" line. With --json, page.complete is false until
+all is read, body_complete covers the body alone, and a left_out notice names those refs.
+Links lists the item's own links (links_out, a list); Linked from groups the links to it by type
+(links_in: a count, by_status and at most 5 entries); query linked=ID lists them all.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--allow-duplicate-of ID]…
        wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
