@@ -65,6 +65,8 @@ There is no telemetry. People keep a separate token of their own for their own d
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
 - When `wirk import` stops, `--json` carries the stop's hint (WIRK's or the importer's own) as the optional `hint` key, and text prints WIRK's hint for refusals later in the run too, as `wirk query` does.
 - `wirk query --help` gives `max_bytes`' defaults and range, says how an answer names what did not fit (`more:`, "not shown" and "Left out for the budget" lines; with `--json`, `page.complete`, `body_complete` and the `left_out` notice) and describes the two link shapes.
+- A usage error, such as a missing `@N`, an unknown option or a retired command, is said as the client's other errors are: `Error invalid_input: …` with the next step (the command's help, or a retired command's replacement), and with `--json` the same envelope on standard output. It still exits 2 and sends nothing.
+- `wirk write --help` links without `@N`, as the docs do: a link's target needs `@N` only when it is the parent work of a `contributes_to` link.
 
 ### 0.4.0
 
