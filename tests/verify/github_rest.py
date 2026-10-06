@@ -53,7 +53,7 @@ class Wirk:
         while True:
             answer = self.post("/v2/query", body)
             yield from answer["data"]["cards"]
-            if answer["page"]["complete"]:
+            if answer["page"]["complete"] or not answer["page"]["next_cursor"]:  # incomplete with nothing to continue
                 return
             body["cursor"] = answer["page"]["next_cursor"]
 
