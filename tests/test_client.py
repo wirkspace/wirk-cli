@@ -119,6 +119,26 @@ def test_the_json_form_of_a_client_failure_is_an_envelope_on_stdout(run):
     assert code == 1 and problem["code"] == "service_unavailable" and URL in problem["message"]
 
 
+@pytest.mark.parametrize("argv, message, help_of", [
+    (["write", "edit", "5c1e7a90", "status=done"], "write edit needs the revision you read, 5c1e7a90@N", "write"),
+    (["query", "5c1e7a90", "--bogus"], "unknown option --bogus", "query"),
+    (["status", "colour=blue"], "status takes no filters (colour)", "status"),
+    (["import", "gitlab", "acme"], "import takes github", "import"),
+    (["frobnicate"], "unknown command frobnicate", ""),
+    (["read", "5c1e7a90"], "wirk read is gone; use: wirk query ID", ""),
+])
+def test_a_usage_error_is_the_client_envelope_and_exits_2(run, argv, message, help_of):
+    """The form every client error has, in text and with --json; the hint is the command's help. Nothing is sent."""
+    see = f"See: wirk {help_of} --help".replace("  ", " ")
+    code, out, err, fake = run([*argv, "--json"])
+    assert (code, err, fake.requests) == (2, "", [])
+    problem = json.loads(out)["errors"][0]
+    assert json.loads(out) == {"ok": False, "errors": [{"code": "invalid_input", "message": problem["message"], "hint": see}]}
+    assert problem["message"].startswith(message)
+    code, out, err, fake = run(argv)
+    assert (code, out, err, fake.requests) == (2, "", f"Error invalid_input: {problem['message']}\n  {see}\n", [])
+
+
 @pytest.mark.parametrize("status, location", [(301, "https://elsewhere.test/v2/status"), (302, "https://x.test/"),
                                               (307, "https://x.test/"), (308, "https://x.test/")])
 def test_redirects_are_never_followed(run, status, location):
