@@ -4,21 +4,28 @@
 
 ## Install and connect
 
-One command, on macOS or Linux:
+Install the CLI from PyPI with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```
-curl -fsSL https://wirk.life/install | sh
+uv tool install wirk
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+This installs the `wirk` command. It requires Python 3.12 or later. If you need uv, use `brew install uv` with Homebrew or `pipx install uv`. If your shell cannot find `wirk`, follow the PATH guidance uv prints.
+
+Then authorize this machine and check the connection:
+
+```
+wirk login
+wirk status
+```
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and asks WIRK to approve the machine: open the link it prints, sign in and approve. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
-By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
+MCP and the agent skill are separate setup steps. Install and register [wirk-mcp](https://github.com/wirkspace/wirk-mcp#install) if your agent uses MCP, then add the [WIRK skill](https://github.com/wirkspace/wirk-skill#install). An agent with a shell can use the CLI directly. See [Getting started](https://wirk.life/docs/getting-started/) for account setup, Claude Code and Codex instructions.
 
 ## Use
 
-Start with `wirk status`. `wirk --help` lists every command with an example you can run as printed.
+Start with `wirk status`. `wirk --help` lists commands and examples. Replace placeholders and sample item IDs, revisions and file paths with the values for your work.
 
 ```
 wirk status 'fix the webhook retries'          who you are, your wirk, what needs you, and what matters for the task
@@ -57,7 +64,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ## Changes
 
-### Next release
+### 0.4.1
 
 - The installer keeps the wheels it verified in `~/.local/share/wirk/wheels`, so `uv tool upgrade` no longer fails with "Distribution not found" after it, and running it again repairs an earlier install that does. It still pins the release: to update, run the installer again.
 - The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
