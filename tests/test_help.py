@@ -217,8 +217,10 @@ def test_write_help_retries_and_parent_revisions(capsys):
 def test_write_help_teaches_one_link_form(capsys):
     """WIRK 63fefe7c: the example links without @N, as write.md does; one clause says when @N matters."""
     text = help_of(capsys, "write")
-    assert re.search(r"--link contributes_to:[0-9a-f]+\s", text) and not re.search(r"--link \w+:[0-9a-f]+@", text)
-    assert "parent work of a contributes_to link (TO@N, or contributes_to:ID@N with --link)" in " ".join(text.split())
+    assert re.search(r"--link contributes_to:[0-9a-f]+  under an initiative", text)
+    assert not re.search(r"--link \w+:[0-9a-f]+@", text)
+    assert ("parent work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link)"
+            in " ".join(text.split()))
 
 
 def test_the_admin_example_gives_the_person_the_membership(capsys):
