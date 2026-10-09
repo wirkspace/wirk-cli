@@ -288,7 +288,7 @@ def test_a_bad_checksum_stops_before_anything_is_installed(tmp_path):
 
 def test_the_documented_command_is_the_sites_and_the_version_is_this_release():
     command = "curl -fsSL https://wirk.life/install | sh"
-    for name in ("README.md", "install.sh", ".github/workflows/release.yml"):
+    for name in ("README.md", "install.sh", "scripts/release_assets.py"):
         assert command in (ROOT / name).read_text(), name
     project = (ROOT / "pyproject.toml").read_text()
     assert f'version = "{VERSION}"' in project and f'VERSION="${{WIRK_VERSION:-{VERSION}}}"' in SCRIPT.read_text()

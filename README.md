@@ -84,7 +84,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ## Releasing
 
-A `v*` tag that matches the version in `pyproject.toml` runs the release workflow: tests, the wheel and the sdist, a GitHub Release with `SHA256SUMS`, and PyPI through trusted publishing. The PyPI step stays off until the `wirk` project on PyPI has this repository's `release.yml` and its `pypi` environment as a trusted publisher and the repository variable `PYPI_PUBLISH` is `true`. No token is stored anywhere.
+Select the exact reviewed commits for a client release set, then push their matching `vMAJOR.MINOR.PATCH` tags. Tag selection is the approval step; publication never selects a new main revision. Each repository tests and builds its tagged source. The shared publication workflow first checks the remote tag's commit, retains identical existing assets, uploads missing ones, and refuses to overwrite different bytes. New GitHub releases remain prereleases until their anonymous public downloads match the build and an isolated installation passes. MCP waits up to ten minutes for its matching CLI wheel on GitHub and PyPI before testing.
+
+PyPI follows GitHub qualification through trusted publishing. This step stays off until the `wirk` project on PyPI has this repository's `release.yml` and its `pypi` environment as a trusted publisher and `PYPI_PUBLISH` is `true`. Retries skip existing distributions only after verifying their actual bytes. Failures remain visible in Actions; rerun failed jobs to reuse successful build artifacts. A rebuilt artifact with different bytes fails safely and needs investigation. No stored publishing token is needed.
+
+The Release workflow's manual `verify_tag` run qualifies an existing public version without publishing or moving tags. Publication does not update clients already installed on someone's machine; rerun the installer to update them.
 
 ## License
 
