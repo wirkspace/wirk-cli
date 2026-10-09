@@ -1,0 +1,62 @@
+name: Publish reviewed client assets
+on:
+  workflow_call:
+    inputs:
+      kind:
+        required: true
+        type: string
+      verify_tag:
+        description: An existing version tag to qualify without publication
+        default: ''
+        type: string
+jobs:
+  publish:
+    if: ${{ inputs.verify_tag == '' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Inherit the caller's contents permission; do not elevate read-only verification calls.
+    env:
+      RELEASE_KIND: ${{ inputs.kind }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist
+      - name: Reconcile only identical assets on the reviewed tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_assets.py publish --kind "$RELEASE_KIND" --tag "$GITHUB_REF_NAME"
+      - name: Qualify actual public bytes and an isolated public installation
+        run: python scripts/release_assets.py qualify --kind "$RELEASE_KIND" --tag "$GITHUB_REF_NAME"
+      - name: Promote the qualified GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_assets.py promote --kind "$RELEASE_KIND" --tag "$GITHUB_REF_NAME"
+  verify:
+    if: ${{ inputs.verify_tag != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      RELEASE_KIND: ${{ inputs.kind }}
+      VERIFY_TAG: ${{ inputs.verify_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Verify an existing public release without writes
+        run: python scripts/release_assets.py verify --kind "$RELEASE_KIND" --tag "$VERIFY_TAG"
