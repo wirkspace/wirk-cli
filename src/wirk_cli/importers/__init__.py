@@ -34,7 +34,7 @@ def main(words: list, options: dict, transport=None) -> int:
         return 0
     try:
         return Run(words, options, transport).go()
-    except (Stop, wirk.WirkError) as stop:
+    except (Stop, wirk.WirkError, Failure) as stop:
         if options.get("--json"):
             print(json.dumps({"ok": False, "data": {}, "errors": [problem(stop)]}, ensure_ascii=False))
         tell(stop)
