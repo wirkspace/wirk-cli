@@ -250,4 +250,5 @@ def test_help_names_messages_and_their_two_operations(capsys):
     assert "query kind=message linked=" in query_help and "inbox=me" in query_help and "participant=" in query_help
     write_help = help_of(capsys, "write")
     assert '{"op": "message.send", "ref": "m", "data": {"body", "title", "to": [PRINCIPAL_ID], "reply_to", "uploads"}}' in write_help
-    assert '{"op": "message.acknowledge", "messages": [ID]}' in write_help and "neither is proposed" in write_help
+    assert '{"op": "message.acknowledge", "messages": [ID]}' in write_help and "received, not agreed" in write_help
+    assert 'a reply notifies only its "to"' in write_help
