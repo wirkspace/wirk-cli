@@ -241,3 +241,13 @@ def test_query_help_states_the_budget_and_what_a_read_leaves_out(capsys):
         assert signal in text, signal
     for shape in ("links_out", "links_in", "by_status", "at most 5 entries", "query linked=ID"):
         assert shape in text, shape
+
+
+def test_help_names_messages_and_their_two_operations(capsys):
+    """docs/plans/messaging.md §8: the inbox, the board query and the two write operations, with nothing new to type."""
+    assert "query inbox=me" in help_of(capsys) and "message.send" in help_of(capsys)
+    query_help = help_of(capsys, "query")
+    assert "query kind=message linked=" in query_help and "inbox=me" in query_help and "participant=" in query_help
+    write_help = help_of(capsys, "write")
+    assert '{"op": "message.send", "ref": "m", "data": {"body", "title", "to": [PRINCIPAL_ID], "reply_to", "uploads"}}' in write_help
+    assert '{"op": "message.acknowledge", "messages": [ID]}' in write_help and "neither is proposed" in write_help
