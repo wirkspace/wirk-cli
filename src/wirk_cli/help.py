@@ -19,8 +19,7 @@ Start with: wirk status
   write message --on ID --body 'Ready'            a message on an item's board; --to ID addresses someone
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
-  upload PATH                          store a file and print how to attach it
-  download ITEM FILE                   save a stored file; FILE is its file ID
+  upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
   login                                connect this machine to https://api.wirk.life
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
