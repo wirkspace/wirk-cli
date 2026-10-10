@@ -61,6 +61,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.5
+
+- `wirk write message --on ITEM --body TEXT` posts a message on an item's board (`--to ID` addresses someone, `--reply-to ID` answers, `--title` and `--body-file` as for records), and `wirk write seen ID…` marks messages seen, so sending and acknowledging need no JSON; the service's footer names `write seen` for what you acted on.
+- `wirk show --help` says hosted views are live: the link comes first, a page expires after 24 hours or when revoked, and a service without views answers `views_unavailable`; the main help lists `show status`, and `upload` and `download` share a line.
+
 ### 0.4.4
 
 - If WIRK becomes unreachable while an import starts, the importer reports its stop with the original error and hint and exits 2.

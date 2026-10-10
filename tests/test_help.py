@@ -184,6 +184,11 @@ def test_the_readme_says_what_this_release_changed():
     assert "inbox=me" in released and "message.send" in released and "message.acknowledge" in released
 
 
+def test_the_readme_says_what_0_4_5_changed():
+    released = changes()["0.4.5"]
+    assert "write message" in released and "write seen" in released and "show status" in released
+
+
 def test_the_readme_describes_the_importer_fix_in_0_4_4():
     assert "If WIRK becomes unreachable while an import starts" in changes()["0.4.4"]
 
