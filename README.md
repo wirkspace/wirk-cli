@@ -59,7 +59,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- Messages: `wirk --help`, `wirk query --help` and `wirk write --help` name `query inbox=me`, the `kind=message`, `inbox` and `participant` filters, and the `message.send` and `message.acknowledge` operations of `wirk write --request`. Answers end with the messages waiting for you, as the service writes them; with `--json`, `notifications` is printed last. Needs a service with messages.
 
 ### 0.4.2
 
