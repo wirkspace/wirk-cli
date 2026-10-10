@@ -11,7 +11,7 @@
 # runs wirk login. It never uses sudo. Running it again is safe, and replaces an earlier wirk MCP server and skill.
 set -eu
 
-VERSION="${WIRK_VERSION:-0.4.6}"
+VERSION="${WIRK_VERSION:-0.4.7}"
 BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the releases live; a mirror or a test may change it
 DRY=0
 YES=0
