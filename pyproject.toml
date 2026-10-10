@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wirk"
-version = "0.4.5"
+version = "0.4.6"
 description = "The wirk command: status, query, write and review for people and agents in a WIRK wirkspace"
 readme = "README.md"
 license = "Apache-2.0"
