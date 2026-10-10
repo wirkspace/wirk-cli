@@ -65,7 +65,7 @@ def test_help_is_fast():
     assert sorted(times)[2] < 0.5  # a cold interpreter included; the CLI's own share is measured in the record
 
 
-WORDING = [r"\bworkspace\b(?!_id|-id)", r"\bwork item", r"kind=wirk", r"· wirk ·", r"\bsteward", r"\bnote\b(?= kind)"]
+WORDING = [r"\bworkspace\b(?!_id|-id)", r"\bwork item", r"kind=wirk", r"· wirk ·", r"\bsteward", r"\bnote\b(?= kind)", r"\bdoc\b"]
 
 
 def agent_text(capsys):

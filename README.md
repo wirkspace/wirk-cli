@@ -67,10 +67,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 - `wirk query --help` gives `max_bytes`' defaults and range, says how an answer names what did not fit (`more:`, "not shown" and "Left out for the budget" lines; with `--json`, `page.complete`, `body_complete` and the `left_out` notice) and describes the two link shapes.
 - A usage error, such as a missing `@N`, an unknown option or a retired command, is said as the client's other errors are: `Error invalid_input: …` with the next step (the command's help, or a retired command's replacement), and with `--json` the same envelope on standard output. It still exits 2 and sends nothing.
 - `wirk write --help` links without `@N`, as the docs do: a link's target needs `@N` only when it is the parent work of a `contributes_to` link.
+- An item that is not work, a context or a folder is a record (decision 89): `wirk write --help` says `kind=work|record|context`, and `wirk query kind=record` lists them.
 
 ### 0.4.0
 
-- `wirk import github OWNER` brings a GitHub owner's issues into a wirkspace. Each issue becomes work, with its history as text, its comments in a linked doc and its raw record as a file, and running it again brings only what changed. Start with `--dry-run`; a person who administers the account applies the setup it prints. GitHub is only read, through your `gh` login. See `wirk import --help`.
+- `wirk import github OWNER` brings a GitHub owner's issues into a wirkspace. Each issue becomes work, with its history as text, its comments in a linked record and its raw record as a file, and running it again brings only what changed. Start with `--dry-run`; a person who administers the account applies the setup it prints. GitHub is only read, through your `gh` login. See `wirk import --help`.
 
 ### 0.3.1
 

@@ -35,7 +35,7 @@ def test_task_under_a_parent_taken_with_owner_me(run):
 
 
 @pytest.mark.parametrize("words, data", [
-    (["kind=work"], {"work": {}}), (["kind=wirk"], {"work": {}}), (["kind=doc"], {}),
+    (["kind=work"], {"work": {}}), (["kind=wirk"], {"work": {}}), (["kind=record"], {}), (["kind=doc"], {}),
     (["kind=context", "level=initiative"], {"context": {"level": "initiative"}}),
     (["kind=context", "level=organization"], {"context": {"level": "organization"}}),
     (["labels=a,b"], {"fields": {"labels": ["a", "b"]}}),
@@ -116,6 +116,7 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "new", "T", "--reason", "…"], "your own words"),
     (["write", "edit", "5c1e7a90@1", "--evidence", "..."], "your own words"),
     (["write", "new", "T", "kind=folder"], "--request"),
+    (["write", "new", "T", "kind=memo"], "kind is work, record or context here"),
     (["write", "new", "T", "level=initiative"], "kind=context"),
     (["write", "archive", "5c1e7a90@1"], "--request"),
     (["write", "restore", "5c1e7a90@1"], "--request"),
