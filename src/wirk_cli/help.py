@@ -13,7 +13,7 @@ Start with: wirk status
   query kind=context                   the organization's context and its initiatives
   query proposal=proposed,deferred     proposals waiting for a decision
   review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
-  write new 'Title' --link related_to:ID          a doc; add kind=work for a task
+  write new 'Title' --link related_to:ID          a record; add kind=work for a task
   write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
   write --request FILE                 any write as JSON; - reads standard input
@@ -65,13 +65,13 @@ Links lists the item's own links (links_out, a list); Linked from groups the lin
        wirk write --request FILE           (- reads standard input)
   every form also takes --reason TEXT, --propose, --request-id ID and --json
 
-  write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a doc linked to wirk
+  write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
   write new 'Plan' kind=context level=initiative --body-file plan.md
 
-KEY=VALUE: kind=work|doc|context, level (with kind=context), owner (me or an ID), workspace_id,
+KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id,
 and the wirkspace's fields (status=open; a comma list for several; KEY= clears on edit).
 Context (kind=context) is the organization and its initiatives. A change to it applies directly
 when you may make it; otherwise it is refused with requires_review: propose it with --propose --reason.
@@ -154,7 +154,7 @@ Other operations: token.revoke, admin.set, wirkspace.create, field.create, field
        wirk import jira [PROJECT|ISSUE_KEY…] [workspace_id=ID] [map=FILE] [--dry-run] [--overwrite] [--json]
 
 Bring a tracker's issues into a wirkspace. Each issue becomes work with its history as text, its comments
-in a linked doc and its raw record as a file; running it again brings only what changed.
+in a linked record and its raw issue as a file; running it again brings only what changed.
 
   1. wirk import github acme --dry-run     read GitHub and WIRK, write nothing, print the plan
   2. a person who administers the account reviews the setup and applies it at their own terminal,

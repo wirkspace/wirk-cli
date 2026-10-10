@@ -142,9 +142,9 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
     positionals, pairs = split(words)
     if positionals:
         raise UsageError(f"write new takes one title (quote it): {' '.join(positionals)}")
-    workspace, kind, level = pairs.pop("workspace_id", None), pairs.pop("kind", "doc"), pairs.pop("level", None)
-    if kind not in ("doc", "work", "wirk", "context"):
-        raise UsageError(f"kind is work, doc or context here; folders and the rest need --request, not {kind}")
+    workspace, kind, level = pairs.pop("workspace_id", None), pairs.pop("kind", "record"), pairs.pop("level", None)
+    if kind not in ("record", "doc", "work", "wirk", "context"):  # doc and wirk are older words, read and never shown
+        raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
     if (level is None) != (kind != "context") or level not in (None, "organization", "initiative"):
         raise UsageError("kind=context needs level=organization or level=initiative, and level needs kind=context")
     fields, work = fields_and_owner(pairs, clearing=False)
