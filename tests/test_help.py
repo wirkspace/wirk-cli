@@ -141,7 +141,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.3"
+    assert project == __version__ == "0.4.4"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -179,8 +179,12 @@ def changes() -> dict:
 
 def test_the_readme_says_what_this_release_changed():
     """Messages (decision 90): the inbox query and the two write operations, in 0.4.3."""
-    released = changes()[__version__]
+    released = changes()["0.4.3"]
     assert "inbox=me" in released and "message.send" in released and "message.acknowledge" in released
+
+
+def test_the_readme_describes_the_importer_fix_in_0_4_4():
+    assert "If WIRK becomes unreachable while an import starts" in changes()["0.4.4"]
 
 
 def test_the_readme_keeps_a_place_for_the_next_release():

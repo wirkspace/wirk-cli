@@ -156,6 +156,27 @@ def test_a_run_that_stops_still_prints_what_it_did(world):
     assert answer["data"]["outcomes"][0]["outcome"] == "current"
 
 
+@pytest.mark.parametrize("json_mode", [False, True], ids=["text", "json"])
+def test_index_query_transport_failure_stops_as_an_import(world, json_mode):
+    def lost_query(body):
+        raise httpx.ConnectError("refused")
+
+    world["fake"].query = lost_query
+    argv = ("github", "acme", "--dry-run", "--json") if json_mode else ("github", "acme", "--dry-run")
+    code, out, err = world["run"](*argv)
+    message = "could not reach https://wirk.test (ConnectError)."
+    hint = "Check your network, then: curl https://wirk.test/health"
+    assert code == 2
+    assert err == f"Error import: service_unavailable: {message}\n  {hint}\n"
+    if json_mode:
+        assert json.loads(out) == {"ok": False, "data": {}, "errors": [
+            {"code": "service_unavailable", "count": 1, "message": message, "hint": hint}]}
+    else:
+        assert out == ""
+    assert any(route == "/v2/query" for route, _ in world["fake"].requests)
+    assert not world["fake"].writes()
+
+
 def test_without_file_storage_nothing_is_read_or_written_and_the_person_is_told_why(world):
     world["fake"].no_files = "No file store is configured"
     for argv in (("github", "acme", "--dry-run"), ("github", "acme")):

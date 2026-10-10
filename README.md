@@ -61,6 +61,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.4
+
+- If WIRK becomes unreachable while an import starts, the importer reports its stop with the original error and hint and exits 2.
+
 ### 0.4.3
 
 - Messages: `wirk --help`, `wirk query --help` and `wirk write --help` name `query inbox=me`, the `kind=message`, `inbox` and `participant` filters, and the `message.send` and `message.acknowledge` operations of `wirk write --request`. Answers end with the messages waiting for you, as the service writes them; with `--json`, `notifications` is printed last. Needs a service with messages.
