@@ -147,7 +147,7 @@ def test_one_version_everywhere():
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
     """Decision 85: an agent whose role may review decides with its own token; a background agent only proposes."""
     text = help_of(capsys)
-    assert "\n  show " not in text  # not live on api.wirk.life yet; wirk show --help says so
+    assert "\n  show status " in text
     assert "\n  review ID@N accept --reason 'Why'  " in text and "only people" not in text.lower()
     assert "a background agent only proposes" in text and "--person" not in text
 
@@ -160,9 +160,10 @@ def test_review_help_says_who_decides_and_what_person_means(capsys):
     assert [line for line in text.split("\n") if line.startswith("  review ") and "--person" in line] == []
 
 
-def test_show_help_says_it_is_not_live_yet(capsys):
+def test_show_help_describes_hosted_lifetime_and_unconfigured_services(capsys):
     text = help_of(capsys, "show")
-    assert "Not live yet" in text and "views_unavailable" in text
+    assert "24 hours" in text and "revoked" in text and "views_unavailable" in text
+    assert "Not live yet" not in text
 
 
 def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):

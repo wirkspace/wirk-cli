@@ -6,6 +6,7 @@ WIRK keeps people and agents aligned on their wirk: tasks, notes, decisions and 
 Start with: wirk status
 
   status 'fix the login bug'           who you are, your wirk and what waits; with words, what matters for them
+  show status                          open a read-only page for a person
   query ID                             fetch an item; short IDs and exact titles work; ID@N is revision N
   query about='hook drain'             what matters for these words; by meaning on Pro, else by words
   query status=open kind=work          list with filters; status shows the keys and values
@@ -18,8 +19,7 @@ Start with: wirk status
   write message --on ID --body 'Ready'            a message on an item's board; --to ID addresses someone
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
-  upload PATH                          store a file and print how to attach it
-  download ITEM FILE                   save a stored file; FILE is its file ID
+  upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
   login                                connect this machine to https://api.wirk.life
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
@@ -105,10 +105,9 @@ wirk login --person; it asks you to type the decision back.
   review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test'""",
         "show": """usage: wirk show status | --file FILE | --revoke LINK [--no-open] [--json]
 
-Not live yet: api.wirk.life has no address for views and answers views_unavailable.
-
-A live, read-only page a person can open; the link comes first and anyone holding it can open it
-until it expires.
+Hosted views are live on api.wirk.life. Anyone holding the link can open the read-only page
+until it expires after 24 hours or is revoked. The link comes first.
+A service without views configured answers views_unavailable.
 
   show status                          what is waiting, in progress and recent
   show --file view.json                a page from a view config
