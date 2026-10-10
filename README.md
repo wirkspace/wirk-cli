@@ -61,6 +61,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.7
+
+- Companion CLI release for grounded catch-up guidance in MCP and skill. CLI behavior is unchanged; the installer selects the matching 0.4.7 set.
+
 ### 0.4.6
 
 - Companion CLI release for the matching MCP and skill catch-up guidance. CLI behavior is unchanged; the installer selects the 0.4.6 set.
