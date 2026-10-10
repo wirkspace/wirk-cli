@@ -154,7 +154,7 @@ Other operations: token.revoke, admin.set, wirkspace.create, field.create, field
        wirk import jira [PROJECT|ISSUE_KEY…] [workspace_id=ID] [map=FILE] [--dry-run] [--overwrite] [--json]
 
 Bring a tracker's issues into a wirkspace. Each issue becomes work with its history as text, its comments
-in a linked record and its raw record as a file; running it again brings only what changed.
+in a linked record and its raw issue as a file; running it again brings only what changed.
 
   1. wirk import github acme --dry-run     read GitHub and WIRK, write nothing, print the plan
   2. a person who administers the account reviews the setup and applies it at their own terminal,
