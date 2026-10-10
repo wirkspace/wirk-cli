@@ -143,6 +143,8 @@ def problem_text(answer: dict) -> str:
 
 def emit(answer: dict, options: dict) -> int:
     if options.get("--json"):
+        if "notifications" in answer:  # messages for you come last, as text ends with them
+            answer["notifications"] = answer.pop("notifications")
         print(json.dumps(answer, ensure_ascii=False, separators=(",", ":")))
     else:
         print(answer["text"] if "text" in answer else problem_text(answer) if not answer["ok"] else "")

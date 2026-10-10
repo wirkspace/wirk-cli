@@ -206,3 +206,19 @@ def test_status_sends_the_context_header_and_no_other_route_does(run):
     assert fake.requests[0].headers["wirk-context"].startswith("harness=wirk-cli version=")
     code, out, err, fake = run(["query", "5c1e7a90"])
     assert "wirk-context" not in fake.requests[0].headers
+
+
+def test_messages_for_you_print_last_and_reach_text_unchanged(run):
+    """docs/plans/messaging.md §7: the service ends text with the footer; --json prints notifications last."""
+    footer = {"state": "available", "pending": 1, "messages": [{"id": "item_1a2b3c4d", "from": "web", "excerpt": "Ready"}]}
+
+    def answer(request):
+        return httpx.Response(200, json={"notifications": footer, **envelope(data={"cards": []}).json()})
+    code, out, err, fake = run(["query", "inbox=me", "--json"], answer)
+    printed = json.loads(out)
+    assert list(printed)[-1] == "notifications" and printed["notifications"] == footer
+    assert fake.bodies()[0]["fields"] == {"inbox": "me"}
+    code, out, err, fake = run(["query", "kind=message", "participant=api,web"],
+                               lambda request: envelope("1a2b3c4d · message\n\nMessages for you: 1 pending"))
+    assert out.endswith("Messages for you: 1 pending\n")
+    assert fake.bodies()[0]["fields"] == {"kind": "message", "participant": ["api", "web"]}

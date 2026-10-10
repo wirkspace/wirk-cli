@@ -12,18 +12,18 @@ Start with: wirk status
   query status=open kind=work          list with filters; status shows the keys and values
   query kind=context                   the organization's context and its initiatives
   query proposal=proposed,deferred     proposals waiting for a decision
+  query inbox=me                       messages for you, until you mark them seen (message.acknowledge)
   review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
   write new 'Title' --link related_to:ID          a record; add kind=work for a task
   write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
-  write --request FILE                 any write as JSON; - reads standard input
+  write --request FILE                 any write as JSON, messages too (message.send); - reads standard input
   upload PATH                          store a file and print how to attach it
   download ITEM FILE                   save a stored file; FILE is its file ID
   login                                connect this machine to https://api.wirk.life
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
 Decide proposals when your role may review; a background agent only proposes and never decides.
-
 Results are text; add --json for data. To run a result line "label: command", type wirk and what follows the colon.""",
         "status": """usage: wirk status [TASK WORDS] [task=… max_bytes=N workspace_id=ID] [--json]
 
@@ -45,6 +45,7 @@ Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys yo
   query status=open,in_progress kind=work owner=me     a list; a comma means any of
   query proposal=proposed,deferred     proposals waiting for a decision
   query kind=context state=active      active initiatives
+  query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
@@ -83,10 +84,11 @@ Every result names the IDs it created. After an uncertain result, run the comman
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
-  {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"
-     cites also takes target_revision, selector, relation and quotation: the exact text it cites at that
-     revision, or the link is refused as quotation_mismatch
-  {"op": "link.remove", "id": LINK_ID}
+  {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"   {"op": "link.remove", "id": LINK_ID}
+     a cites link also takes target_revision, selector, relation and quotation: the exact text it cites at
+     that revision, or the link is refused as quotation_mismatch
+  {"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}
+  {"op": "message.acknowledge", "messages": [ID]}   seen: received, not agreed; a reply notifies only its "to"
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
 expect holds the rN you read of every existing item you edit, archive or link from, and of the parent
 work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link); one left
