@@ -82,7 +82,7 @@ def test_linear_import_links_archives_and_restores_then_writes_nothing(imported)
     assert item(folder, "Secret thing", kind="project") is None and item(folder, "Secret plan", kind="initiative") is None
     out_of = lambda view: {(link["type"], link["to"]) for link in view.get("links_out", [])}
     assert ("contributes_to", plan["id"]) in out_of(beta) and ("contributes_to", beta["id"]) in out_of(one)
-    assert ("requires", beta["id"]) in out_of(retention) and plan["kind"] == "work" and reliability["kind"] == "doc"
+    assert ("requires", beta["id"]) in out_of(retention) and plan["kind"] == "work" and reliability["kind"] == "record"
     assert plan["id"] in {link["id"] for link in reliability.get("links_out", [])}
     code, out = imported["run"]("--json")
     assert {o["outcome"] for o in json.loads(out)["data"]["outcomes"]} == {"current"}

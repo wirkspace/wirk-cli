@@ -63,7 +63,7 @@ def test_each_issue_is_one_work_item_with_its_archive_and_one_discussion_doc(fak
     assert outcomes(result) == {("acme/api#1", "issue"): "created", ("acme/api#1", "comments"): "created",
                                 ("acme/api#2", "issue"): "created"}
     writes = fake.writes()
-    assert len(writes) == 2 and len(writes[0]["operations"]) == 3  # one issue per write: work, doc, their link
+    assert len(writes) == 2 and len(writes[0]["operations"]) == 3  # one issue per write: work, record, their link
     work = [i for i in fake.items.values() if i["revisions"][-1]["work"] is not None]
     assert len(work) == 2
     snap = work[0]["revisions"][-1]
@@ -298,12 +298,12 @@ def test_a_refusal_or_an_unsettled_write_is_an_error_for_that_issue_and_the_run_
 def test_parts_go_one_to_a_write_and_stale_parts_are_archived(fake):
     big = [said("漢" * 60000, f"2026-09-0{n}T00:00:00Z") for n in range(1, 8)]
     make(fake).run([issue(1, comments=big)])
-    docs = fake.mine("doc")
+    docs = fake.mine("record")
     assert len(docs) == 2 and len(fake.writes()) == 2
     assert all(len(w["operations"]) <= 32 for w in fake.writes())
     result = outcomes(make(fake).run([issue(1, comments=big[:2])]))
     assert result[("acme/api#1", "comments-2")] == "archived"
-    assert sum(1 for item in fake.mine("doc").values() if item["archived"]) == 1
+    assert sum(1 for item in fake.mine("record").values() if item["archived"]) == 1
 
 
 def test_an_issue_whose_work_item_is_archived_or_ambiguous_gets_no_new_discussion(fake):
@@ -480,7 +480,7 @@ def big_discussion():
 
 
 def part_two(fake):
-    return next(i for i, item in fake.mine("doc").items() if item["revisions"][0]["body"].startswith("GitHub comments-2 "))
+    return next(i for i, item in fake.mine("record").items() if item["revisions"][0]["body"].startswith("GitHub comments-2 "))
 
 
 def test_a_stale_part_a_person_changed_is_left_with_who_changed_it(fake):

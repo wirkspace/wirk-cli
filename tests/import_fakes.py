@@ -104,7 +104,7 @@ class FakeWirk:
     def card(self, item_id, revision=None):
         item = self.items[item_id]
         snap = item["revisions"][(revision or len(item["revisions"])) - 1]
-        card = {"id": item_id, "kind": "work" if snap["work"] is not None else "doc", "r": snap["r"], "title": snap["title"],
+        card = {"id": item_id, "kind": "work" if snap["work"] is not None else "record", "r": snap["r"], "title": snap["title"],
                 "fields": snap["fields"], "by": snap["by"], "by_kind": "agent", "changed": "2026-10-02T00:00:00Z"}
         if first_line(snap["body"]):
             card["line"] = first_line(snap["body"])
