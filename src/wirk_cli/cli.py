@@ -19,7 +19,8 @@ from .help import HELP, RETIRED
 SWITCH, VALUE, MANY = "switch", "value", "many"
 WRITE = {"--body": VALUE, "--body-file": VALUE, "--criterion": MANY, "--link": MANY, "--upload": MANY,
          "--allow-duplicate-of": MANY, "--title": VALUE, "--evidence": VALUE, "--reason": VALUE, "--propose": SWITCH,
-         "--request-id": VALUE, "--request": VALUE}
+         "--request-id": VALUE, "--request": VALUE, "--to": VALUE, "--on": VALUE, "--reply-to": VALUE}
+MESSAGE_ONLY = {"--to", "--on", "--reply-to"}
 FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "review": {"--reason": VALUE, "--person": SWITCH, "--request-id": VALUE, "--request": VALUE},
          "show": {"--file": VALUE, "--revoke": VALUE, "--no-open": SWITCH},
@@ -186,11 +187,17 @@ def shortcut(words: list[str], options: dict) -> dict:
     action, rest = (words[0], words[1:]) if words else ("", [])
     if "--body" in options and "--body-file" in options:
         raise UsageError("give --body or --body-file, not both")
+    if action != "message" and MESSAGE_ONLY & set(options):
+        raise UsageError("--to, --on and --reply-to belong to write message")
+    if action == "seen":
+        return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
     if action in ("archive", "restore"):
         raise UsageError(f"{action} needs a reason: use wirk write --request with item.{action} (see wirk write --help)")
+    if action == "message":
+        return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
-        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, or --request FILE")
+        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, or --request FILE")
     if action == "link":
         return grammar.write_link(rest, options)
     return (grammar.write_new if action == "new" else grammar.write_edit)(rest[0], rest[1:], options, text)
