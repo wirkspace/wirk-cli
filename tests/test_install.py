@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
