@@ -141,7 +141,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.0"
+    assert project == __version__ == "0.4.2"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -178,14 +178,14 @@ def changes() -> dict:
 
 
 def test_the_readme_says_what_this_release_changed():
-    assert "wirk import github" in changes()[__version__]
+    """Decision 89 (record), decision 85's wording (#16) and the recovery hints (#13, #15), all in 0.4.2."""
+    released = changes()[__version__]
+    assert "record" in released and "Anyone whose role may review decides" in released and "--person" in released
+    assert "run the same command again" in released and "--json" in released
 
 
-def test_the_readme_says_what_the_next_release_changes():
-    """Decision 85's wording (#16) and the recovery hints (#13, #15) since 0.4.0."""
-    upcoming = changes()["Next release"]
-    assert "Anyone whose role may review decides" in upcoming and "--person" in upcoming
-    assert "run the same command again" in upcoming and "--json" in upcoming
+def test_the_readme_keeps_a_place_for_the_next_release():
+    assert changes()["Next release"].strip()
 
 
 ALL = [*COMMANDS, "import"]
