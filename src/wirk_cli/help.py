@@ -87,7 +87,7 @@ Every result names the IDs it created. After an uncertain result, run the comman
   {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"   {"op": "link.remove", "id": LINK_ID}
      a cites link also takes target_revision, selector, relation and quotation: the exact text it cites at
      that revision, or the link is refused as quotation_mismatch
-  {"op": "message.send", "ref": "m", "data": {"body", "title", "to": [PRINCIPAL_ID], "reply_to", "uploads"}}
+  {"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}
   {"op": "message.acknowledge", "messages": [ID]}   seen: received, not agreed; a reply notifies only its "to"
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
 expect holds the rN you read of every existing item you edit, archive or link from, and of the parent
