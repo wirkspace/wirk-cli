@@ -5,19 +5,19 @@ HELP = {"": """usage: wirk COMMAND [ARGS] [--json] | wirk --version
 WIRK keeps people and agents aligned on their wirk: tasks, notes, decisions and evidence in one wirkspace.
 Start with: wirk status
 
-  status                               who you are, your wirk, what is in progress and what waits
-  status 'fix the login bug'           the same, with what matters for your task
+  status 'fix the login bug'           who you are, your wirk and what waits; with words, what matters for them
   query ID                             fetch an item; short IDs and exact titles work; ID@N is revision N
   query about='hook drain'             what matters for these words; by meaning on Pro, else by words
   query status=open kind=work          list with filters; status shows the keys and values
-  query kind=context                   the organization's context and its initiatives
   query proposal=proposed,deferred     proposals waiting for a decision
-  query inbox=me                       messages for you, until you mark them seen (message.acknowledge)
+  query inbox=me                       messages for you, until you mark them seen
   review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
   write new 'Title' --link related_to:ID          a record; add kind=work for a task
   write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
-  write --request FILE                 any write as JSON, messages too (message.send); - reads standard input
+  write message --on ID --body 'Ready'            a message on an item's board; --to ID addresses someone
+  write seen ID                        mark messages seen once you have read them
+  write --request FILE                 any write as JSON; - reads standard input
   upload PATH                          store a file and print how to attach it
   download ITEM FILE                   save a stored file; FILE is its file ID
   login                                connect this machine to https://api.wirk.life
@@ -50,7 +50,7 @@ Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys yo
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all).
-Every other KEY=VALUE is a filter; status lists the filters and their values.
+Every other KEY=VALUE is a filter; status lists them. A list leaves messages out unless it asks for them.
 Quote a title or words with spaces. A result line "label: command" is the next command to run.
 
 What did not fit is named: a cut body ends with … and its own more: line, blocks on a "not shown" line,
@@ -63,6 +63,8 @@ Links lists the item's own links (links_out, a list); Linked from groups the lin
        wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
        wirk write link FROM@N TYPE TO[@N]
+       wirk write message [--to ID,…] [--on ITEM,…] [--reply-to ID] [--title TEXT] --body TEXT | --body-file PATH
+       wirk write seen ID…
        wirk write --request FILE           (- reads standard input)
   every form also takes --reason TEXT, --propose, --request-id ID and --json
 
@@ -85,14 +87,12 @@ Every result names the IDs it created. After an uncertain result, run the comman
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
   {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"   {"op": "link.remove", "id": LINK_ID}
-     a cites link also takes target_revision, selector, relation and quotation: the exact text it cites at
-     that revision, or the link is refused as quotation_mismatch
+     a cites link also takes target_revision, selector, relation and quotation: the exact text, else quotation_mismatch
   {"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}
   {"op": "message.acknowledge", "messages": [ID]}   seen: received, not agreed; a reply notifies only its "to"
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
-expect holds the rN you read of every existing item you edit, archive or link from, and of the parent
-work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link); one left
-out is refused as basis_changed, naming its current revision.""",
+expect holds the rN you read of each item you edit, archive or link from, and of the parent work (not an
+initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link), or it is refused as basis_changed.""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.

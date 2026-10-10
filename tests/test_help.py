@@ -247,11 +247,27 @@ def test_query_help_states_the_budget_and_what_a_read_leaves_out(capsys):
 
 
 def test_help_names_messages_and_their_two_operations(capsys):
-    """docs/plans/messaging.md §8: the inbox, the board query and the two write operations, with nothing new to type."""
-    assert "query inbox=me" in help_of(capsys) and "message.send" in help_of(capsys)
+    """docs/plans/messaging.md §8: the inbox, the board query and the two write operations, as short forms (01289c53)."""
+    assert "query inbox=me" in help_of(capsys) and "write message" in help_of(capsys)
     query_help = help_of(capsys, "query")
     assert "query kind=message linked=" in query_help and "inbox=me" in query_help and "participant=" in query_help
     write_help = help_of(capsys, "write")
     assert '{"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}' in write_help
     assert '{"op": "message.acknowledge", "messages": [ID]}' in write_help and "received, not agreed" in write_help
     assert 'a reply notifies only its "to"' in write_help
+
+
+def test_the_message_short_forms_have_one_line_each_in_the_main_help(capsys):
+    lines = help_of(capsys).split("\n")
+    assert [line.split()[:2] for line in lines if line.startswith("  write message") or line.startswith("  write seen")] == [
+        ["write", "message"], ["write", "seen"]]
+
+
+def test_write_help_gives_the_message_forms_beside_the_json_shapes(capsys):
+    text = help_of(capsys, "write")
+    assert "wirk write message [--to ID,…] [--on ITEM,…]" in text and "wirk write seen ID…" in text
+    assert '{"op": "message.send"' in text and '{"op": "message.acknowledge"' in text
+
+
+def test_query_help_says_a_list_leaves_messages_out_unless_it_asks(capsys):
+    assert "A list leaves messages out unless it asks" in " ".join(help_of(capsys, "query").split())

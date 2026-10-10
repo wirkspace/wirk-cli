@@ -188,6 +188,37 @@ def write_link(words: list[str], options: dict) -> dict:
     return write_body(links(source, {"--link": [f"{words[1]}:{words[2]}"]}, expect), expect, options, None)
 
 
+def listed(text: str) -> list[str]:
+    return [part for part in text.split(",") if part]
+
+
+def write_message(words: list[str], options: dict, body_text: str | None) -> dict:
+    """One message.send, and a related_to link from it to each --on item: its boards; no --to and no --on is the
+    company board."""
+    positionals, pairs = split(words)
+    workspace = pairs.pop("workspace_id", None)
+    if positionals or pairs:
+        raise UsageError("write message takes --to, --on, --reply-to, --title and --body or --body-file, and no other words")
+    if body_text is None:
+        raise UsageError("write message needs --body TEXT or --body-file PATH")
+    data = {"body": body_text, **({"title": options["--title"]} if "--title" in options else {}),
+            **({"to": listed(options["--to"])} if "--to" in options else {}),
+            **({"reply_to": options["--reply-to"]} if "--reply-to" in options else {})}
+    boards = [{"op": "link.create", "data": {"type": "related_to", "from": "$m", "to": item}}
+              for item in listed(options.get("--on", ""))]
+    return write_body([{"op": "message.send", "ref": "m", "data": data}, *boards], {}, options, workspace)
+
+
+def write_seen(words: list[str], options: dict) -> dict:
+    """One message.acknowledge of every ID, each word a comma list or one ID."""
+    positionals, pairs = split(words)
+    workspace = pairs.pop("workspace_id", None)
+    messages = [item for word in positionals for item in listed(word)]
+    if not messages or pairs or set(options) - {"--request-id", "--json"}:
+        raise UsageError("write seen takes the IDs of messages you have read, and --request-id")
+    return write_body([{"op": "message.acknowledge", "messages": messages}], {}, options, workspace)
+
+
 def review_body(words: list[str], options: dict) -> dict:
     if len(words) < 2 or words[-1] not in ACTIONS:
         raise UsageError("Replace ACTION with accept, reject or defer, and REASON with why: wirk review ID@N ACTION --reason WHY")
