@@ -162,3 +162,55 @@ def test_request_ids_are_generated_or_given(run):
     assert fake.bodies()[0]["request_id"] == "mine-7"
     code, out, err, fake = run(["review", "c4a1e902@1", "accept", "--reason", "Fine"])
     assert __import__("re").fullmatch(r"r-[0-9a-f]{10}", fake.bodies()[0]["request_id"])
+
+
+# ---------------------------------------------------------------- the message short forms (WIRK 01289c53)
+
+def test_a_handoff_on_an_items_board_is_one_send_and_its_link(run):
+    assert sent(run, ["write", "message", "--on", "2c355356", "--body", "The API is ready"]) == {"operations": [
+        {"op": "message.send", "ref": "m", "data": {"body": "The API is ready"}},
+        {"op": "link.create", "data": {"type": "related_to", "from": "$m", "to": "2c355356"}}]}
+
+
+def test_every_message_option_maps_to_the_send_and_one_link_per_board(run, tmp_path):
+    (tmp_path / "note.md").write_text("Line one\nLine two")
+    assert sent(run, ["write", "message", "--to", "alice-agents,bob", "--on", "2c355356,8d24f6b1", "--reply-to", "9f8e7d6c",
+                      "--title", "API ready", "--body-file", "note.md", "--reason", "Handoff", "workspace_id=1a2b3c4d"]) == {
+        "reason": "Handoff", "workspace_id": "1a2b3c4d", "operations": [
+            {"op": "message.send", "ref": "m", "data": {"body": "Line one\nLine two", "title": "API ready",
+                                                        "to": ["alice-agents", "bob"], "reply_to": "9f8e7d6c"}},
+            {"op": "link.create", "data": {"type": "related_to", "from": "$m", "to": "2c355356"}},
+            {"op": "link.create", "data": {"type": "related_to", "from": "$m", "to": "8d24f6b1"}}]}
+
+
+def test_a_message_with_no_recipient_and_no_board_goes_to_the_company_board(run):
+    assert sent(run, ["write", "message", "--body", "Company news"]) == {"operations": [
+        {"op": "message.send", "ref": "m", "data": {"body": "Company news"}}]}
+
+
+def test_marking_seen_is_one_acknowledgment_of_every_id(run):
+    expected = {"operations": [{"op": "message.acknowledge", "messages": ["1a2b3c4d", "5e6f7a8b", "77aa88bb"]}]}
+    assert sent(run, ["write", "seen", "1a2b3c4d", "5e6f7a8b,77aa88bb"]) == expected
+
+
+def test_a_bad_id_is_refused_with_the_services_own_words(run):
+    words = "1a2b3c4d is not addressed to you; only its recipients mark it seen"
+    code, out, err, fake = run(["write", "seen", "1a2b3c4d"], lambda request: refusal(
+        "not_authorized", words, status=403, text=f"Not applied w-1 · not_authorized: {words}"))
+    assert code == 1 and len(fake.requests) == 1 and out == f"Not applied w-1 · not_authorized: {words}\n"
+
+
+@pytest.mark.parametrize("argv, words", [
+    (["write", "message"], "--body TEXT or --body-file PATH"),
+    (["write", "message", "--to", "bob"], "--body TEXT or --body-file PATH"),
+    (["write", "message", "--body", "a", "--body-file", "b"], "--body"),
+    (["write", "message", "Hello", "--body", "Hi"], "write message takes"),
+    (["write", "seen"], "write seen takes"),
+    (["write", "seen", "1a2b3c4d", "--body", "x"], "write seen takes"),
+    (["write", "new", "T", "--to", "bob"], "--to, --on and --reply-to belong to write message"),
+    (["write", "edit", "5c1e7a90@1", "--on", "2c355356"], "--to, --on and --reply-to belong to write message"),
+])
+def test_message_usage_errors_send_nothing(run, argv, words):
+    code, out, err, fake = run(argv)
+    assert code == 2 and fake.requests == []
+    assert words in err
