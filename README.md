@@ -61,6 +61,12 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.10
+
+- `wirk query --help`, wording only: `sort=changed` is newest first and a leading minus reverses it; a whole-file quotation matches the exact full text including newlines; the `depth=all` hint need not mean a cut passage.
+- `wirk write --help` says a stored refusal keeps its `request_id` and a corrected request takes a new one; after an uncertain result, run the command its hint prints, and any retry uses the identical body and `request_id`.
+- The README no longer promises that examples run as printed: replace sample IDs, revisions and paths with your own values first.
+
 ### 0.4.9
 
 - `wirk import` keeps the first structured hint for each kind of error and prints it once beneath the aggregate; the JSON outcomes keep their five keys.
