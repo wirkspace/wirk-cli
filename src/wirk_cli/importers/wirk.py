@@ -33,6 +33,7 @@ class Outcome:
     outcome: str
     message: str = ""
     item: str | None = None
+    hint: str | None = None
 
     def line(self) -> str:
         return " ".join(filter(None, [self.key, "" if self.kind == "issue" else self.kind, self.outcome
@@ -221,7 +222,7 @@ class Importer:
         except (WirkError, Failure) as error:
             if isinstance(error, Failure) and error.code not in UNSETTLED or error.code == "files_unavailable":
                 raise  # the client's own failure, or no file storage: every issue would fail the same way
-            return [Outcome(key, kind, "error", f"{error.code}: {error}")]
+            return [Outcome(key, kind, "error", f"{error.code}: {error}", hint=error.hint)]
 
     # ---------------------------------------------------------------- links (§3.6)
 
@@ -325,7 +326,8 @@ class Importer:
             problem = answer["errors"][0]
             index = problem.get("input_index")
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
-                return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}")]
+                return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}",
+                                hint=problem.get("hint"))]
             operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
             body = {**body, "request_id": self.rid(ident)}
             notes.append(f"kept as related: WIRK refused it ({problem['code']})")
@@ -430,7 +432,9 @@ class Importer:
         answer = self.wirk.write(self.archiving(record, word, [h for _, h in found],
                                                 record.archived or f"Active again in {self.ctx.source}"))
         if not answer["ok"]:
-            return [Outcome(record.key, record.kind, "error", f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}")]
+            problem = answer["errors"][0]
+            return [Outcome(record.key, record.kind, "error", f"{problem['code']}: {problem.get('message', '')}",
+                            hint=problem.get("hint"))]
         for (kind, h), result in zip(found, answer["data"]["results"]):
             self.index.add(kind, record.ident, replace(h, r=result["revision"], archived=want))
         return [Outcome(record.key, kind, f"{word}d", item=h.item) for kind, h in found]
@@ -500,8 +504,9 @@ class Importer:
                 **({"expect": expect} if expect else {})}
         notes = []
 
-        def each(outcome: str, message: str) -> list:
-            return [Outcome(record.key, plan.kind, outcome, message, held.item if held else None) for plan, _, held in acting]
+        def each(outcome: str, message: str, hint: str | None = None) -> list:
+            return [Outcome(record.key, plan.kind, outcome, message, held.item if held else None, hint=hint)
+                    for plan, _, held in acting]
 
         for _ in range(4):
             answer = self.wirk.write(body)
@@ -512,7 +517,7 @@ class Importer:
                 return each("skipped", "completing it needs its prerequisites completed first (a link made in WIRK)")
             fixed = self.fix(record, body, problem)
             if fixed is None:
-                return each("error", f"{problem['code']}: {problem.get('message', '')}")
+                return each("error", f"{problem['code']}: {problem.get('message', '')}", problem.get("hint"))
             notes.append(fixed)
             body = {**body, "request_id": self.rid(record.ident)}
         else:
@@ -579,8 +584,12 @@ class Importer:
                 else:
                     reason = f"No longer needed: the discussion of [{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"
                     answer = self.wirk.write(self.archiving(record, "archive", [found], reason))
-                    message = "" if answer["ok"] else f"{answer['errors'][0]['code']}: {answer['errors'][0].get('message', '')}"
-                    outcomes.append(Outcome(record.key, kind, "archived" if answer["ok"] else "error", message, found.item))
+                    if answer["ok"]:
+                        outcomes.append(Outcome(record.key, kind, "archived", item=found.item))
+                    else:
+                        problem = answer["errors"][0]
+                        outcomes.append(Outcome(record.key, kind, "error", f"{problem['code']}: {problem.get('message', '')}",
+                                                found.item, hint=problem.get("hint")))
         return outcomes
 
     def gone(self, present: set) -> list:
