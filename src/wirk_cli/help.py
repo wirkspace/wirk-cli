@@ -48,8 +48,8 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
-And wait (0–60 s, with inbox=me). Default sort=changed is newest first; leading - reverses. A list leaves messages out
-unless it asks for them. Other KEY=VALUE filters: see status. Quote titles or words with spaces. Run "label: command".
+And wait (0–60 s, with inbox=me). Lists: sort=changed is newest first; leading - reverses. A list leaves messages out
+unless it asks for them. See status for filters. Quote words with spaces. For "label: command", run "wirk command".
 
 --json answers {ok, errors, notices, page, data, notifications}: a fetch in data.results[], a list in data.cards[],
 each with r (its revision, the N of ID@N), fields and owner (on work); notifications: messages waiting for you.
