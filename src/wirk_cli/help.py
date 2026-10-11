@@ -35,7 +35,7 @@ what needs your review, recent changes and how to ask for more. It writes nothin
   status max_bytes=65536               room for every section; max_bytes is 1024–65536 (default 8192)""",
         "query": """usage: wirk query [REF…] [KEY=VALUE…] [--request FILE] [--json]
 
-Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys you give choose which.
+Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a message; the keys you give choose which.
 
   query 5c1e7a90                       one item with its links and context; 5c1e7a90@2 is revision 2; 'Exact title' too
   query about='webhook retries'        what matters for these words; by meaning on Pro, else by words
@@ -48,8 +48,8 @@ Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys yo
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
-Every other KEY=VALUE is a filter; status lists them. A list leaves messages out unless it asks for them.
-Quote a title or words with spaces. A result line "label: command" is the next command to run.
+And wait (0–60 s, with inbox=me). Every other KEY=VALUE is a filter; status lists them. A list leaves messages out
+unless it asks for them. Quote a title or words with spaces. A result line "label: command" is the next command to run.
 
 --json answers {ok, errors, notices, page, data, notifications}: a fetch in data.results[], a list in data.cards[],
 each with r (its revision, the N of ID@N), fields and owner (on work); notifications: messages waiting for you.

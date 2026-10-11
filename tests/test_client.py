@@ -42,6 +42,14 @@ def failing(*errors):
     return answer
 
 
+def test_a_waiting_inbox_is_given_its_wait_on_top_of_the_read_timeout(run):
+    code, out, err, fake = run(["query", "inbox=me", "wait=60"], lambda request: envelope("no cards"))
+    assert code == 0 and fake.bodies() == [{"fields": {"inbox": "me"}, "wait": 60, "format": "text"}]
+    assert fake.requests[0].extensions["timeout"]["read"] == 120
+    code, out, err, fake = run(["query", "inbox=me"], lambda request: envelope("no cards"))
+    assert fake.requests[0].extensions["timeout"]["read"] == 60
+
+
 def test_one_identical_resend_when_no_answer_arrives(run):
     code, out, err, fake = run(["write", "new", "T"], failing(httpx.ReadTimeout("slow")))
     assert code == 0 and len(fake.requests) == 2 and fake.requests[0].content == fake.requests[1].content
