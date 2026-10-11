@@ -45,6 +45,9 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
   query kind=context state=active      active initiatives
   query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
+  query --request FILE                 a fetch as JSON: {"fetch": [{"ref": "5c1e7a90", "revision": 2, "select": [{"type":
+                                       "whole", "part": {"type": "file", "file_id": "FILE"}}]}]} reads a file's text with
+                                       its fidelity line; a cites link quoting it exactly is in wirk write --help
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.

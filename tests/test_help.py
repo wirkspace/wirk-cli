@@ -309,3 +309,11 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
                    "work.owner_id", "write message --on"):
         assert needed in text, needed
     assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # only edit has a section of its own
+
+
+def test_query_help_shows_how_to_read_a_files_text(capsys):
+    """2c355356's blind trial: an agent could download originals but not find the derived text; the help shows the
+    existing object fetch with a whole-file select, and points at the cites link for an exact quotation."""
+    text = " ".join(help_of(capsys, "query").split())
+    assert '"select": [{"type": "whole", "part": {"type": "file", "file_id": "FILE"}}]' in text
+    assert "fidelity line" in text and "cites link" in text and "wirk write --help" in text
