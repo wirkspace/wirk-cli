@@ -26,6 +26,7 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "service_lines.json")
     (["proposal=proposed,deferred"], {"fields": {"proposal": ["proposed", "deferred"]}}),
     (["receipt=w-3f9a2c41d0"], {"receipt": "w-3f9a2c41d0"}),
     (["status=open", "limit=5", "cursor=AXic"], {"fields": {"status": "open"}, "limit": 5, "cursor": "AXic"}),
+    (["inbox=me", "wait=60"], {"fields": {"inbox": "me"}, "wait": 60}),
 ])
 def test_query_grammar_table(words, body):
     assert grammar.query_body(words) == body
@@ -58,7 +59,7 @@ def test_status_bodies():
         grammar.status_body(["status=open"])
 
 
-@pytest.mark.parametrize("words", [["limit=five"], ["max_bytes=1k"], ["status=open", "status=done"]])
+@pytest.mark.parametrize("words", [["limit=five"], ["max_bytes=1k"], ["inbox=me", "wait=1m"], ["status=open", "status=done"]])
 def test_bad_numbers_and_repeated_keys_are_refused(words):
     with pytest.raises(grammar.UsageError):
         grammar.query_body(words)

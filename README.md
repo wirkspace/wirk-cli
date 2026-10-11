@@ -61,6 +61,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - `wirk query --help` names where a `--json` answer keeps what (`data.results[]` for a fetch, `data.cards[]` for a list, `r` as the revision, `owner` and `fields`, `page.next_cursor`, `notifications`), that `max_bytes` above 65536 is refused, and that a cut body carries one hint, the line that continues it; `depth=all` comes on its last page.
 - `wirk write edit --help` prints the edit form alone: its examples, the claim, and that giving a record an owner turns it into work. `wirk write --help` spells the owner three ways in one sentence: `owner=me` here, `work.owner_id` in a request body, `owner` at the top of what `query` returns.
+- `wirk query inbox=me wait=60` holds the answer until a message is pending for you or 60 seconds pass, so a harness can wake an idle agent only when the answer has cards; the request waits that much longer before it times out. Needs a service with `wait`.
 
 ### 0.4.7
 

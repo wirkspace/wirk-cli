@@ -5,8 +5,8 @@ import re
 ID = re.compile(r"(?:[a-z]+_)?[0-9a-fA-F]{6,32}")
 KEY = re.compile(r"([a-z][a-z0-9_]*)=(.*)", re.S)
 STATUS_KEYS = {"task", "max_bytes", "workspace_id"}
-QUERY_KEYS = {"about", "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id"}
-NUMBERS = {"limit", "max_bytes"}
+QUERY_KEYS = {"about", "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id", "wait"}
+NUMBERS = {"limit", "max_bytes", "wait"}
 SINGLE = {"text", "linked", "folder"}  # filters that take one string, commas included
 LINKS = ("related_to", "contributes_to", "requires")
 PLACEHOLDERS = {"", "REASON", "WHY", "…", "..."}
