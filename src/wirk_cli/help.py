@@ -38,13 +38,13 @@ what needs your review, recent changes and how to ask for more. It writes nothin
 Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a message; the keys you give choose which.
 
   query 5c1e7a90                       one item with its links and context; 5c1e7a90@2 is revision 2; 'Exact title' too
-  query about='webhook retries'        what matters for these words; by meaning on Pro, else by words
-  query text='exact words'             items containing these words
+  query about='webhook retries'        what matters for these words (meaning on Pro); text='exact words' matches words
   query status=open,in_progress kind=work owner=me     a list; a comma means any of
-  query proposal=proposed,deferred     proposals waiting for a decision
-  query kind=context state=active      active initiatives
+  query proposal=proposed,deferred     proposals waiting for a decision; kind=context state=active lists initiatives
   query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
+  query --request FILE                 a file's text with its fidelity line, through the API's fetch object:
+       {"fetch":[{"ref":"ID","select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]}]}  (cite: write --help)
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
