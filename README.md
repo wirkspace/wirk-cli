@@ -18,7 +18,7 @@ By hand: `uv tool install wirk` (or the wheel attached to a [release](https://gi
 
 ## Use
 
-Start with `wirk status`. `wirk --help` lists every command with an example you can run as printed.
+Start with `wirk status`. `wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
 
 ```
 wirk status 'fix the webhook retries'          who you are, your wirk, what needs you, and what matters for the task
