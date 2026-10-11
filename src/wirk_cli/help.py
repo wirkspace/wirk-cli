@@ -43,18 +43,18 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
   query proposal=proposed,deferred     proposals waiting for a decision; kind=context state=active lists initiatives
   query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
-  query --request FILE                 a file's text with its fidelity line, through the API's fetch object:
+  query --request FILE              a file's text with its fidelity line; whole-file quote: exact full text and newlines
        {"fetch":[{"ref":"ID","select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]}]}  (cite: write --help)
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
-And wait (0–60 s, with inbox=me). Every other KEY=VALUE is a filter; status lists them. A list leaves messages out
-unless it asks for them. Quote a title or words with spaces. A result line "label: command" is the next command to run.
+And wait (0–60 s, with inbox=me). Lists: sort=changed is newest first; leading - reverses. A list leaves messages out
+unless it asks for them. See status for filters. Quote words with spaces. For "label: command", run "wirk command".
 
 --json answers {ok, errors, notices, page, data, notifications}: a fetch in data.results[], a list in data.cards[],
 each with r (its revision, the N of ID@N), fields and owner (on work); notifications: messages waiting for you.
-Each cut is named once: a cut body ends with … and one more: line that continues it where it stopped (in JSON
-the view's more, and page.next_cursor when one item was fetched); depth=all starts over, so only a last page has it.
+Each cut is named once: a cut body ends with … and one more: line that continues it where it stopped (JSON:
+the view's more; page.next_cursor for one fetched item). depth=all starts over; its hint need not mean a cut passage.
 Dropped blocks get a "not shown" line, refs left as cards a "Left out for the budget" line (a left_out notice);
 page.complete is false until all is read, body_complete covers the body alone. links_out: the item's own links;
 links_in: the links to it by type (a count, by_status and at most 5 entries); query linked=ID lists them all.""",
