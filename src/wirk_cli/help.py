@@ -77,10 +77,10 @@ links_in: the links to it by type (a count, by_status and at most 5 entries); qu
 KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its
-initiatives. A change to it applies directly when you may make it; otherwise it is refused with requires_review:
-propose it with --propose --reason. --link TYPE is related_to, contributes_to or requires. --evidence is a completion's
-note: the tests that pass, a link, a file path, or a file attached with --upload. --propose needs --reason. Every
-result names the IDs it created. After an uncertain result, run the command its hint prints.
+initiatives. A change applies directly when you may make it; for requires_review, propose with --propose --reason.
+--link TYPE is related_to, contributes_to or requires. --evidence: passing tests, a link, file path or file attached
+with --upload. --propose needs --reason. Results list IDs. Correct a definitely rejected request; use a new request_id.
+After an uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
 
 --request sends one JSON body. Operations:
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
