@@ -417,11 +417,10 @@ def test_a_link_refused_for_another_reason_or_again_and_again_is_an_error_for_it
     blocker = Ref(key="acme/api#2", scope="acme/api", public=True, ident="3000000002")
     records = [issue(1, relations=[("blocked_by", blocker)]), issue(2)]
     links_only = lambda operations: all(op["op"] == "link.create" for op in operations)
-    write = refuse_when(fake, links_only, refusal("invalid_input", "operations[0] is not accepted"))
+    write = refuse_when(fake, links_only, refusal("invalid_input", "operations[0] is not accepted", hint="Fix link"))
     result = make(fake).run(records)
-    assert [o.__dict__ for o in result if o.kind == "links"] == [
-        {"key": "acme/api#1", "kind": "links", "outcome": "error", "message": "invalid_input: operations[0] is not accepted",
-         "item": None}]
+    assert [(o.key, o.kind, o.outcome, o.message, o.item, o.hint) for o in result if o.kind == "links"] == [
+        ("acme/api#1", "links", "error", "invalid_input: operations[0] is not accepted", None, "Fix link")]
     fake.write = write
     refuse_when(fake, links_only, refusal("link_cycle", "This relationship would create a work cycle", input_index=0))
     result = make(fake).run(records)
@@ -430,10 +429,43 @@ def test_a_link_refused_for_another_reason_or_again_and_again_is_an_error_for_it
 
 
 def test_a_refused_archive_is_an_error_for_its_issue(fake):
-    refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409))
+    refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409, hint="Re-read item"))
     result = make(fake).run([issue(1, archived="Archived in Linear on 2026-03-01")])
     assert [(o.kind, o.outcome, o.message) for o in result] == [("issue", "created", ""), ("issue", "error", "basis_changed: moved on")]
-    assert result[1].item is None and not fake.items[item_of_issue(fake, 1)]["archived"]
+    assert result[1].item is None and result[1].hint == "Re-read item"
+    assert not fake.items[item_of_issue(fake, 1)]["archived"]
+
+
+def test_refused_restore_keeps_its_hint(fake):
+    make(fake).run([issue(1, archived="Archived in GitHub")])
+    refuse_when(fake, lambda operations: operations[0]["op"] == "item.restore",
+                refusal("basis_changed", "changed since import", 409, hint="Fetch the new revision"))
+    result = make(fake).run([issue(1)])
+    assert [(o.outcome, o.message, o.hint) for o in result if o.outcome == "error"] == [
+        ("error", "basis_changed: changed since import", "Fetch the new revision")]
+
+
+def test_guarded_read_refusal_and_unsettled_failure_keep_hints(fake):
+    make(fake).run([issue(1)])
+    first = item_of_issue(fake, 1)
+    query = fake.query
+    fake.query = lambda body: refusal("not_available", "No record", hint="Read another item") if first in str(body.get("fetch")) else query(body)
+    result = make(fake).run([issue(1, body="Changed.")])
+    assert errors_of(result) == [{"code": "not_available", "count": 1, "message": "No record", "hint": "Read another item"}]
+    fake.query = query
+    fake.lose("write", after=False, times=2, when=lambda body: "3000000002" in body["request_id"])
+    result = make(fake).run([issue(2)])
+    assert result[0].outcome == "error" and result[0].hint
+    assert errors_of(result)[0]["hint"] == result[0].hint
+
+
+def test_one_refused_issue_and_discussion_count_as_two_error_outcomes_with_one_hint(fake):
+    refuse_when(fake, lambda operations: any(op["op"] == "item.create" for op in operations),
+                refusal("field_invalid", "field refused", hint="Use a valid field"))
+    result = make(fake).run([issue(1, comments=[said("A comment.")])])
+    assert [(o.kind, o.outcome, o.hint) for o in result] == [
+        ("issue", "error", "Use a valid field"), ("comments", "error", "Use a valid field")]
+    assert errors_of(result) == [{"code": "field_invalid", "count": 2, "message": "field refused", "hint": "Use a valid field"}]
 
 
 def test_four_refusals_fixed_in_turn_end_as_refused_repeatedly(fake):
@@ -491,7 +523,7 @@ def test_a_stale_part_a_person_changed_is_left_with_who_changed_it(fake):
     result = make(fake).run([issue(1, comments=big[:2])])
     assert [o.__dict__ for o in result if o.kind == "comments-2"] == [
         {"key": "acme/api#1", "kind": "comments-2", "outcome": "skipped",
-         "message": "no longer needed, but changed in WIRK (r2 by bob)", "item": part}]
+         "message": "no longer needed, but changed in WIRK (r2 by bob)", "item": part, "hint": None}]
     assert not fake.items[part]["archived"]
 
 
@@ -501,10 +533,11 @@ def test_a_stale_part_in_a_dry_run_when_wirk_refuses_and_once_archived(fake):
     part = part_two(fake)
     stale = lambda result: [(o.outcome, o.message, o.item) for o in result if o.kind == "comments-2"]
     assert stale(make(fake, dry_run=True).run([issue(1, comments=big[:2])])) == [("would archive", "", part)]
-    write = refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409))
+    write = refuse_when(fake, lambda operations: operations[0]["op"] == "item.archive", refusal("basis_changed", "moved on", 409, hint="Fetch current revision"))
     refused = make(fake).run([issue(1, comments=big[:2])])
     assert stale(refused) == [("error", "basis_changed: moved on", part)]
-    assert errors_of(refused) == [{"code": "basis_changed", "count": 1, "message": "moved on"}]  # summarized like other refusals
+    assert errors_of(refused) == [{"code": "basis_changed", "count": 1, "message": "moved on",
+                                   "hint": "Fetch current revision"}]
     fake.write = write
     archive = fake.writes()[-1]
     assert archive["operations"] == [{"op": "item.archive", "id": part}] and archive["expect"] == {part: 1}
@@ -518,4 +551,5 @@ def test_what_left_a_complete_read_is_named_missing_and_an_issue_outside_the_sel
     result = make(fake).run([issue(2)])
     assert [o.__dict__ for o in result if o.outcome == "missing"] == [
         {"key": "acme/api#1", "kind": "issue", "outcome": "missing",
-         "message": "deleted, transferred out or no longer visible in GitHub; nothing was archived", "item": item_of_issue(fake, 1)}]
+         "message": "deleted, transferred out or no longer visible in GitHub; nothing was archived",
+         "item": item_of_issue(fake, 1), "hint": None}]
