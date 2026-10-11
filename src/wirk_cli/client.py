@@ -139,7 +139,7 @@ class Service:
         import httpx
         for attempt in range(2 if resend else 1):
             try:
-                answer = self.http.post(self.url + route, json=body,
+                answer = self.http.post(self.url + route, json=body, timeout=httpx.Timeout(60 + body.get("wait", 0), connect=10),
                                         headers={"Authorization": f"Bearer {self._token}", **(headers or {})})
                 return self.envelope(answer, route, uncertain)
             except httpx.TransportError as error:
