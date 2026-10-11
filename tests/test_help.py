@@ -289,3 +289,22 @@ def test_query_help_names_the_answer_shape_the_cap_and_the_one_cut_hint(capsys):
     assert "32768 at depth all); larger is refused" in text
     assert "a cut body ends with … and one more: line that continues it" in text and "depth=all starts over" in text
 
+
+def test_write_help_spells_the_owner_three_ways_in_one_sentence(capsys):
+    """11be4836: owner=me in the CLI, work.owner_id on the wire, owner at the top of a read; none of them changes."""
+    sentences = [s for s in " ".join(help_of(capsys, "write").split()).split(". ") if "owner_id" in s]
+    assert len(sentences) == 1 and all(word in sentences[0] for word in ("owner=me", "work.owner_id", "owner at the top"))
+
+
+def test_write_edit_help_is_the_edit_section_alone(capsys):
+    """11be4836: `wirk write edit --help` printed the whole write help; it gives the edit form, its examples, the owner
+    spelling and the kind change a claim makes, within the line limit."""
+    text = help_of(capsys, "write", "edit")
+    lines = text.rstrip("\n").split("\n")
+    assert text != help_of(capsys, "write") and lines[0].startswith("usage: wirk write edit ID@N")
+    assert len(lines) <= 25 and max(map(len, lines)) <= 120
+    assert "write new" not in text and '{"op"' not in text
+    for needed in ("status=in_progress owner=me", "--evidence", "basis_changed", "record → work", "owner=me",
+                   "work.owner_id", "write message --on"):
+        assert needed in text, needed
+    assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # only edit has a section of its own

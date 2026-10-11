@@ -435,7 +435,7 @@ def main(argv: list[str] | None = None, transport=None) -> int:
             print(f"wirk {__version__}")
             return 0
         if not command or "--help" in words or "-h" in words:
-            print(HELP[command])
+            print(HELP.get(f"{command} {words[0]}", HELP[command]) if words else HELP[command])  # write edit has its own
             return 0
         positionals, options = parse(words, FLAGS[command])
         return COMMANDS[command](positionals, options, transport)

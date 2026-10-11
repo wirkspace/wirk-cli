@@ -74,13 +74,13 @@ links_in: the links to it by type (a count, by_status and at most 5 entries); qu
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
   write new 'Plan' kind=context level=initiative --body-file plan.md
 
-KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id,
-and the wirkspace's fields (status=open; a comma list for several; KEY= clears on edit).
-Context (kind=context) is the organization and its initiatives. A change to it applies directly
-when you may make it; otherwise it is refused with requires_review: propose it with --propose --reason.
---link TYPE is related_to, contributes_to or requires. --evidence is a completion's note: the tests
-that pass, a link, a file path, or a file attached with --upload. --propose needs --reason.
-Every result names the IDs it created. After an uncertain result, run the command its hint prints.
+KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
+fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
+request body and owner at the top of what query returns. Context (kind=context) is the organization and its
+initiatives. A change to it applies directly when you may make it; otherwise it is refused with requires_review:
+propose it with --propose --reason. --link TYPE is related_to, contributes_to or requires. --evidence is a completion's
+note: the tests that pass, a link, a file path, or a file attached with --upload. --propose needs --reason. Every
+result names the IDs it created. After an uncertain result, run the command its hint prints.
 
 --request sends one JSON body. Operations:
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
@@ -93,6 +93,24 @@ Every result names the IDs it created. After an uncertain result, run the comman
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
 expect holds the rN you read of each item you edit, archive or link from, and of the parent work (not an
 initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link), or it is refused as basis_changed.""",
+        "write edit": """usage: wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
+                      [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
+                      [--reason TEXT] [--propose] [--request-id ID] [--json]
+
+Change one item at the revision you read: N is the rN on its card, its fetch or your last receipt.
+
+  write edit 5c1e7a90@3 status=in_progress owner=me     claim it
+  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
+  write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner
+
+KEY=VALUE: owner (me or an ID) and the wirkspace's fields (status=open; a comma list for several).
+The owner is owner=me here, work.owner_id in a request body and owner at the top of what query returns.
+An owner turns a record into work and the receipt says so (record → work); a status alone on a record is refused.
+--body replaces the whole body; add progress as a message instead: wirk write message --on ID --body TEXT.
+--evidence is a completion's note: the tests that pass, a link, a file path, or a file attached with --upload.
+--propose needs --reason. A stale N is refused as basis_changed: query the item again and use its new rN.
+Kind, context and criteria change through wirk write --request (see wirk write --help).""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
