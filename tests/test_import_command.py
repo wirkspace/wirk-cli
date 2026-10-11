@@ -1,6 +1,7 @@
 """`wirk import` as a person and an agent meet it (docs/plans/importers.md §2): the dry run, the setup request, the
 importer's own token, the runs after, the report and the exit status."""
 
+import hashlib
 import json
 import os
 import stat
@@ -213,6 +214,78 @@ def test_when_every_issue_errors_the_json_names_the_error_once_with_its_count(wo
     assert answer["errors"] == [{"code": "invalid_input", "count": 2, "message": "operations[0] is not accepted"}]
     code, out, err = world["run"]("github", "acme")
     assert "errors: 2 invalid_input: operations[0] is not accepted" in out
+
+
+def test_per_issue_hints_keep_first_nonempty_per_code_in_cli_text_and_json(world):
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    world["gh"].repos[0] = repo("acme/web", issues=5)
+    world["gh"].issues["acme/web"] = [node(n) for n in range(1, 6)]
+    hints = {1: None, 2: "", 3: "First 漢字\nsecond", 4: "Later hint", 5: "Other hint"}
+
+    def refuse_issue(body):
+        number = int(body["request_id"].split("300000000", 1)[1].split("-", 1)[0])
+        code = "field_invalid" if number < 5 else "other_error"
+        return refusal(code, f"problem {number}", hint=hints[number], private="synthetic-private-marker")
+
+    world["fake"].write = refuse_issue
+    code, out, err = world["run"]("github", "acme", "--json")
+    json_output, json_error = out, err
+    answer = json.loads(out)
+    assert code == 1 and err == "" and not answer["ok"]
+    assert answer["errors"] == [
+        {"code": "field_invalid", "count": 4, "message": "problem 1", "hint": "First 漢字\nsecond"},
+        {"code": "other_error", "count": 1, "message": "problem 5", "hint": "Other hint"},
+    ]
+    assert json.dumps(answer["data"]["outcomes"][2], ensure_ascii=False) == (
+        '{"key": "acme/web#3", "kind": "issue", "outcome": "error", '
+        '"message": "field_invalid: problem 3", "item": null}'
+    )
+    code, out, err = world["run"]("github", "acme")
+    assert code == 1 and err == ""
+    assert "errors: 4 field_invalid: problem 1\n  First 漢字\nsecond\n" in out
+    assert "errors: 1 other_error: problem 5\n  Other hint\n" in out
+    assert out.count("First 漢字") == 1 and "Later hint" not in out
+    private = "synthetic-private-marker"
+    token = (world["home"] / "import" / "wirk-token-github-import").read_text().strip()
+    assert all(value not in json_output + json_error + out + err for value in (private, token, AGENT))
+
+
+def test_same_code_stop_stays_separate_from_issue_hint(world):
+    from wirk_cli.client import Failure
+
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    calls = 0
+
+    def refuse_then_stop(body):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return refusal("service_unavailable", "issue refused", hint="Fix this issue")
+        raise Failure("service_unavailable", "service stopped", "Check service")
+
+    world["fake"].write = refuse_then_stop
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    assert code == 2 and answer["errors"] == [
+        {"code": "service_unavailable", "count": 1, "message": "service stopped", "hint": "Check service"},
+        {"code": "service_unavailable", "count": 1, "message": "issue refused", "hint": "Fix this issue"},
+    ]
+    assert err == "Error import: service_unavailable: service stopped\n  Check service\n"
+    assert answer["data"]["outcomes"][0]["message"] == "service_unavailable: issue refused"
+
+
+def test_non_json_write_failure_keeps_body_and_tokens_out_of_import_report(world):
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    world["fake"].write = lambda body: httpx.Response(503, text="synthetic-private-body-marker")
+    code, out, err = world["run"]("github", "acme", "--json")
+    answer = json.loads(out)
+    token = (world["home"] / "import" / "wirk-token-github-import").read_text().strip()
+    assert code == 1 and err == "" and answer["errors"][0]["code"] == "outcome_unknown"
+    assert answer["errors"][0]["hint"]
+    assert all(value not in out + err for value in ("synthetic-private-body-marker", token, AGENT))
 
 
 def test_the_setup_is_a_persons_step_and_says_so(world):
@@ -459,3 +532,28 @@ def test_a_captcha_or_a_dead_token_during_a_project_read_stops_the_jira_run(answ
     monkeypatch.setattr(jira, "TRANSPORT", httpx.MockTransport(source))
     code, out, err = jira_world["run"]("SEED", "--dry-run")
     assert code == 2 and said in err and not jira_world["fake"].writes()
+
+
+def test_success_and_hintless_cli_bytes_match_main_baseline(world, monkeypatch):
+    from itertools import count
+    counts = count(1)
+    monkeypatch.setattr("secrets.token_hex", lambda n: f"{next(counts):0{2*n}x}")
+    world["run"]("github", "acme", "--dry-run")
+    register(world)
+    success = world["run"]("github", "acme")
+    current_json = world["run"]("github", "acme", "--json")
+    world["gh"].repos[0] = repo("acme/web", issues=3)
+    world["gh"].issues["acme/web"].append(node(3))
+    world["fake"].write = lambda body: refusal("invalid_input", "operations[0] is not accepted")
+    hintless = world["run"]("github", "acme")
+    hintless_json = world["run"]("github", "acme", "--json")
+    # Byte-exact stdout baselines captured on main 3de8628, with exit codes and stderr.
+    runs = (success, current_json, hintless, hintless_json)
+    assert [code for code, _, _ in runs] == [0, 0, 1, 1]
+    assert [err for _, _, err in runs] == ["", "", "", ""]
+    assert [hashlib.sha256(out.encode()).hexdigest() for _, out, _ in runs] == [
+        "a86ff8194aa4717c7dd956b94c1f24cf248c33339e9303be9124b1c3ba4e5faf",
+        "2153f57e071d2df04ff3cb7de67fc09c04e6eb68af87b75bb5a57367322cf1b3",
+        "e8534d68e75a07368f69e331d969b244a41cf446732c2665aa8bb0bd49d5978a",
+        "47aac47b5e855794ff2392a1c4d76c5f0cae5fb5ab52409886dcc7eaa2b40a3b",
+    ]

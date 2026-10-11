@@ -48,13 +48,16 @@ def problem(stop: Exception) -> dict:
 
 
 def errors_of(outcomes: list) -> list:
-    """Each kind of error once, with how many issues it hit and its first message."""
+    """Each kind of error once, with its count, first message and first hint."""
     found = {}
     for outcome in outcomes:
         if outcome.outcome == "error":
             coded = CODED.fullmatch(outcome.message)
             code, message = coded.groups() if coded else ("error", outcome.message)
-            found.setdefault(code, {"code": code, "count": 0, "message": message})["count"] += 1
+            entry = found.setdefault(code, {"code": code, "count": 0, "message": message})
+            entry["count"] += 1
+            if outcome.hint and "hint" not in entry:
+                entry["hint"] = outcome.hint
     return list(found.values())
 
 
@@ -221,7 +224,9 @@ class Run:
         errors = ([problem(stopped)] if stopped else []) + failed
         if self.json:
             print(json.dumps({"ok": not errors, "errors": errors,
-                              "data": {"summary": summary, "outcomes": [o.__dict__ for o in outcomes]}}, ensure_ascii=False))
+                              "data": {"summary": summary, "outcomes": [
+                                  {"key": o.key, "kind": o.kind, "outcome": o.outcome, "message": o.message, "item": o.item}
+                                  for o in outcomes]}}, ensure_ascii=False))
             return
         space = you["wirkspace"]
         lines = [f"{self.adapter.source} {' '.join(self.selection)} → wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}) "
@@ -237,7 +242,8 @@ class Run:
                       "  " + command("wirk", "import", self.source, *(self.selection or census.selected),
                                      *(name for name, _ in census.skipped), "--dry-run")]
         lines.append("items: " + (" · ".join(f"{outcome}: {count}" for outcome, count in sorted(counts.items())) or "none"))
-        lines += [f"errors: {error['count']} {error['code']}: {error['message']}" for error in failed]
+        lines += [f"errors: {error['count']} {error['code']}: {error['message']}"
+                  + (f"\n  {error['hint']}" if error.get("hint") else "") for error in failed]
         fields = [f"header only: {key} ({count} values, over the limit of {self.limit})" for key, count in large.items()]
         fields += [f"missing options in {key}: {', '.join(sorted(values)[:5])}" for key, values in importer.missing.items()]
         fields += [f"not set up yet: {', '.join(sorted(importer.unset))}"] if importer.unset else []
