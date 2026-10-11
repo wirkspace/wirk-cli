@@ -61,6 +61,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.9
+
+- `wirk import` keeps the first structured hint for each kind of error and prints it once beneath the aggregate; the JSON outcomes keep their five keys.
+- `wirk query --help` shows the `--request` form that reads a file's text with its fidelity line (a whole-file `select`), and points at the cites link for an exact quotation.
+
 ### 0.4.8
 
 - `wirk query --help` names where a `--json` answer keeps what (`data.results[]` for a fetch, `data.cards[]` for a list, `r` as the revision, `owner` and `fields`, `page.next_cursor`, `notifications`), that `max_bytes` above 65536 is refused, and that a cut body carries one hint, the line that continues it; `depth=all` comes on its last page.
