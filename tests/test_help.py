@@ -277,3 +277,15 @@ def test_write_help_gives_the_message_forms_beside_the_json_shapes(capsys):
 
 def test_query_help_says_a_list_leaves_messages_out_unless_it_asks(capsys):
     assert "A list leaves messages out unless it asks" in " ".join(help_of(capsys, "query").split())
+
+
+def test_query_help_names_the_answer_shape_the_cap_and_the_one_cut_hint(capsys):
+    """11be4836 (joint record §1.5): where a JSON answer keeps what, how far max_bytes goes, and that a cut body has one
+    hint, the line that continues it, with depth=all left to its last page."""
+    text = " ".join(help_of(capsys, "query").split())
+    for shape in ("data.results[]", "data.cards[]", "r (its revision", "fields and owner", "page.next_cursor",
+                  "notifications", "body_complete"):
+        assert shape in text, shape
+    assert "32768 at depth all); larger is refused" in text
+    assert "a cut body ends with … and one more: line that continues it" in text and "depth=all starts over" in text
+

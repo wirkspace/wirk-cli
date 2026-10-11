@@ -59,7 +59,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- `wirk query --help` names where a `--json` answer keeps what (`data.results[]` for a fetch, `data.cards[]` for a list, `r` as the revision, `owner` and `fields`, `page.next_cursor`, `notifications`), that `max_bytes` above 65536 is refused, and that a cut body carries one hint, the line that continues it; `depth=all` comes on its last page.
 
 ### 0.4.7
 

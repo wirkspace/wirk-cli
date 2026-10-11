@@ -37,9 +37,7 @@ what needs your review, recent changes and how to ask for more. It writes nothin
 
 Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys you give choose which.
 
-  query 5c1e7a90                       one item, with its links and the context it serves
-  query 5c1e7a90@2                     revision 2 of it
-  query 'Exact title'                  an item by its exact title
+  query 5c1e7a90                       one item with its links and context; 5c1e7a90@2 is revision 2; 'Exact title' too
   query about='webhook retries'        what matters for these words; by meaning on Pro, else by words
   query text='exact words'             items containing these words
   query status=open,in_progress kind=work owner=me     a list; a comma means any of
@@ -49,15 +47,17 @@ Fetch, list, find by words (by meaning on Pro) or look up a receipt; the keys yo
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
-max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all).
+max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
 Every other KEY=VALUE is a filter; status lists them. A list leaves messages out unless it asks for them.
 Quote a title or words with spaces. A result line "label: command" is the next command to run.
 
-What did not fit is named: a cut body ends with … and its own more: line, blocks on a "not shown" line,
-refs shown as cards only on a "Left out for the budget" line. With --json, page.complete is false until
-all is read, body_complete covers the body alone, and a left_out notice names those refs.
-Links lists the item's own links (links_out, a list); Linked from groups the links to it by type
-(links_in: a count, by_status and at most 5 entries); query linked=ID lists them all.""",
+--json answers {ok, errors, notices, page, data, notifications}: a fetch in data.results[], a list in data.cards[],
+each with r (its revision, the N of ID@N), fields and owner (on work); notifications: messages waiting for you.
+Each cut is named once: a cut body ends with … and one more: line that continues it where it stopped (in JSON
+the view's more, and page.next_cursor when one item was fetched); depth=all starts over, so only a last page has it.
+Dropped blocks get a "not shown" line, refs left as cards a "Left out for the budget" line (a left_out notice);
+page.complete is false until all is read, body_complete covers the body alone. links_out: the item's own links;
+links_in: the links to it by type (a count, by_status and at most 5 entries); query linked=ID lists them all.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--allow-duplicate-of ID]…
        wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
