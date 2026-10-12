@@ -1,6 +1,6 @@
-"""The Jira adapter (docs/plans/importers.md §6) on synthetic answers through a fake Jira Cloud. The answers are shaped
-from the REST v3 OpenAPI the Jira note read (issue, search/jql, changelog bulk fetch, comments, worklogs, remote links,
-fields, projects) and Atlassian's document format; real-site evidence waits for the person's site (the plan's J rows)."""
+"""The Jira adapter on synthetic answers through a fake Jira Cloud. The answers are shaped
+from Jira's REST v3 OpenAPI (issue, search/jql, changelog bulk fetch, comments, worklogs, remote links,
+fields, projects) and Atlassian's document format; real-site evidence waits for the person's site."""
 
 import base64
 import json
@@ -544,7 +544,7 @@ def test_a_move_at_a_time_that_cannot_be_read_withholds_the_whole_history(folder
     assert b"Outside" not in archive and b"legal hold" not in archive and b"Later words" not in archive
 
 
-# ---------------------------------------------------------------- project docs (docs/plans/importers-jira-projects.md)
+# ---------------------------------------------------------------- project docs
 
 def docs(records):
     return {record.key: record for record in records if record.kind == "project"}

@@ -1,4 +1,4 @@
-"""Links between imported issues (docs/plans/importers.md §3.6): planned once per pair, the fallbacks with their notes,
+"""Links between imported issues: planned once per pair, the fallbacks with their notes,
 no link to an item archived in WIRK, the importer's own links kept in step, never a person's."""
 
 from import_fakes import FakeWirk

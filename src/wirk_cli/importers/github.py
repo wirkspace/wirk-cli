@@ -1,4 +1,4 @@
-"""The GitHub adapter (docs/plans/importers.md §4): issues read through the person's `gh` login, with GraphQL queries and
+"""The GitHub adapter: issues read through the person's `gh` login, with GraphQL queries and
 GETs only. It never reads gh's token and never writes to GitHub; pull requests are counted, never read."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -28,8 +28,8 @@ SPENT = re.compile(r"API rate limit (already )?exceeded", re.I)  # the hour's bu
 RESET = "query { rateLimit { cost remaining resetAt } }"
 TIMEOUT = re.compile(r"timeout|HTTP 50[234]|Something went wrong", re.I)
 PAGE = 25
-READERS = 4  # timelines read at once (decision 80); writes to WIRK stay one at a time
-CAP = 100 * 1024 * 1024  # bytes a download may hold (§3.7)
+READERS = 4  # timelines read at once; writes to WIRK stay one at a time
+CAP = 100 * 1024 * 1024  # bytes a download may hold
 # Where GitHub serves attachment bytes; a redirect anywhere else is not followed, and no credential is ever sent.
 FILE_HOSTS = {"github.com", "objects.githubusercontent.com", "private-user-images.githubusercontent.com",
               "user-images.githubusercontent.com"}
@@ -98,7 +98,7 @@ def connections(projects: bool) -> dict:
 
 def issue_fields(projects: bool) -> str:
     """An issue's fields for the paged query. Its timeline is not among them: GitHub's paged query can return a timeline
-    short, totalCount included, without saying so, so each issue's timeline is read on its own (§4.1)."""
+    short, totalCount included, without saying so, so each issue's timeline is read on its own."""
     paged = " ".join(f"{name}({args}) {{ pageInfo {{ hasNextPage endCursor }} {nodes} }}"
                      for name, (args, nodes) in connections(projects).items() if name != "timelineItems")
     return (f"id fullDatabaseId number title body url state stateReason(enableDuplicate: true) createdAt updatedAt closedAt "

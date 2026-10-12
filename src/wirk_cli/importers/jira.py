@@ -1,4 +1,4 @@
-"""The Jira adapter (docs/plans/importers.md §6): a Jira Cloud site's issues read through REST v3 with a scoped read-only
+"""The Jira adapter: a Jira Cloud site's issues read through REST v3 with a scoped read-only
 API token. Site, login and token sit in one owner-only file, <config>/import/jira-key; requests go only to Atlassian's
 API gateway for the site, reads only, and no email is kept. Restricted issues, comments and worklogs are skipped unless
 the issue is named."""
@@ -38,7 +38,7 @@ CHURN = {"comment", "worklog", "updated", "watches", "votes", "timeoriginalestim
          "aggregatetimeoriginalestimate", "aggregatetimeestimate", "aggregatetimespent", "timetracking", "progress",
          "aggregateprogress"}
 CAP = 100 * 1024 * 1024
-# a project doc's archive holds only what the doc shows, plus IDs (docs/plans/importers-jira-projects.md §3)
+# a project doc's archive holds only what the doc shows, plus IDs
 VERSION, SPRINT = ("id", "name", "released", "archived", "startDate", "releaseDate"), \
     ("id", "name", "state", "startDate", "endDate", "completeDate", "goal")
 
@@ -88,7 +88,7 @@ def placed(entry: dict) -> tuple:
 
 class Jira:
     source, noun, unit, needs_selection = SOURCE, NOUN, "Jira requests", False
-    # resolutions of done work that mean it was not done (§6); the map file's "cancelled" replaces them
+    # resolutions of done work that mean it was not done; the map file's "cancelled" replaces them
     cancelled = {"Won't Do", "Duplicate", "Won't Fix", "Cannot Reproduce", "Declined"}
 
     def __init__(self, http=None, sleep=None, folder=None, clock=None):
@@ -246,7 +246,7 @@ class Jira:
         return docs
 
     def project(self, node: dict, components: list, versions: list, sprints: list) -> render.Record:
-        """The doc and its archive, both from the same allowlist (§3 of the plan)."""
+        """The doc and its archive, both from the same allowlist."""
         raw = {"project": {**{key: node.get(key) for key in ("id", "key", "name", "description")}, "lead": person(node.get("lead"))},
                "components": [{"id": c["id"], "name": c["name"], "lead": person(c.get("lead"))} for c in by_id(components)],
                "versions": [{key: v.get(key) for key in VERSION} for v in by_id(versions)],
@@ -320,7 +320,7 @@ class Jira:
         moves = [next((i for i in e.get("items", []) if i.get("field") == "project"), None) for e in ordered]
         where = next((m.get("from") for m in moves if m is not None), f["project"]["id"])  # where it began; unknown fails closed
         lost = any(placed(e)[0] and m is not None for e, m in zip(ordered, moves))  # a move at an unknown time: none is shown
-        for entry, move in zip(ordered, moves):  # a change made in, or moving into or out of, a project not selected names it (§3.9)
+        for entry, move in zip(ordered, moves):  # a change made in, or moving into or out of, a project not selected names it
             before, where = (move.get("from"), move.get("to")) if move is not None else (where, where)
             self.outside |= {entry.get("id")} if lost or placed(entry)[0] or {before, where} - self.shown_projects else set()
         raw = {"issue": clean({**node, "fields": self.archived(f, attachments)}), "worklogs": clean(worklogs),
@@ -370,7 +370,7 @@ class Jira:
         return self.paged(f"/rest/api/3/issue/{node['id']}/{field}", key, size)
 
     def fields_and_facts(self, f: dict) -> tuple[dict, list, list]:
-        """Field values by name (small current sets only become fields, §6), header facts, and paragraph-field sections."""
+        """Field values by name (small current sets only become fields), header facts, and paragraph-field sections."""
         sprints, points, custom, sections, fields = [], None, [], [], defaultdict(list)
         for ident, definition in self.fields.items():
             value = f.get(ident)
@@ -446,7 +446,7 @@ class Jira:
         return check
 
     def download(self, attachment) -> bytes | None:
-        """The bytes, streamed by Jira itself (redirect=false), so the token never follows a redirect (§3.7)."""
+        """The bytes, streamed by Jira itself (redirect=false), so the token never follows a redirect."""
         if not attachment.url.startswith(self.base + "/rest/api/3/attachment/content/"):
             return None
         try:

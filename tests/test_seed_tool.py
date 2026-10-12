@@ -1,4 +1,4 @@
-"""The GitHub seed tool's guard rails (docs/plans/importers.md §4.6): it writes only to the seed repositories, paces
+"""The GitHub seed tool's guard rails: it writes only to the seed repositories, paces
 itself under GitHub's content limits, keeps credential shapes and the sentinel where they belong, and is idempotent."""
 
 import json
