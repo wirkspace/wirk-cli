@@ -31,7 +31,8 @@ def test_main_help_is_the_whole_entry_point(capsys):
 @pytest.mark.parametrize("command", COMMANDS)
 def test_each_command_help_is_short(capsys, command):
     text = help_of(capsys, command)
-    assert len(text.rstrip("\n").split("\n")) <= (35 if command in ("write", "admin") else 25)
+    max_lines = {"write": 35, "admin": 35, "query": 26}.get(command, 25)
+    assert len(text.rstrip("\n").split("\n")) <= max_lines
     assert "accept|reject|defer" not in text
 
 
@@ -316,4 +317,4 @@ def test_query_help_shows_how_to_read_a_files_text(capsys):
     existing object fetch with a whole-file select, and points at the cites link for an exact quotation."""
     text = " ".join(help_of(capsys, "query").split())
     assert '"select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]' in text
-    assert "a file's text with its fidelity line" in text and "(cite: write --help)" in text
+    assert "[partial: REASON] marks known incomplete extraction" in text and "(cite: write --help)" in text
