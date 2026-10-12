@@ -46,7 +46,7 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
   query --request FILE              a file's derived text; [partial: REASON] marks known incomplete extraction
                                     whole-file quote: exact full text and newlines
        {"fetch":[{"ref":"ID","select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]}]}  (cite: write --help)
-With --request, an explicit format in the file is kept; --json still controls CLI output.
+With --request, --json prints JSON but keeps an explicit file format; set \"format\":\"json\" in the file too.
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
 And wait (0–60 s, with inbox=me). Lists: sort=changed is newest first; leading - reverses. A list leaves messages out
