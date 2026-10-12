@@ -1,4 +1,4 @@
-"""What the importer writes, from plain records (docs/plans/importers.md §3.2, §3.3, §3.9): pure, deterministic."""
+"""What the importer writes, from plain records: pure, deterministic."""
 
 import json
 

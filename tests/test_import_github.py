@@ -1,4 +1,4 @@
-"""The GitHub adapter (docs/plans/importers.md §4.1, §4.2) on synthetic GraphQL pages through a fake `gh`."""
+"""The GitHub adapter on synthetic GraphQL pages through a fake `gh`."""
 
 import json
 
@@ -276,7 +276,7 @@ def test_timelines_are_read_issue_by_issue():
 
 
 def test_timelines_are_read_four_at_a_time_and_kept_in_order():
-    """Decision 80: at most four timeline reads at once; the records keep GitHub's order."""
+    """At most four timeline reads at once; the records keep GitHub's order."""
     import threading
     import time as clock
     events = lambda n: page([{"__typename": "LabeledEvent", "createdAt": "2026-09-02T00:00:00Z", "actor": {"login": "ada"},

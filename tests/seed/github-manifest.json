@@ -1,5 +1,5 @@
 {
- "about": "Synthetic seed for the GitHub importer's evidence runs (docs/plans/importers.md §4.6). Every text is invented. {key:X} is seed X's owner/repo#number, {n:X} its number, {sentinel} the private sentinel. Each issue's expect states the WIRK result the plan's mapping gives; it is written from the plan, never from the importer's code. A change's expect overrides its seed's expect once the change's stage is applied (verify with --stage N).",
+ "about": "Synthetic seed for the GitHub importer's evidence runs. Every text is invented. {key:X} is seed X's owner/repo#number, {n:X} its number, {sentinel} the private sentinel. Each issue's expect states the WIRK result expected for that seed; it is maintained independently of the importer's code. A change's expect overrides its seed's expect once the change's stage is applied (verify with --stage N).",
  "owner": "wirkspace",
  "sentinel": "PRIVSEED-1ba3bd",
  "repos": {

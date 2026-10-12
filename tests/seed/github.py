@@ -1,4 +1,4 @@
-"""Fill the GitHub import seed repositories from github-manifest.json (docs/plans/importers.md §4.6).
+"""Fill the GitHub import seed repositories from github-manifest.json.
 
 Test code for the importer's evidence; the importer never imports it. It writes only to repositories of the manifest's
 owner whose names start with import-seed-, never deletes, and paces content requests under GitHub's limits: one a second

@@ -1,4 +1,4 @@
-"""The importer against WIRK (docs/plans/importers.md §3.4–§3.7): the index and its trust rules, the decision for each
+"""The importer against WIRK: the index and its trust rules, the decision for each
 object, one issue per write, refusals, receipts and files, on an in-memory WIRK."""
 
 from dataclasses import replace

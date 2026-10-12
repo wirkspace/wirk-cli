@@ -1,4 +1,4 @@
-"""What the importer writes, rendered from plain records: pure functions, no I/O (docs/plans/importers.md §3.2, §3.3, §3.9).
+"""What the importer writes, rendered from plain records: pure functions, no I/O.
 
 The same records always render the same bytes, so the hash on the first line tells a re-run whether anything changed.
 Text from the source is cleaned once here: control characters stripped, credential shapes redacted, the GitHub
@@ -43,7 +43,7 @@ RELATIONS = ("parent", "sub_issue", "project", "milestone", "of", "initiative", 
 
 
 class Stop(Exception):
-    """The run cannot start or go on; `fix` is what helps (exit status 2, §2.3)."""
+    """The run cannot start or go on; `fix` is what helps (exit status 2)."""
 
     def __init__(self, message: str, fix: str = "", code: str | None = None):
         super().__init__(message)
@@ -103,7 +103,7 @@ class Census:
     """What a read found: the selection, what it skipped and why, its counts and what it cost."""
     selected: list = field(default_factory=list)
     skipped: list = field(default_factory=list)  # (scope, its issues or None): not public and not named
-    named_private: list = field(default_factory=list)  # (scope, visibility, issues): not public, named (§3.9)
+    named_private: list = field(default_factory=list)  # (scope, visibility, issues): not public, named
     pulls: int | None = None  # pull requests, counted and skipped (GitHub)
     issues: int = 0
     comments: int = 0
@@ -179,7 +179,7 @@ def notice(ctx: Context) -> str:
 
 
 def refs(ctx: Context, values: list, counts: Counter, notes: dict | None = None, holder: str = "", most: int | None = None) -> str:
-    """References as shown, a fallback's note after its own (§3.6), the withheld ones counted; past `most`, a count."""
+    """References as shown, a fallback's note after its own, the withheld ones counted; past `most`, a count."""
     shown = [f"[{ref.key}]" + (f" ({note})" if (note := (notes or {}).get((holder, ref.ident)) or ref.note) else "")
              for ref in values if ctx.shown(ref)]
     withheld, more = len(values) - len(shown), max(0, len(shown) - (most or len(shown)))
@@ -322,7 +322,7 @@ def sealed(rendered: Rendered, source: str, ident: str, digest_: str) -> str:
 
 # ---------------------------------------------------------------- fields and file names
 
-# Keys the CLI, the request or the filters read as their own: a field may never take one (§3.8).
+# Keys the CLI, the request or the filters read as their own: a field may never take one.
 RESERVED = {"kind", "state", "proposal", "owner", "linked", "folder", "changed_days", "text", "archived", "status", "about",
             "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id", "task", "format", "fetch", "fields",
             "level"}
@@ -358,7 +358,7 @@ def field_key(name: str, source: str) -> str:
 
 
 def plan_fields(records: list, selections: dict, source: str) -> dict:
-    """Every field the source may fill, with the options in use; those within the field limit become fields (§3.8)."""
+    """Every field the source may fill, with the options in use; those within the field limit become fields."""
     used = {name: {} for name in selections}
     for record in records:
         for name, values in record.fields.items():

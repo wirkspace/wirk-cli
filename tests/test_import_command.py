@@ -1,4 +1,4 @@
-"""`wirk import` as a person and an agent meet it (docs/plans/importers.md §2): the dry run, the setup request, the
+"""`wirk import` as a person and an agent meet it: the dry run, the setup request, the
 importer's own token, the runs after, the report and the exit status."""
 
 import hashlib
