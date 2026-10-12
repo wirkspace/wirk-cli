@@ -309,7 +309,7 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
     for needed in ("status=in_progress owner=me", "--evidence", "basis_changed", "record → work", "owner=me",
                    "work.owner_id", "write message --on"):
         assert needed in text, needed
-    assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # only edit has a section of its own
+    assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # new uses general write help
 
 
 @pytest.mark.parametrize("form, first_line, needed", [
@@ -317,7 +317,7 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
                                                "workspace_id=ID", "--request-id", "--json",
                                                "active work", "inbox", "--propose is refused")),
     ("seen", "usage: wirk write seen", ("workspace_id=ID", "--request-id", "--json",
-                                           "addressed to you", "boards of work you own", "across sessions",
+                                           "addressed to you", "boards of work you own", "ancestor boards", "across sessions",
                                            "receipt, not agreement", "own handoff")),
 ])
 def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, form, first_line, needed):

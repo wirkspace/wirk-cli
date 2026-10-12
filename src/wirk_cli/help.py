@@ -128,8 +128,8 @@ even without --on; owners of active work may see posts on its or ancestor boards
 Use the same --request-id and body after an uncertain send. Messages apply directly; --propose is refused.""",
         "write seen": """usage: wirk write seen ID… [workspace_id=ID] [--request-id ID] [--json]
 
-Mark only handled messages addressed to you or on boards of work you own.
-Separate IDs with spaces or commas.
+Mark only handled messages addressed to you or on boards of work you own,
+or on ancestor boards reached through contributes_to. Separate IDs with spaces or commas.
 Marking seen acknowledges receipt, not agreement. It clears these IDs from this principal's inbox
 across sessions, but keeps the messages and does not change their work. Do not clear your own handoff.
 
