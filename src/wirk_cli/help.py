@@ -43,7 +43,8 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
   query proposal=proposed,deferred     proposals waiting for a decision; kind=context state=active lists initiatives
   query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review
-  query --request FILE              a file's text with its fidelity line; whole-file quote: exact full text and newlines
+  query --request FILE              a file's derived text; [partial: REASON] marks known incomplete extraction
+                                    whole-file quote: exact full text and newlines
        {"fetch":[{"ref":"ID","select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]}]}  (cite: write --help)
 
 Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, default 20), cursor, workspace_id,
