@@ -1,4 +1,4 @@
-"""Attachments (docs/plans/importers.md §3.7, §4.1; conditions 1 and the cap): found in bodies and comments, named by a hash
+"""Attachments: found in bodies and comments, named by a hash
 of their source ID, downloaded only when their item is written, through allowlisted redirects without credentials."""
 
 import hashlib

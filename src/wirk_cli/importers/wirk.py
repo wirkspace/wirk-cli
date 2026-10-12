@@ -1,4 +1,4 @@
-"""The importer against WIRK (docs/plans/importers.md §3.4–§3.7): the index of earlier imports and its trust rules, the
+"""The importer against WIRK: the index of earlier imports and its trust rules, the
 decision for each object, one issue per write, refusals, receipts and files. WIRK's index is the only state."""
 
 from collections import Counter, defaultdict
@@ -115,7 +115,7 @@ class Wirk:
 
 
 class Index:
-    """Every item whose first line is a provenance line of this source, trusted as §3.4 says."""
+    """Index prior imported items by this source's provenance line."""
 
     def __init__(self, wirk: Wirk, source: str, me: str):
         self.wirk, self.source, self.me = wirk, source, me
@@ -224,7 +224,7 @@ class Importer:
                 raise  # the client's own failure, or no file storage: every issue would fail the same way
             return [Outcome(key, kind, "error", f"{error.code}: {error}", hint=error.hint)]
 
-    # ---------------------------------------------------------------- links (§3.6)
+    # ---------------------------------------------------------------- links
 
     def plan_links(self, records: list) -> None:
         """Every link the source asks for between this run's issues, once per pair, with each fallback's note."""
@@ -409,7 +409,7 @@ class Importer:
             return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
                                for plan, action, held, message in decided if action in ("create", "update")] + \
                 self.stale(record, len(plans) - 1) + self.mirror(record, plans)
-        # the work item and the discussion's first part go in one write; later parts one to a write (§3.5)
+        # the work item and the discussion's first part go in one write; later parts one to a write
         together = [entry for entry in acting if entry[0].kind in (record.kind, "comments")]
         work = held.item if held else None
         if together:
@@ -614,5 +614,5 @@ class Importer:
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
-    """A link as the plan holds it: related_to is the same either way round."""
+    """A canonical link key: related_to is the same either way round."""
     return (kind, *sorted((source, target), key=lambda ident: (len(ident), ident))) if kind == "related_to" else (kind, source, target)

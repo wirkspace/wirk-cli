@@ -1,4 +1,4 @@
-"""Jira's ADF to Markdown (docs/plans/importers.md §6; the Jira note's §2.8 contract): pure, deterministic, and no text
+"""Jira's ADF to Markdown: pure, deterministic, and no text
 character ever dropped. Nodes and attributes follow Atlassian's ADF document format."""
 
 from collections import Counter

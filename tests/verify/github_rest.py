@@ -1,7 +1,7 @@
-"""An independent check of a GitHub import (docs/plans/importers.md §7: A5, A6, A14 and the seed manifest).
+"""An independent check of a GitHub import.
 
 It reads GitHub through the REST API, never GraphQL, and WIRK over plain HTTP, and shares no code with the importer:
-every rule it applies is written here again from the plan. It prints every difference and exits 1 when there is one.
+its expected mapping is encoded here independently of the importer. It prints every difference and exits 1 when there is one.
 
     python tests/verify/github_rest.py WIRK_CONFIG_DIR OWNER/REPO… [--manifest FILE [--stage N]] [--public-only] [--sentinel TEXT]
 """
@@ -19,7 +19,7 @@ import httpx
 
 REDACTED = "[redacted: possible credential]"
 CONTROLS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f؜​‎‏‪-‮⁠-⁩﻿]")
-LEFT_OUT = {"commented", "mentioned", "subscribed", "unsubscribed"}  # the plan keeps these out of the issue's archive
+LEFT_OUT = {"commented", "mentioned", "subscribed", "unsubscribed"}  # these are not included in an issue's archive
 PROJECT = {"added_to_project", "moved_columns_in_project", "removed_from_project", "converted_note_to_issue",
            "added_to_project_v2", "removed_from_project_v2", "project_v2_item_status_changed", "converted_from_draft"}
 
@@ -81,7 +81,7 @@ def clean(text: str) -> str:
 
 
 def same(stored: str, original: str) -> bool:
-    """WIRK's text equals GitHub's but for what the plan changes: redacted shapes and guarded markers."""
+    """WIRK's text matches GitHub's after redaction and guarded marker handling."""
     stored = stored.replace("⁠", "")
     pattern = "[\\s\\S]+?".join(re.escape(part) for part in stored.split(REDACTED))
     return re.fullmatch(pattern, clean(original)) is not None
@@ -225,7 +225,7 @@ class Check:
 
 
 def manifest_check(check: Check, manifest: dict):
-    """Every seeded issue's expected result, as the manifest states it (written from the plan, not the importer)."""
+    """Every seeded issue's expected result, as the manifest states it (maintained independently of the importer)."""
     numbers = {}
     for key, spec in manifest["repos"].items():
         full = f"{manifest['owner']}/{spec['name']}"

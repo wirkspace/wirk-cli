@@ -1,4 +1,4 @@
-"""The Linear adapter (docs/plans/importers.md §5): issues read through Linear's GraphQL API with a personal key restricted
+"""The Linear adapter: issues read through Linear's GraphQL API with a personal key restricted
 to Read, saved owner-only at <config>/import/linear-key. Queries only; the key goes only to Linear; no email is asked for."""
 
 from collections import Counter, defaultdict
@@ -18,7 +18,7 @@ from .render import Stop
 
 SOURCE, NOUN = "Linear", ("team", "teams")
 API = "https://api.linear.app/graphql"
-FILE_HOSTS = {"uploads.linear.app"}  # where uploads are read, with the key; anything else stays a link (§3.7)
+FILE_HOSTS = {"uploads.linear.app"}  # where uploads are read, with the key; anything else stays a link
 TRANSPORT = None  # how requests leave; tests answer through a fake
 KEY = re.compile(r"lin_api_[A-Za-z0-9]{20,}")
 LABELS = {"parent": "Parent", "sub_issue": "Sub-issues", "blocked_by": "Blocked by", "blocking": "Blocking",
@@ -83,7 +83,7 @@ IN_TEAMS = "team: { id: { in: $teams } }"
 
 
 def due_at(day: str, zone: str | None) -> str:
-    """The last second of a due day in the team's time zone, in UTC (§5)."""
+    """The last second of a due day in the team's time zone, in UTC."""
     try:
         place = ZoneInfo(zone or "UTC")
     except (ZoneInfoNotFoundError, ValueError):
@@ -93,7 +93,7 @@ def due_at(day: str, zone: str | None) -> str:
 
 
 def bracketed(name: str) -> str:
-    """A name as a key: a ] inside it escaped, so `text='Linear project [<key>]'` finds that one object (§3.3)."""
+    """A name as a key: a ] inside it escaped, so `text='Linear project [<key>]'` finds that one object."""
     return name.replace("\\", "\\\\").replace("]", "\\]")
 
 
@@ -252,7 +252,7 @@ class Linear:
 
     def others(self, lists: dict, issues: list, comments: dict) -> list:
         """The objects around the issues: a selected team's projects with their milestones and relations, the initiatives
-        that hold them, and the documents and updates of what is imported (§5)."""
+        that hold them, and the documents and updates of what is imported."""
         projects = [p for p in lists["projects"] if {t["id"] for t in p["teams"]["nodes"]} & self.chosen]
         ids = {p["id"] for p in projects}
         milestones = [m for m in lists["projectMilestones"] if m["project"]["id"] in ids]
@@ -405,7 +405,7 @@ class Linear:
             ([("milestone", self.part(milestone))] if milestone in self.milestones else
              [("project", self.part(project))] if project in self.projects else []) + \
             sorted(((kind, other) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
-        # an identifier from before a move names its team: shown, and kept in the archive, only as any reference is (§3.9)
+        # an identifier from before a move names its team: shown, and kept in the archive, only as any reference is
         previous = [{"identifier": key, "team": {"key": prefix, "private": self.keys.get(prefix, {"private": True})["private"]}}
                     for key in node["previousIdentifiers"] for prefix in [key.rsplit("-", 1)[0]]]
         relations += [("previously", render.Ref(p["identifier"], p["team"]["key"], not p["team"]["private"])) for p in previous]
@@ -423,7 +423,7 @@ class Linear:
             archived)
 
     def fields_and_facts(self, node: dict, team: dict, state: dict) -> tuple[dict, list]:
-        """The field values by name, and the header's facts: every value is also a header line (§3.8)."""
+        """The field values by name, and the header's facts: every value is also a header line."""
         groups = defaultdict(list)
         for label in sorted((self.labels[l["id"]] for l in node["labels"]["nodes"] if l["id"] in self.labels),
                             key=lambda label: label["name"].casefold()):

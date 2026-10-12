@@ -1,4 +1,4 @@
-"""Jira's Atlassian Document Format as Markdown (docs/plans/importers.md §6; the Jira note's §2.8 contract): a pure
+"""Jira's Atlassian Document Format as Markdown: a pure
 function over the tree. No text character is dropped: an unknown node gives its children's text and is counted, and every
 line that would read as a heading or other structure is escaped, so imported text never makes structure."""
 

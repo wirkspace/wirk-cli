@@ -1,6 +1,6 @@
-"""The Linear adapter (docs/plans/importers.md §5) on synthetic GraphQL answers through a fake endpoint. The answers
-are shaped from the fields the Linear research note read in Linear's published schema; real-workspace evidence waits for
-a read key (the plan's L rows marked R)."""
+"""The Linear adapter on synthetic GraphQL answers through a fake endpoint. The answers
+are shaped from fields in Linear's published schema; real-workspace evidence waits for
+a read key."""
 
 import json
 import os

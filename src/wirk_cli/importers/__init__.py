@@ -1,4 +1,4 @@
-"""wirk import: bring a team's tracker into WIRK (docs/plans/importers.md §2).
+"""wirk import: bring a team's tracker into WIRK.
 
 The dry run reads the source and WIRK and writes nothing to either; it leaves the setup request a person applies with
 `wirk admin --request`, the importer's own token and a map template, all in <config>/import/. Every later run writes
@@ -113,7 +113,7 @@ class Run:
                     raise Stop("another importer for this source already holds some of these issues: " + ", ".join(
                         f"{name} made {count}" for name, count in importer.index.blocked.items()),
                         "run the import as that principal, or import into another wirkspace (workspace_id=)")
-            except (Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did (§2.3)
+            except (Stop, wirk.WirkError, Failure) as stop:  # a run that stops still says what it did
                 self.report(census, importer, importer.outcomes, you, setup=None, stopped=stop)
                 tell(stop)
                 return 2
