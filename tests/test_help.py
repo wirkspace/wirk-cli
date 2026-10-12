@@ -309,7 +309,37 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
     for needed in ("status=in_progress owner=me", "--evidence", "basis_changed", "record → work", "owner=me",
                    "work.owner_id", "write message --on"):
         assert needed in text, needed
-    assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # only edit has a section of its own
+    assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # new uses general write help
+
+
+@pytest.mark.parametrize("form, first_line, needed", [
+    ("message", "usage: wirk write message", ("--on", "--to", "--reply-to", "--body-file",
+                                               "workspace_id=ID", "--request-id", "--json",
+                                               "active work", "inbox", "--propose is refused")),
+    ("seen", "usage: wirk write seen", ("workspace_id=ID", "--request-id", "--json",
+                                           "addressed to you", "boards of work you own", "ancestor boards", "across sessions",
+                                           "receipt, not agreement", "own handoff")),
+])
+def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, form, first_line, needed):
+    def no_transport(*args, **kwargs):
+        pytest.fail("help attempted a transport call")
+
+    monkeypatch.setattr(cli, "connect", no_transport)
+    text = help_of(capsys, "write", form)
+    lines = text.rstrip("\n").split("\n")
+    assert lines[0].startswith(first_line)
+    assert len(lines) <= 25 and max(map(len, lines)) <= 120
+    assert text != help_of(capsys, "write")
+    assert "write new" not in text and "write edit" not in text and '{"op"' not in text
+    for phrase in needed:
+        assert phrase in text
+
+
+def test_write_help_limits_common_options_to_supported_short_forms(capsys):
+    text = help_of(capsys, "write")
+    assert len(text.rstrip("\n").split("\n")) <= 35
+    assert "every form also takes --reason TEXT, --propose" not in text
+    assert "--propose needs --reason and cannot send or acknowledge messages" in text
 
 
 def test_query_help_shows_how_to_read_a_files_text(capsys):

@@ -67,7 +67,7 @@ links_in: the links to it by type (a count, by_status and at most 5 entries); qu
        wirk write message [--to ID,…] [--on ITEM,…] [--reply-to ID] [--title TEXT] --body TEXT | --body-file PATH
        wirk write seen ID…
        wirk write --request FILE           (- reads standard input)
-  every form also takes --reason TEXT, --propose, --request-id ID and --json
+  Shortcuts take --request-id ID and --json; --propose needs --reason and cannot send or acknowledge messages.
 
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
@@ -112,6 +112,30 @@ An owner turns a record into work and the receipt says so (record → work); a s
 --evidence is a completion's note: the tests that pass, a link, a file path, or a file attached with --upload.
 --propose needs --reason. A stale N is refused as basis_changed: query the item again and use its new rN.
 Kind, context and criteria change through wirk write --request (see wirk write --help).""",
+        "write message": """usage: wirk write message [--on ITEM,…] [--to ID,…] [--reply-to ID] [--title TEXT]
+                          (--body TEXT | --body-file PATH) [workspace_id=ID]
+                          [--reason TEXT] [--request-id ID] [--json]
+
+Post one message. --on puts it on each item's board; without --on, the message is unlinked.
+--to addresses known principals, comma separated. Addressed recipients get a pending notification
+even without --on; owners of active work may see posts on its or ancestor boards in their inbox.
+--reply-to threads the response but inherits no recipient or board. Add --to SENDER to notify them.
+
+  write message --on ITEM --body 'Ready'                  post on the item board
+  write message --on ITEM --to ID --body-file note.md     notify a known recipient
+  write message --on ITEM --reply-to MSG --to ID --body 'Handled'   reply and notify
+
+Use the same --request-id and body after an uncertain send. Messages apply directly; --propose is refused.""",
+        "write seen": """usage: wirk write seen ID… [workspace_id=ID] [--request-id ID] [--json]
+
+Mark only handled messages addressed to you or on boards of work you own,
+or on ancestor boards reached through contributes_to. Separate IDs with spaces or commas.
+Marking seen acknowledges receipt, not agreement. It clears these IDs from this principal's inbox
+across sessions, but keeps the messages and does not change their work. Do not clear your own handoff.
+
+  write seen MSG1 MSG2
+
+After an uncertain result, retry the same IDs and --request-id; --json gives structured output.""",
         "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
