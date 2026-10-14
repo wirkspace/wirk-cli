@@ -81,9 +81,10 @@ fields (status=open; a comma list for several; KEY= clears on edit). The owner i
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its
 initiatives. A change to it applies directly when you may make it; for requires_review, propose with --propose --reason.
 --body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record
-is the default; data.work makes work. --link TYPE is related_to, contributes_to or requires. --evidence: passing tests,
-a link, file path or file attached with --upload. Results list IDs. A stored refusal keeps its request_id; correct with
-a new ID. After an uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
+is the default; data.work makes work. --link TYPE is related_to, contributes_to, requires or works_at (a person record
+to a company record). --evidence: passing tests, a link, file path or file attached with --upload. Results list IDs. A
+stored refusal keeps its request_id; correct with a new ID. After an uncertain result, run the command its hint prints;
+any retry uses the identical body and request_id.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
