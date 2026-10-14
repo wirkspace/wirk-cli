@@ -73,6 +73,35 @@ def test_the_dry_run_writes_the_setup_the_token_and_the_map_and_nothing_else(wor
     assert token.read_text().strip() not in out + err
 
 
+def test_preflight_status_budget_allows_a_preview_before_and_after_registration(world):
+    status = world["fake"].status
+
+    def context_status(body):
+        if body.get("max_bytes", 8192) < 4096:
+            return refusal("budget_too_small", "Context does not fit in the requested status budget")
+        return status(body)
+
+    world["fake"].status = context_status
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0 and "would create: 2" in out, out + err
+    assert not world["fake"].writes()
+    register(world)
+
+    world["fake"].requests.clear()
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 0 and "would create: 2" in out, out + err
+    status_requests = [body for route, body in world["fake"].requests if route == "/v2/status"]
+    assert status_requests == [{"format": "json"}, {"format": "json"}, {"max_bytes": 65536, "format": "json"}]
+    assert not world["fake"].writes()
+
+
+def test_preflight_auth_denial_stops_before_source_read(world):
+    world["fake"].tokens = {}
+    code, out, err = world["run"]("github", "acme", "--dry-run")
+    assert code == 2 and "This token is not registered" in err
+    assert out == "" and not world["gh"].calls and not world["fake"].writes()
+
+
 def test_a_run_before_the_setup_says_what_to_do(world):
     code, out, err = world["run"]("github", "acme")
     assert code == 2 and "wirk import github acme --dry-run" in err
@@ -509,7 +538,7 @@ def test_an_empty_workspace_id_is_sent_as_given_so_wirk_refuses_it(world):
                                          else status(body))  # as core answers a wirkspace ID that names none
     code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run")
     assert (code, out, err) == (2, "", "Error import: Workspace is unavailable\n")
-    assert [body for route, body in world["fake"].requests] == [{"format": "json", "max_bytes": 1024, "workspace_id": ""}]
+    assert [body for route, body in world["fake"].requests] == [{"format": "json", "workspace_id": ""}]
     code, out, err = world["run"]("github", "acme", "workspace_id=", "--dry-run", "--json")  # no hint, no hint key
     assert json.loads(out)["errors"] == [{"code": "import_stopped", "count": 1, "message": "Workspace is unavailable"}]
 
