@@ -230,8 +230,18 @@ def test_write_help_teaches_one_link_form(capsys):
     text = help_of(capsys, "write")
     assert re.search(r"--link contributes_to:[0-9a-f]+  under an initiative", text)
     assert not re.search(r"--link \w+:[0-9a-f]+@", text)
-    assert ("parent work (not an initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link)"
-            in " ".join(text.split()))
+    guidance = " ".join(text.split())
+    assert "linked-from item's rN" in guidance
+    assert "parent work's rN" in guidance
+    assert "no destination rN for an initiative" in guidance
+
+
+def test_write_help_distinguishes_context_levels_and_stdin_forms(capsys):
+    text = help_of(capsys, "write")
+    assert "kind=context level=initiative --body-file" in text
+    assert "kind=context level=organization --body-file" in text
+    assert "--body-file PATH reads a regular file; - reads raw body text from stdin" in text
+    assert "--request - reads one JSON request" in text
 
 
 def test_the_admin_example_gives_the_person_the_membership(capsys):
@@ -263,6 +273,12 @@ def test_help_names_messages_and_their_two_operations(capsys):
     assert '{"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}' in write_help
     assert '{"op": "message.acknowledge", "messages": [ID]}' in write_help and "received, not agreed" in write_help
     assert 'a reply notifies only its "to"' in write_help
+
+
+def test_query_help_distinguishes_message_replies_from_board_posts(capsys):
+    text = help_of(capsys, "query")
+    assert any("query kind=message linked=" in line and "board" in line for line in text.splitlines())
+    assert "direct replies (20 at a time), query its ID; linked=ID lists board messages instead" in text
 
 
 def test_the_message_short_forms_have_one_line_each_in_the_main_help(capsys):
@@ -315,7 +331,8 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
 @pytest.mark.parametrize("form, first_line, needed", [
     ("message", "usage: wirk write message", ("--on", "--to", "--reply-to", "--body-file",
                                                "workspace_id=ID", "--request-id", "--json",
-                                               "active work", "inbox", "--propose is refused")),
+                                               "active work", "inbox", "reachable ancestor boards",
+                                               "--propose is refused")),
     ("seen", "usage: wirk write seen", ("workspace_id=ID", "--request-id", "--json",
                                            "addressed to you", "boards of work you own", "ancestor boards", "across sessions",
                                            "receipt, not agreement", "own handoff")),

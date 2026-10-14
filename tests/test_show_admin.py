@@ -35,6 +35,12 @@ def test_show_takes_exactly_one_mode_and_is_never_resent(run):
     assert code == 1 and len(fake.requests) == 1
 
 
+def test_show_item_refusal_points_to_query_without_a_request(run):
+    code, out, err, fake = run(["show", "5c1e7a90", "--no-open"])
+    assert code == 2 and fake.requests == []
+    assert "invalid_input" in err and "wirk query ID" in err
+
+
 def test_a_browser_that_does_not_open_still_succeeds(run, monkeypatch):
     monkeypatch.setattr("webbrowser.open", lambda url: False)
     code, out, err, fake = run(["show", "status"], lambda r: envelope("https://show.wirk.life/v/abc\nx"))
