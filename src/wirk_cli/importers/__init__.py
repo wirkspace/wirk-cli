@@ -128,7 +128,7 @@ class Run:
         if url is None:
             raise Stop("WIRK is not set up on this machine", "wirk login")
         agent = wirk.Wirk(Service(url, read_token(directory / "agent-token"), self.transport), self.pairs.get("workspace_id"))
-        status = agent.post("/v2/status", {"max_bytes": 1024})
+        status = agent.post("/v2/status", {})
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))
         you = status["data"]["you"]
@@ -145,7 +145,7 @@ class Run:
         self.workspace = you["wirkspace"]["id"]
         if self.token_file.exists():
             mine = wirk.Wirk(Service(url, read_token(self.token_file), self.transport), self.pairs.get("workspace_id"))
-            if mine.post("/v2/status", {"max_bytes": 1024})["ok"]:
+            if mine.post("/v2/status", {})["ok"]:
                 return mine, True
         if not self.dry_run:
             fix = (f"{PERSON_STEP}: wirk admin --request {self.setup_file}" if self.setup_file.exists()
