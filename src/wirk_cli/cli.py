@@ -245,7 +245,7 @@ def decision_phrase(body: dict) -> str:
 def show(words, options, transport):
     modes = (words == ["status"]) + ("--file" in options) + ("--revoke" in options)
     if modes != 1 or words not in ([], ["status"]):
-        raise UsageError("show takes exactly one of: status, --file FILE, --revoke LINK")
+        raise UsageError("show takes exactly one of: status, --file FILE, --revoke LINK. To read an item: wirk query ID")
     if "--revoke" in options:
         body = {"revoke": options["--revoke"]}
     else:

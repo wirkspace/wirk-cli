@@ -51,14 +51,14 @@ Request keys: about, receipt, depth (card, full, all), sort, limit (1–100, def
 max_bytes (1024–65536; default 8192 for cards, 16384 at depth full, 32768 at depth all); larger is refused.
 And wait (0–60 s, with inbox=me). Lists: sort=changed is newest first; leading - reverses. A list leaves messages out
 unless it asks for them. See status for filters. Quote words with spaces. For "label: command", run "wirk command".
-
 --json answers {ok, errors, notices, page, data, notifications}: a fetch in data.results[], a list in data.cards[],
 each with r (its revision, the N of ID@N), fields and owner (on work); notifications: messages waiting for you.
 Each cut is named once: a cut body ends with … and one more: line that continues it where it stopped (JSON:
 the view's more; page.next_cursor for one fetched item). depth=all starts over; its hint need not mean a cut passage.
 Dropped blocks get a "not shown" line, refs left as cards a "Left out for the budget" line (a left_out notice);
-page.complete is false until all is read, body_complete covers the body alone. links_out: the item's own links;
-links_in: the links to it by type (a count, by_status and at most 5 entries); query linked=ID lists them all.""",
+page.complete is false until all is read; body_complete covers the body alone.
+links_out: the item's own links; links_in: incoming links by_status (at most 5 entries); query linked=ID lists them all.
+To see a message's direct replies (20 at a time), query its ID; kind=message linked=ITEM lists board messages.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--allow-duplicate-of ID]…
        wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
@@ -74,6 +74,7 @@ links_in: the links to it by type (a count, by_status and at most 5 entries); qu
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
   write new 'Plan' kind=context level=initiative --body-file plan.md
+  write new 'Organization' kind=context level=organization --body-file organization.md
 
 KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
@@ -82,8 +83,7 @@ initiatives. A change to it applies directly when you may make it; for requires_
 --link TYPE is related_to, contributes_to or requires. --evidence: passing tests, a link, file path or file attached
 with --upload. --propose needs --reason. Results list IDs. A stored refusal keeps its request_id; correct with a new ID.
 After an uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
-
---request sends one JSON body. Operations:
+--body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
@@ -92,8 +92,8 @@ After an uncertain result, run the command its hint prints; any retry uses the i
   {"op": "message.send", "ref": "m", "data": {"body", "title", "to": ["alice-agents"], "reply_to", "uploads"}}
   {"op": "message.acknowledge", "messages": [ID]}   seen: received, not agreed; a reply notifies only its "to"
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
-expect holds the rN you read of each item you edit, archive or link from, and of the parent work (not an
-initiative) of a contributes_to link (TO@N, or contributes_to:ID@N with --link), or it is refused as basis_changed.""",
+expect: each edited, archived or linked-from item's rN; contributes_to also needs the parent work's rN
+(TO@N or --link contributes_to:ID@N), no destination rN for an initiative; otherwise basis_changed.""",
         "write edit": """usage: wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
                       [--reason TEXT] [--propose] [--request-id ID] [--json]
@@ -118,7 +118,7 @@ Kind, context and criteria change through wirk write --request (see wirk write -
 
 Post one message. --on puts it on each item's board; without --on, the message is unlinked.
 --to addresses known principals, comma separated. Addressed recipients get a pending notification
-even without --on; owners of active work may see posts on its or ancestor boards in their inbox.
+even without --on; holders of active work get inbox notices for posts on their board or reachable ancestor boards.
 --reply-to threads the response but inherits no recipient or board. Add --to SENDER to notify them.
 
   write message --on ITEM --body 'Ready'                  post on the item board
