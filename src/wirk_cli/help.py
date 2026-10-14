@@ -58,7 +58,7 @@ the view's more; page.next_cursor for one fetched item). depth=all starts over; 
 Dropped blocks get a "not shown" line, refs left as cards a "Left out for the budget" line (a left_out notice);
 page.complete is false until all is read; body_complete covers the body alone.
 links_out: the item's own links; links_in: incoming links by_status (at most 5 entries); query linked=ID lists them all.
-To see a message's direct replies (20 at a time), query its ID; linked=ID lists board messages instead.""",
+To see a message's direct replies (20 at a time), query its ID; kind=message linked=ITEM lists board messages.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--allow-duplicate-of ID]…
        wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]

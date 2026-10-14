@@ -278,7 +278,7 @@ def test_help_names_messages_and_their_two_operations(capsys):
 def test_query_help_distinguishes_message_replies_from_board_posts(capsys):
     text = help_of(capsys, "query")
     assert any("query kind=message linked=" in line and "board" in line for line in text.splitlines())
-    assert "direct replies (20 at a time), query its ID; linked=ID lists board messages instead" in text
+    assert "direct replies (20 at a time), query its ID; kind=message linked=ITEM lists board messages" in text
 
 
 def test_the_message_short_forms_have_one_line_each_in_the_main_help(capsys):
