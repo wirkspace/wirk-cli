@@ -26,9 +26,9 @@ def test_progress_note_linked_to_two_items(run):
 
 
 def test_a_person_record_works_at_a_company_record(run):
-    assert sent(run, ["write", "link", "5c1e7a90@1", "works_at", "6a0d2e83"]) == {
+    assert sent(run, ["write", "link", "5c1e7a90@1", "works_at", "5c1e7a91"]) == {
         "expect": {"5c1e7a90": 1},
-        "operations": [{"op": "link.create", "data": {"type": "works_at", "from": "5c1e7a90", "to": "6a0d2e83"}}]}
+        "operations": [{"op": "link.create", "data": {"type": "works_at", "from": "5c1e7a90", "to": "5c1e7a91"}}]}
 
 
 def test_task_under_a_parent_taken_with_owner_me(run):
