@@ -365,3 +365,10 @@ def test_query_help_shows_how_to_read_a_files_text(capsys):
     text = " ".join(help_of(capsys, "query").split())
     assert '"select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]' in text
     assert "[partial: REASON] marks known incomplete extraction" in text and "(cite: write --help)" in text
+
+
+def test_write_help_says_what_item_create_makes_by_default(capsys):
+    """friction entry 14: kind=record in item.create data was refused unknown_field; a record needs no key."""
+    text = " ".join(help_of(capsys, "write").split())
+    assert "--request - reads one JSON request. A record is the default; data.work makes work." in text
+    assert text.count("--propose needs --reason") == 1
