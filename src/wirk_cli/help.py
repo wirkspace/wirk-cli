@@ -75,7 +75,6 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
-
 KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its

@@ -31,7 +31,7 @@ def test_main_help_is_the_whole_entry_point(capsys):
 @pytest.mark.parametrize("command", COMMANDS)
 def test_each_command_help_is_short(capsys, command):
     text = help_of(capsys, command)
-    max_lines = {"write": 36, "admin": 35, "query": 26}.get(command, 25)  # write: 35, then works_at's line
+    max_lines = {"write": 35, "admin": 35, "query": 26}.get(command, 25)
     assert len(text.rstrip("\n").split("\n")) <= max_lines
     assert "accept|reject|defer" not in text
 
@@ -354,7 +354,7 @@ def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, 
 
 def test_write_help_limits_common_options_to_supported_short_forms(capsys):
     text = help_of(capsys, "write")
-    assert len(text.rstrip("\n").split("\n")) <= 36  # 35, then the works_at line
+    assert len(text.rstrip("\n").split("\n")) <= 35
     assert ("--link TYPE is related_to, contributes_to, requires or works_at (a person record to a company record)."
             in " ".join(text.split()))
     assert "every form also takes --reason TEXT, --propose" not in text
