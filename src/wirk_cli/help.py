@@ -56,7 +56,7 @@ each with r (its revision, the N of ID@N), fields and owner (on work); notificat
 Each cut is named once: a cut body ends with … and one more: line that continues it where it stopped (JSON:
 the view's more; page.next_cursor for one fetched item). depth=all starts over; its hint need not mean a cut passage.
 Dropped blocks get a "not shown" line, refs left as cards a "Left out for the budget" line (a left_out notice);
-page.complete is false until all is read; body_complete covers the body alone.
+page.complete is false until all is read; body_complete covers the body alone (in a fetch, data.results[0].body).
 links_out: the item's own links; links_in: incoming links by_status (at most 5 entries); query linked=ID lists them all.
 To see a message's direct replies (20 at a time), query its ID; kind=message linked=ITEM lists board messages.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…

@@ -372,3 +372,8 @@ def test_write_help_says_what_item_create_makes_by_default(capsys):
     text = " ".join(help_of(capsys, "write").split())
     assert "--request - reads one JSON request. A record is the default; data.work makes work." in text
     assert text.count("--propose needs --reason") == 1
+
+
+def test_query_help_names_where_a_fetched_body_is(capsys):
+    """friction entry 22: agents measuring a body against a limit dug it out of the whole answer."""
+    assert "body_complete covers the body alone (in a fetch, data.results[0].body)." in help_of(capsys, "query")
