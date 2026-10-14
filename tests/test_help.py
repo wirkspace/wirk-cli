@@ -365,3 +365,22 @@ def test_query_help_shows_how_to_read_a_files_text(capsys):
     text = " ".join(help_of(capsys, "query").split())
     assert '"select":[{"type":"whole","part":{"type":"file","file_id":"F"}}]' in text
     assert "[partial: REASON] marks known incomplete extraction" in text and "(cite: write --help)" in text
+
+
+def test_write_help_says_what_item_create_makes_by_default(capsys):
+    """friction entry 14: kind=record in item.create data was refused unknown_field; a record needs no key."""
+    text = " ".join(help_of(capsys, "write").split())
+    assert "--request - reads one JSON request. A record is the default; data.work makes work." in text
+    assert text.count("--propose needs --reason") == 1
+
+
+def test_query_help_names_where_a_fetched_body_is(capsys):
+    """friction entry 22: agents measuring a body against a limit dug it out of the whole answer."""
+    assert "body_complete covers the body alone (in a fetch, data.results[0].body)." in help_of(capsys, "query")
+
+
+def test_import_help_names_the_destination_and_the_persons_command(capsys):
+    """friction entry 25: the destination wirkspace was hard to find, and the person's step was buried in a sentence."""
+    text = help_of(capsys, "import")
+    assert "workspace_id=ID names the destination; the ID comes from wirk status." in " ".join(text.split())
+    assert "\n     wirk login --person && wirk admin --request ~/.config/wirk/import/github-setup.json\n" in text
