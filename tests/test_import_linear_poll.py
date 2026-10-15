@@ -133,7 +133,8 @@ def test_a_polls_context_reports_nothing_missing(folder):
     fake = PollingLinear()
     full, census, _ = read(fake, folder)
     found, census, _ = poll(fake, folder, ws.SINCE, full.lists)
-    assert full.context(census.selected).seen and found.context(census.selected).seen is None
+    assert full.context(census.selected).complete and not found.context(census.selected).complete
+    assert found.context(census.selected).seen == full.context(census.selected).seen
 
 
 def importer(fake_wirk, found, census):

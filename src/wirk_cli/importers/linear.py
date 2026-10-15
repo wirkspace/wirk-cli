@@ -220,8 +220,7 @@ class Linear:
     # ---------------------------------------------------------------- what to read
 
     def context(self, selected: list) -> render.Context:
-        seen = frozenset(self.seen) if self.since is None else None  # a poll does not know what Linear no longer has
-        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, seen)
+        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, frozenset(self.seen), self.since is None)
 
     def by_id(self) -> None:
         self.teams, self.states, self.users, self.labels, self.cycles, self.projects, self.milestones, self.initiatives = (
