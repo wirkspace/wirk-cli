@@ -50,7 +50,8 @@ class PollingLinear(FakeLinear):
             nodes = [c for c in self.lists["comments"] if c["issue"] and (c["issue"]["id"] in ids or since and c["updatedAt"] > since
                                                                          and team.get(c["issue"]["id"]) in variables["teams"])]
         else:
-            nodes = [{**n, **{key: page(found[:50], len(found) > 50, "50" if len(found) > 50 else None)
+            first = {key: int(re.search(rf"{key}\(first: (\d+)", query)[1]) for key in linear.POLLED}
+            nodes = [{**n, **{key: self.window(found, {"first": first[key]})
                               for key, found in self.nested_of(n["id"], variables["teams"]).items()}}
                      for n in self.lists["issues"] if n["team"]["id"] in variables["teams"] and (n["updatedAt"] > since or n["id"] in ids)]
         return {name: self.window(nodes, variables)}
@@ -120,13 +121,30 @@ def test_a_poll_reads_a_list_again_only_when_an_issue_names_an_id_it_lacks(folde
     assert found.lists["issueLabels"] == full.lists["issueLabels"] and len(lists["issueLabels"]) == len(full.lists["issueLabels"]) - 1
 
 
-def test_a_long_list_of_children_is_paged_with_its_filter(folder):
-    children = [issue(n, parent=ref(1)) for n in range(2, 62)]
+@pytest.mark.parametrize("count", [30, 130])
+def test_children_past_the_first_page_are_paged_with_their_filter(folder, count):
+    children = [issue(n, parent=ref(1)) for n in range(2, count + 2)] + [issue(999, "SEC", parent=ref(1))]
     fake = PollingLinear(issues=[issue(1, updatedAt=ws.NEW)] + children, relations=[], comments=[])
     full, _, records = read(fake, folder)
     _, _, polled = poll(fake, folder, ws.SINCE, full.lists)
     assert polled == [next(r for r in records if r.key == "ENG-1")]
-    assert len([kind for kind, _ in polled[0].relations if kind == "sub_issue"]) == 60
+    assert len([kind for kind, _ in polled[0].relations if kind == "sub_issue"]) == count
+    assert "issue" in roots(fake)  # the rest read issue by issue, past the poll's first page
+
+
+@pytest.mark.parametrize("selection", [(), ("ENG", "OPS", "SEC")], ids=["public", "private team chosen"])
+def test_a_poll_over_a_real_window_renders_as_the_full_read(folder, selection):
+    fake = PollingLinear()
+    full, census, records = read(fake, folder, selection)
+    found, _, polled = poll(fake, folder, ws.SINCE, full.lists, selection)
+    whole = {record.ident: record for record in records}
+    assert sorted(record.key for record in polled) == ["ENG-1", "ENG-6", "ENG-7"]
+    for record in polled:
+        assert record == whole[record.ident], record.key
+        assert render.archive(record.raw, found.withheld(found.context(census.selected)), {}) == \
+            render.archive(whole[record.ident].raw, full.withheld(full.context(census.selected)), {})
+    children = [other.key for kind, other in whole[ref(1)["id"]].relations if kind == "sub_issue"]
+    assert children == ["ENG-2", "ENG-3", "OPS-4"] + (["SEC-10"] if selection else [])
 
 
 def test_a_polls_context_reports_nothing_missing(folder):
