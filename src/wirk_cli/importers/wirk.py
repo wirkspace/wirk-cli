@@ -202,7 +202,8 @@ class Importer:
     def run(self, records: list, position: dict | None = None) -> list:
         """Every record, then the links between them. A `position` (record, then link source) moves in place past what is
         settled (see `walk`), and a later run with it goes on from there; links are planned over every record."""
-        position = {} if position is None else position
+        if position is None or self.dry_run:
+            position = dict(position or {})  # a dry run goes on from the caller's position but never moves it
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
         self.plan_links(records)

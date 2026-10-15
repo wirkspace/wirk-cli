@@ -116,3 +116,9 @@ def test_a_link_to_a_record_that_errored_is_written_when_the_run_resumes(fake, r
     make(fake).run(records, position=position)
     assert [link["type"] for link in fake.links.values()] == ["requires"]
     assert position == {"record": "3000000003", "link": "3000000002" if records[1].relations else "3000000001"}
+
+
+def test_a_dry_run_never_moves_the_position(fake):
+    position = {"record": "3000000001"}
+    result = make(fake, dry_run=True).run([issue(1), issue(2)], position=position)
+    assert outcomes(result) == {("acme/api#2", "issue"): "would create"} and position == {"record": "3000000001"}
