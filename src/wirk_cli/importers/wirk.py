@@ -117,8 +117,8 @@ class Wirk:
 class Index:
     """Index prior imported items by this source's provenance line."""
 
-    def __init__(self, wirk: Wirk, source: str, me: str):
-        self.wirk, self.source, self.me = wirk, source, me
+    def __init__(self, wirk: Wirk, source: str, mine: set):
+        self.wirk, self.source, self.mine = wirk, source, mine  # the principals whose items are the importer's own
         self.held, self.blocked_keys, self.blocked, self.forged = defaultdict(list), {}, Counter(), 0
         self.keys = {}  # item -> (kind, source ID), for the importer's own items
 
@@ -137,10 +137,10 @@ class Index:
         """An importer's item is keyed by the line of its own latest revision, so a person's edit, even a line written
         above it, never hides or moves it; another importer's keys are blocked; anyone else's provenance line is forged."""
         creator = card["by"]
-        if creator != self.me or not parsed:
+        if creator not in self.mine or not parsed:
             whole = self.wirk.item(card["id"], "all")["all"]
             creator = whole["metadata"]["created_by"]
-            if creator != self.me and not creator.endswith(f"-{self.source.lower()}-import"):
+            if creator not in self.mine and not creator.endswith(f"-{self.source.lower()}-import"):
                 self.forged += parsed is not None
                 return
             if card["by"] != creator or not parsed:
@@ -148,7 +148,7 @@ class Index:
                 parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
                 if not parsed or parsed[0] != self.source:
                     return
-        if creator != self.me:
+        if creator not in self.mine:
             self.blocked_keys[parsed[1:3]] = creator
             self.blocked[creator] += 1
         else:
@@ -174,12 +174,13 @@ class Plan:
 
 class Importer:
     def __init__(self, wirk: Wirk, ctx: render.Context, *, users: dict, statuses: dict, plan: dict, withheld, download,
-                 dry_run: bool, overwrite: bool, progress=None):
+                 dry_run: bool, overwrite: bool, progress=None, mine=()):
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
         self.not_members = set()  # owners WIRK refused this run: their issues are planned without an owner
         self.outcomes, self.notes, self.progress = [], {}, progress or (lambda done, total: None)
+        self.mine = set(mine)  # other principals whose items are the importer's own, such as an earlier connection's
 
     # ---------------------------------------------------------------- the run
 
@@ -187,10 +188,11 @@ class Importer:
         """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
         you = self.wirk.ok("/v2/status", {"max_bytes": 65536})["data"]
         self.me = me or you["you"]["principal"]
+        self.mine.add(self.me)
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
         self.managed = {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
-        self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
+        self.index = Index(self.wirk, self.ctx.source, self.mine).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
 
@@ -289,7 +291,7 @@ class Importer:
         for start in range(0, len(stale), 32):
             answer = self.wirk.ok("/v2/query", {"fetch": stale[start:start + 32], "depth": "card"})
             makers.update({found["id"]: found.get("created_by") for found in answer["data"]["results"]})
-        return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) == self.me]
+        return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) in self.mine]
 
     def link_pass(self) -> list:
         """The missing links, one write per issue (more when over 32), read from each issue's own fetch."""
@@ -375,7 +377,7 @@ class Importer:
                     files, attachments, digest)
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
-        active = [h for h in held if not h.archived or h.by == self.me]  # an archive the importer made is its own to undo
+        active = [h for h in held if not h.archived or h.by in self.mine]  # an archive the importer made is its own to undo
         if len(active) > 1:
             return "ambiguous", None, ", ".join(h.item[5:13] for h in active) + " all claim it"
         if not active:
@@ -383,7 +385,7 @@ class Importer:
         found = active[0]
         if found.hash == digest:
             return "current", found, ""
-        if found.by == self.me:
+        if found.by in self.mine:
             return "update", found, ""
         changed = f"changed in WIRK since import (r{found.r} by {found.by})"
         return ("update", found, changed + "; replaced by --overwrite") if self.overwrite else \
@@ -425,7 +427,7 @@ class Importer:
         or an edit someone else made is theirs."""
         want = record.archived is not None
         found = [(plan.kind, h) for plan in plans for h in self.index.held.get((plan.kind, record.ident), [])
-                 if h.archived != want and h.by == self.me]
+                 if h.archived != want and h.by in self.mine]
         word = "archive" if want else "restore"
         if not found or self.dry_run:
             return [Outcome(record.key, kind, f"would {word}", item=h.item) for kind, h in found]
@@ -544,7 +546,7 @@ class Importer:
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
             # an item the importer made is kept separate only when the index knows it as another issue's work
             if not choices or any(self.ident_of(choice) == record.ident or self.ident_of(choice) is None and
-                                  self.wirk.item(choice, "all")["all"]["metadata"]["created_by"] == self.me
+                                  self.wirk.item(choice, "all")["all"]["metadata"]["created_by"] in self.mine
                                   for choice in choices):
                 return None
             operation["allow_duplicate_of"] = choices
@@ -576,7 +578,7 @@ class Importer:
             for found in self.index.held[(kind, record.ident)]:
                 if found.archived:
                     continue
-                if found.by != self.me:
+                if found.by not in self.mine:
                     outcomes.append(Outcome(record.key, kind, "skipped", f"no longer needed, but changed in WIRK (r{found.r} by {found.by})",
                                             found.item))
                 elif self.dry_run:
