@@ -209,3 +209,10 @@ def test_a_list_read_again_is_kept_on_the_adapter_for_the_next_poll_and_no_lists
     assert "issueLabels" not in roots(fake) and again.lists == found.lists
     poll(fake, folder, ws.SINCE, {})  # an empty dict is no lists: every list is read, as at a first import
     assert set(linear.LISTS) <= set(roots(fake))
+
+
+def test_lists_serve_only_a_read_of_changes(folder):
+    fake = PollingLinear()
+    full, _, _ = read(fake, folder)
+    with pytest.raises(ValueError, match="since"):
+        full.read([], lists=full.lists)  # a full read reads every list itself, so nothing it names is ever missing
