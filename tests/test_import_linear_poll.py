@@ -180,3 +180,14 @@ def test_a_poll_refuses_an_error_that_is_not_an_unreadable_relation_end(folder):
         read(fake, folder)
     with pytest.raises(Stop, match="Internal error"):
         poll(fake, folder, ws.SINCE, full.lists)
+
+
+def test_a_list_read_again_is_kept_on_the_adapter_for_the_next_poll_and_no_lists_reads_them_all(folder):
+    fake = PollingLinear(issues=ws.ISSUES[:1] + [issue(7, updatedAt=ws.NEW, labels=page([{"id": "l-bug"}]))])
+    full, _, _ = read(fake, folder)
+    found, _, _ = poll(fake, folder, ws.SINCE, {**full.lists, "issueLabels": []})
+    assert roots(fake).count("issueLabels") == 1
+    again, _, _ = poll(fake, folder, ws.SINCE, found.lists)
+    assert "issueLabels" not in roots(fake) and again.lists == found.lists
+    poll(fake, folder, ws.SINCE, {})  # an empty dict is no lists: every list is read, as at a first import
+    assert set(linear.LISTS) <= set(roots(fake))

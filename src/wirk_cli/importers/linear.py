@@ -230,8 +230,9 @@ class Linear:
 
     def read(self, selection: list, since: str | None = None, lists: dict | None = None) -> tuple[render.Census, list]:
         """The selection's records. With `since`, only the issues changed after it or whose comments changed, each read with
-        its children and relations so it renders as the full read renders it; the other lists are `lists`, the last full
-        read's `self.lists`, and an ID they lack reads that list again."""
+        its children and relations so it renders as the full read renders it. The other lists are `lists` when given (an
+        empty dict is none, so every list is read); an ID they lack reads that list again. After any read, `self.lists`
+        holds the lists it used, for the caller to keep and pass to the next poll."""
         self.since, self.lists = since, dict(lists or {name: self.every(name, *spec) for name, spec in LISTS.items()})
         self.by_id()
         lists, keys = self.lists, self.keys
