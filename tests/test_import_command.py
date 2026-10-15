@@ -9,7 +9,7 @@ import stat
 import httpx
 import pytest
 
-from import_fakes import FakeWirk, refusal
+from import_fakes import FakeWirk, envelope, refusal
 from test_import_github import FakeGh, node, page, ref, repo
 from test_import_linear import KEY
 from wirk_cli import cli
@@ -23,6 +23,8 @@ def world(home, monkeypatch, capsys):
     """An agent's CLI configuration, a fake WIRK that knows the agent's token, and a fake GitHub."""
     fake = FakeWirk(principal="alice-github-import", person="alice", fields={})
     fake.tokens = {AGENT: "alice-agents"}
+    setattr(fake, "import", lambda body: refusal("not_available",
+            "No such route: the service answers /health and /v2/…", 404))
     gh = FakeGh([repo("acme/web"), repo("acme/api", "PRIVATE", issues=812)],
                 {"acme/web": [node(1, labels=page([{"name": "bug", "description": ""}])), node(2)]})
     monkeypatch.setattr(github, "gh", gh)
@@ -586,3 +588,16 @@ def test_success_and_hintless_cli_bytes_match_main_baseline(world, monkeypatch):
         "e8534d68e75a07368f69e331d969b244a41cf446732c2665aa8bb0bd49d5978a",
         "47aac47b5e855794ff2392a1c4d76c5f0cae5fb5ab52409886dcc7eaa2b40a3b",
     ]
+
+
+def test_eleven_local_repositories_remain_accepted_when_no_connection(world, monkeypatch):
+    choices = [f"acme/repo-{number}" for number in range(11)]
+    setattr(world["fake"], "import", lambda body: envelope({
+        "mode": "local", "reason": "no_connection", "provider": "github",
+        "workspace": {"id": "wsp_" + "1" * 32, "name": "Scratch"}}))
+    monkeypatch.setattr(github, "gh", FakeGh([repo(name) for name in choices],
+                                          {name: [] for name in choices}))
+    code, output, error = world["run"]("github", *choices, "--dry-run")
+    assert code == 0 and "selection: 11 repositories" in output, output + error
+    assert "local source mode" in error
+    assert not world["fake"].writes()

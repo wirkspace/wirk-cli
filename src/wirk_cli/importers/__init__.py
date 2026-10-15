@@ -18,7 +18,7 @@ from .. import grammar
 from ..client import Failure, Service, config_dir, digest, new_token, read_token, saved_url
 from ..grammar import UsageError, command
 from ..help import HELP
-from . import github, jira, linear, render, wirk
+from . import connected, github, jira, linear, render, wirk
 from .render import Stop
 
 SOURCES = {"github": github.GitHub, "linear": linear.Linear, "jira": jira.Jira}
@@ -93,6 +93,9 @@ class Run:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise Stop(f"another wirk import {self.source} is running on this machine; wait for it to finish") from None
+            hosted = connected.dispatch(self)
+            if hosted is not None:
+                return hosted
             client, registered = self.connect()
             mapped = self.read_map()
             self.limit = mapped.get("field_limit", 50)
@@ -128,7 +131,7 @@ class Run:
         if url is None:
             raise Stop("WIRK is not set up on this machine", "wirk login")
         agent = wirk.Wirk(Service(url, read_token(directory / "agent-token"), self.transport), self.pairs.get("workspace_id"))
-        status = agent.post("/v2/status", {})
+        status = getattr(self, "preflight_status", None) or agent.post("/v2/status", {})
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))
         you = status["data"]["you"]

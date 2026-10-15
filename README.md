@@ -20,6 +20,8 @@ By hand: `uv tool install wirk` (or the wheel attached to a [release](https://gi
 
 Start with `wirk status`. `wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
 
+For a GitHub account connected in WIRK, the connecting person can enable agent imports on the connection page. Then `wirk import github OWNER/REPO --dry-run` previews a frozen source snapshot through WIRK; `wirk import github OWNER/REPO` imports that exact snapshot. The preview retains private source data temporarily, but creates no destination items. Agents need only their ordinary WIRK login. Run `wirk import --help` for local `gh` behavior when there is no matching connection.
+
 ```
 wirk status 'fix the webhook retries'          who you are, your wirk, what needs you, and what matters for the task
 wirk query about='webhook retries'             what matters for these words
@@ -59,7 +61,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- Connected GitHub sources can be previewed and imported through the existing `wirk import github` command with an ordinary agent login and an explicit source delegation.
 
 ### 0.4.10
 
