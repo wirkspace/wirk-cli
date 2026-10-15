@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from conftest import TOKEN, envelope, refusal
+from wirk_cli import cli
 
 STORE = "https://storage.test"
 
@@ -153,3 +154,22 @@ def test_every_file_read_goes_through_one_function():
     readers = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
                for call in ast.walk(node) if isinstance(call, ast.Attribute) and call.attr in ("read_text", "read_bytes")}
     assert readers <= {"readable"}
+
+
+def test_store_returns_the_confirmed_answer_prints_nothing_and_names_the_wirkspace(home, tmp_path, capsys):
+    """The MCP server's way in: the same declare, PUT and confirm as `wirk upload`, silent, in a chosen wirkspace."""
+    from conftest import Fake, URL
+    from wirk_cli.client import Service
+    (tmp_path / "report.pdf").write_bytes(b"%PDF data")
+    answer, state = files_service()
+    fake = Fake(lambda r: envelope(data={"upload": {"id": "upload_" + "7e" * 16}}) if r.url.host != "storage.test"
+                and "confirm" in json.loads(r.content) else answer(r))
+    with open(tmp_path / "report.pdf", "rb") as source:
+        service = Service(URL, TOKEN, httpx.MockTransport(fake))
+        found = cli.store(source, str(tmp_path / "report.pdf"), "w-1/0/0", "retry", service, workspace_id="wsp_9")
+    sha = hashlib.sha256(b"%PDF data").hexdigest()
+    bodies = [json.loads(r.content) for r in fake.requests if r.url.host != "storage.test"]
+    assert bodies[0] == {"upload": {"bytes": 9, "sha256": sha}, "workspace_id": "wsp_9", "format": "json"}
+    assert bodies[1] == {"request_id": "w-1/0/0", "confirm": {"filename": "report.pdf", "bytes": 9, "sha256": sha},
+                         "workspace_id": "wsp_9", "format": "json"}
+    assert found["data"]["upload"]["id"] == "upload_" + "7e" * 16 and capsys.readouterr().out == ""
