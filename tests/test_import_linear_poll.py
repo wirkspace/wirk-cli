@@ -29,6 +29,11 @@ class PollingLinear(FakeLinear):
                 "inverseRelations": [r for r in self.lists["issueRelations"] if (r["relatedIssue"] or {}).get("id") == ident]}
 
     def answer(self, query, variables):
+        data = self.answered(query, variables)
+        self.forbidden(data)
+        return data
+
+    def answered(self, query, variables):
         more = re.search(r"issue\(id: \$id\) \{ (\w+)\(", query)
         if "viewer" in query:
             return super().answer(query, variables)
@@ -48,6 +53,17 @@ class PollingLinear(FakeLinear):
                               for key, found in self.nested_of(n["id"], variables["teams"]).items()}}
                      for n in self.lists["issues"] if n["team"]["id"] in variables["teams"] and (n["updatedAt"] > since or n["id"] in ids)]
         return {name: self.window(nodes, variables)}
+
+    def forbidden(self, value, path=()):
+        """With each relation end the key cannot read, the FORBIDDEN error Linear sends beside its null."""
+        if isinstance(value, dict):
+            self.errors += [{"message": "Entity not found", "path": [*path, end], "extensions": {"code": "FORBIDDEN"}}
+                            for end in ("issue", "relatedIssue") if "relatedIssue" in value and value[end] is None]
+            for key, item in value.items():
+                self.forbidden(item, (*path, key))
+        elif isinstance(value, list):
+            for number, item in enumerate(value):
+                self.forbidden(item, (*path, number))
 
 
 def poll(fake, folder, since, lists, selection=()):
