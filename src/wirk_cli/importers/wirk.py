@@ -47,6 +47,7 @@ class Held:
     by: str
     archived: bool
     hash: str
+    version: str  # the source's, as its first line carries it
 
 
 class Wirk:
@@ -152,7 +153,7 @@ class Index:
             self.blocked_keys[parsed[1:3]] = creator
             self.blocked[creator] += 1
         else:
-            self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4]))
+            self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4], parsed[3]))
 
     def add(self, kind: str, ident: str, held: Held):
         self.held[(kind, ident)] = [h for h in self.held[(kind, ident)] if h.item != held.item] + [held]
@@ -170,6 +171,7 @@ class Plan:
     files: list  # (name, bytes) the importer makes
     attachments: list
     digest: str
+    version: str
 
 
 class Importer:
@@ -374,7 +376,7 @@ class Importer:
         names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
         return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
-                    files, attachments, digest)
+                    files, attachments, digest, render.compact(made.version))
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
         active = [h for h in held if not h.archived or h.by in self.mine]  # an archive the importer made is its own to undo
@@ -530,7 +532,7 @@ class Importer:
         outcomes = []
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
-                                                         plan.digest))
+                                                         plan.digest, plan.version))
             message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
