@@ -131,8 +131,9 @@ def test_a_poll_then_the_nights_read_write_a_changed_issue_once_and_a_poll_repor
     importer(store, full, census).run(records)
     fake.lists["issues"][0].update(title="Parent, renamed", updatedAt="2026-10-14T21:00:00.000Z")
     found, census, polled = poll(fake, folder, ws.NEW, full.lists)
-    before = len(store.requests)
+    before, links = len(store.requests), {ident: link["removed"] for ident, link in store.links.items()}
     outcomes = importer(store, found, census).run(polled)
+    assert links and {ident: link["removed"] for ident, link in store.links.items()} == links  # none outside the batch touched
     assert [(o.key, o.outcome) for o in outcomes if o.kind == "issue"] == [("ENG-1", "updated")]
     assert not [o for o in outcomes if o.outcome == "missing"]
     assert not [body for route, body in store.requests[before:] if route == "/v2/query" and body.get("depth") == "full"
