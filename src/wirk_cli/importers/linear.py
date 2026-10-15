@@ -113,7 +113,8 @@ def declared(variables: dict) -> str:
 def unreadable(error: dict) -> bool:
     """Whether an error only says a relation's end is in a team the key cannot read, beside the null it leaves."""
     path, code = error.get("path") or [], (error.get("extensions") or {}).get("code")
-    return (len(path) >= 4 and path[-4] in ("issueRelations", "relations", "inverseRelations") and path[-1] in ("issue", "relatedIssue")
+    return (len(path) >= 4 and path[-4] in ("issueRelations", "relations", "inverseRelations")
+            and path[-1] in ("issue", "relatedIssue")
             and (code == "FORBIDDEN" or "not found" in (error.get("message") or "").lower()))
 
 
@@ -213,7 +214,8 @@ class Linear:
                  f"{connection(name, 'after: $after' + (', ' + args if args else ''), nodes, '$first')} }} }}")
         found = node[name]
         while found["pageInfo"]["hasNextPage"]:
-            more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"], **variables})["issue"][name]
+            after = found["pageInfo"]["endCursor"]
+            more = self.graphql(query, {"id": node["id"], "first": 100, "after": after, **variables})["issue"][name]
             found = {"pageInfo": more["pageInfo"], "nodes": found["nodes"] + more["nodes"]}
         node[name] = found
 
@@ -244,10 +246,11 @@ class Linear:
         self.chosen = {team["id"] for team in chosen}
         self.seen = {node["id"] for name in ("projects", "projectMilestones", "initiatives", "documents", "projectUpdates",
                                              "initiativeUpdates") for node in lists[name]}  # in Linear, selected or not
+        teams = sorted(self.chosen)
         if since is None:
-            issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, teams=sorted(self.chosen))
+            issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, teams=teams)
             found = self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
-                               teams=sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
+                               teams=teams) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
                                                                  COMMENT, 100)
             relations, children = defaultdict(list), defaultdict(list)
             for relation in filter(None, lists["issueRelations"]):
@@ -258,7 +261,7 @@ class Linear:
                     self.rest_of(node, name)
                 children[(node["parent"] or {}).get("id")].append(node)
         else:
-            issues, found = self.changed(since)
+            issues, found = self.changed(since, teams)
             relations = {node["id"]: node.pop("relations")["nodes"] + node.pop("inverseRelations")["nodes"] for node in issues}
             children = {node["id"]: node.pop("children")["nodes"] for node in issues}
         comments = defaultdict(list)
@@ -284,14 +287,15 @@ class Linear:
             census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:]))
         return census, records
 
-    def changed(self, since: str) -> tuple[list, list]:
+    def changed(self, since: str, teams: list) -> tuple[list, list]:
         """The issues changed after `since` or whose comments did, with their comments; a list lacking an ID they name is
         read again."""
-        teams, after = sorted(self.chosen), "updatedAt: { gt: $since }"
-        touched = {c["issue"]["id"] for c in self.every("comments", f"includeArchived: true, filter: {{ {after}, issue: {{ {IN_TEAMS} }} }}",
-                                                        "issue { id }", 100, teams=teams, since=since)}
-        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS}, or: [{{ {after} }}, {{ id: {{ in: $ids }} }}] }}",
-                            POLL, PAGE, teams=teams, since=since, ids=sorted(touched))
+        after = "updatedAt: { gt: $since }"
+        touched = {c["issue"]["id"] for c in self.every(
+            "comments", f"includeArchived: true, filter: {{ {after}, issue: {{ {IN_TEAMS} }} }}", "issue { id }", 100,
+            teams=teams, since=since)}
+        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS}, or: [{{ {after} }}, "
+                                      "{ id: { in: $ids } }] }", POLL, PAGE, teams=teams, since=since, ids=sorted(touched))
         for node in issues:
             for name in (*NESTED, *POLLED):
                 self.rest_of(node, name)
