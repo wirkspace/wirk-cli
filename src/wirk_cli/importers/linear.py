@@ -291,7 +291,7 @@ class Linear:
         named = {name: {(node[key] or {}).get("id") for node in issues + comments for key in keys if key in node}
                  for name, keys in NAMED.items()}
         named["issueLabels"] = {label["id"] for node in issues for label in node["labels"]["nodes"]}
-        lacking = [name for name, ids in named.items() if ids - {None} - {node["id"] for node in self.lists[name]}]
+        lacking = [name for name, wanted in named.items() if wanted - {None} - {node["id"] for node in self.lists[name]}]
         for name in lacking:
             self.lists[name] = self.every(name, *LISTS[name])
         if lacking:
