@@ -13,7 +13,6 @@ from ..client import Failure
 from . import render
 
 PAGE = {"limit": 100, "max_bytes": 65536}
-LATER = "a later version is already written"
 UNSETTLED = {"outcome_unknown", "storage_failed", "storage_mismatch"}  # failures of one issue's write or file
 KEYED = re.compile(r"\[((?:\\.|[^\]\\])*)\]")  # a key in brackets, a ] inside it escaped
 
@@ -200,12 +199,12 @@ class Importer:
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
 
-    def run(self, records: list, position: dict | None = None) -> list:
+    def run(self, records: list, position: dict | None = None, stale=frozenset()) -> list:
         """Every record, then the links between them. A `position` (record, then link source) moves in place past what is
-        settled (see `walk`), and a later run with it goes on from there; links are planned over every record."""
-        # a run with a position may replay a read older than one already written: a part older than its written version is
-        # then left as it is. Without one, a discussion whose newest comment was deleted is older and still written.
-        self.replaying = position is not None
+        settled (see `walk`), and a later run with it goes on from there; links are planned over every record. `stale`
+        names records a later read has written since this one was made: a part of theirs older than its written version
+        is left as it is."""
+        self.overtaken = frozenset(stale)
         if position is None or self.dry_run:
             position = dict(position or {})  # a dry run goes on from the caller's position but never moves it
         self.keys = {record.ident: record.key for record in records}
@@ -394,15 +393,15 @@ class Importer:
         return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
                     files, attachments, digest, render.compact(made.version))
 
-    def decide(self, held: list, plan: Plan) -> tuple[str, Held | None, str]:
+    def decide(self, held: list, plan: Plan, overtaken: bool = False) -> tuple[str, Held | None, str]:
         active = [h for h in held if not h.archived or h.by in self.mine]  # an archive the importer made is its own to undo
         if len(active) > 1:
             return "ambiguous", None, ", ".join(h.item[5:13] for h in active) + " all claim it"
         if not active:
             return ("skipped", held[0], "archived in WIRK") if held else ("create", None, "")
         found = active[0]
-        if self.replaying and found.version > plan.version:  # a later read wrote it first
-            return "current", found, LATER
+        if overtaken and found.version > plan.version:  # a later read wrote it first
+            return "later", found, "a later version is already written"
         if found.hash == plan.digest:
             return "current", found, ""
         if found.by in self.mine:
@@ -418,8 +417,10 @@ class Importer:
         if blocked:
             return [Outcome(record.key, record.kind, "blocked", f"imported by {blocked}")]
         plans = self.plans(record)
-        decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan)) for plan in plans]
-        later = any(message == LATER for *_, message in decided)  # its parts and archive are what the later read left
+        decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan, record.ident in self.overtaken))
+                   for plan in plans]
+        later = {plan.kind for plan, action, _, _ in decided if action == "later"}  # what the later read left stays
+        decided = [(plan, "current" if action == "later" else action, held, message) for plan, action, held, message in decided]
 
         def tidy():
             return [] if later else self.stale(record, len(plans) - 1) + self.mirror(record, plans)
