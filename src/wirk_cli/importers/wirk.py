@@ -594,7 +594,9 @@ class Importer:
 
     def gone(self, present: set) -> list:
         """The importer's active items that the source no longer has: an issue missing from a complete read of its scope, or
-        another object missing from everything the source showed, selected or not."""
+        another object missing from everything the source showed, selected or not. A read of changes only finds nothing."""
+        if self.ctx.seen is None:
+            return []
         outcomes = []
         for (kind, ident), held in self.index.held.items():
             if kind.startswith("comments") or ident in present or kind != "issue" and ident in self.ctx.seen:

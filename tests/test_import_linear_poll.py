@@ -1,0 +1,141 @@
+"""The Linear adapter as a library: a poll since a time, on lists from the last full read, renders each issue as the full
+read does. The workspace is synthetic until L0 records a real one (linear_workspace.py)."""
+
+import json
+import re
+
+import httpx
+
+from import_fakes import FakeWirk
+from test_import_linear import FakeLinear, adapter, folder, issue, page, read, ref  # noqa: F401 (folder is a fixture)
+import linear_workspace as ws
+from wirk_cli.client import Service
+from wirk_cli.importers import DEFAULT_STATUSES, linear, render, wirk
+
+
+class PollingLinear(FakeLinear):
+    """Also answers a poll: updatedAt and ID filters given as literals, and an issue's children and relations nested."""
+
+    def __init__(self, issues=ws.ISSUES, relations=ws.RELATIONS, comments=ws.COMMENTS):
+        super().__init__([dict(node) for node in issues], relations, comments)
+
+    def nested_of(self, ident, teams):
+        keys = {team["id"]: team for team in self.lists["teams"]}
+        children = [{"id": n["id"], "identifier": n["identifier"], "number": n["number"],
+                     "team": {key: keys[n["team"]["id"]][key] for key in ("id", "key", "private")}}
+                    for n in reversed(self.lists["issues"]) if (n["parent"] or {}).get("id") == ident and n["team"]["id"] in teams]
+        return {"children": children,
+                "relations": [r for r in self.lists["issueRelations"] if (r["issue"] or {}).get("id") == ident],
+                "inverseRelations": [r for r in self.lists["issueRelations"] if (r["relatedIssue"] or {}).get("id") == ident]}
+
+    def answer(self, query, variables):
+        more = re.search(r"issue\(id: \$id\) \{ (\w+)\(", query)
+        if "viewer" in query:
+            return super().answer(query, variables)
+        if more and more[1] in linear.POLLED:
+            return {"issue": {more[1]: self.window(self.nested_of(variables["id"], variables["teams"])[more[1]], variables)}}
+        name = re.search(r"\{\s*(\w+)\(", query)[1]
+        since, ids = re.search(r'updatedAt: \{ gt: ("[^"]*") \}', query), re.search(r"id: \{ in: (\[[^\]]*\]) \}", query)
+        if not (since or ids):
+            return super().answer(query, variables)
+        since, ids = json.loads(since[1]) if since else None, set(json.loads(ids[1])) if ids else set()
+        team = {n["id"]: n["team"]["id"] for n in self.lists["issues"]}
+        if name == "comments":
+            nodes = [c for c in self.lists["comments"] if c["issue"] and (c["issue"]["id"] in ids or since and c["updatedAt"] > since
+                                                                         and team.get(c["issue"]["id"]) in variables["teams"])]
+        else:
+            nodes = [{**n, **{key: page(found[:50], len(found) > 50, "50" if len(found) > 50 else None)
+                              for key, found in self.nested_of(n["id"], variables["teams"]).items()}}
+                     for n in self.lists["issues"] if n["team"]["id"] in variables["teams"] and (n["updatedAt"] > since or n["id"] in ids)]
+        return {name: self.window(nodes, variables)}
+
+
+def poll(fake, folder, since, lists, selection=()):
+    found = adapter(fake, folder)
+    found.check({})
+    fake.requests.clear()
+    return found, *found.read(list(selection), since=since, lists=lists)
+
+
+def roots(fake):
+    return [re.search(r"\{\s*(\w+)\(", json.loads(r.content)["query"])[1] for r in fake.requests if r.method == "POST"]
+
+
+def test_a_poll_asks_only_for_what_changed_and_takes_the_lists_from_the_last_full_read(folder):
+    fake = PollingLinear()
+    full, _, _ = read(fake, folder)
+    _, census, records = poll(fake, folder, ws.SINCE, full.lists)
+    assert sorted(record.key for record in records) == ["ENG-1", "ENG-6", "ENG-7"]  # ENG-6 through its comment
+    assert {record.kind for record in records} == {"issue"} and census.issues == 3
+    assert set(roots(fake)) == {"issues", "comments"}  # no team, label, project or relation list read again
+    asked = next(json.loads(r.content)["query"] for r in fake.requests if "issues(" in json.loads(r.content)["query"])
+    assert f'updatedAt: {{ gt: "{ws.SINCE}" }}' in asked and "includeArchived: true" in asked
+    assert "id type issue { id identifier team { id key private } } relatedIssue { id identifier team { id key private } }" in asked
+
+
+def test_a_polled_issue_renders_byte_for_byte_as_the_full_read_does(folder):
+    fake = PollingLinear()
+    full, census, records = read(fake, folder)
+    found, _, polled = poll(fake, folder, "2000-01-01T00:00:00.000Z", full.lists)
+    whole = {record.ident: record for record in records if record.kind == "issue"}
+    assert sorted(record.key for record in polled) == sorted(record.key for record in whole.values())
+    for record in polled:
+        assert record == whole[record.ident], record.key
+        assert render.archive(record.raw, found.withheld(found.context(census.selected)), {}) == \
+            render.archive(whole[record.ident].raw, full.withheld(full.context(census.selected)), {})
+    parent = whole[ref(1)["id"]]
+    assert [r["id"] for r in parent.raw["relations"]] == ["r-1", "r-2", "r-3", "r-5", "r-9"]  # by relation ID, both ways
+    assert [(kind, other.key) for kind, other in parent.relations if kind == "sub_issue"] == [
+        ("sub_issue", "ENG-2"), ("sub_issue", "ENG-3"), ("sub_issue", "OPS-4")]  # chosen teams, archived too, by number
+    assert not {"children", "relations", "inverseRelations"} & set(parent.raw["issue"])
+
+
+def test_a_poll_reads_a_list_again_only_when_an_issue_names_an_id_it_lacks(folder):
+    fake = PollingLinear(issues=ws.ISSUES[:1] + [issue(7, updatedAt=ws.NEW, labels=page([{"id": "l-bug"}]))])
+    full, _, _ = read(fake, folder)
+    lists = {**full.lists, "issueLabels": [label for label in full.lists["issueLabels"] if label["id"] != "l-bug"]}
+    found, _, records = poll(fake, folder, ws.SINCE, lists)
+    assert roots(fake).count("issueLabels") == 1 and "teams" not in roots(fake)
+    assert next(r for r in records if r.key == "ENG-7").fields["Label"] == ["Bug"]
+    assert found.lists["issueLabels"] == full.lists["issueLabels"] and len(lists["issueLabels"]) == len(full.lists["issueLabels"]) - 1
+
+
+def test_a_long_list_of_children_is_paged_with_its_filter(folder):
+    children = [issue(n, parent=ref(1)) for n in range(2, 62)]
+    fake = PollingLinear(issues=[issue(1, updatedAt=ws.NEW)] + children, relations=[], comments=[])
+    full, _, records = read(fake, folder)
+    _, _, polled = poll(fake, folder, ws.SINCE, full.lists)
+    assert polled == [next(r for r in records if r.key == "ENG-1")]
+    assert len([kind for kind, _ in polled[0].relations if kind == "sub_issue"]) == 60
+
+
+def test_a_polls_context_reports_nothing_missing(folder):
+    fake = PollingLinear()
+    full, census, _ = read(fake, folder)
+    found, census, _ = poll(fake, folder, ws.SINCE, full.lists)
+    assert full.context(census.selected).seen and found.context(census.selected).seen is None
+
+
+def importer(fake_wirk, found, census):
+    ctx = found.context(census.selected)
+    service = Service("https://wirk.test", "wirk_" + "t" * 43, transport=httpx.MockTransport(fake_wirk))
+    made = wirk.Importer(wirk.Wirk(service), ctx, users={}, statuses={state: state for state in DEFAULT_STATUSES.values()},
+                         plan={}, withheld=found.withheld(ctx), download=lambda attachment: None, dry_run=False, overwrite=False)
+    made.start()
+    return made
+
+
+def test_a_poll_then_the_nights_read_write_a_changed_issue_once_and_a_poll_reports_nothing_missing(folder):
+    fake, store = PollingLinear(), FakeWirk(principal="sam-linear-import", person="sam")
+    full, census, records = read(fake, folder)
+    importer(store, full, census).run(records)
+    fake.lists["issues"][0].update(title="Parent, renamed", updatedAt="2026-10-14T21:00:00.000Z")
+    found, census, polled = poll(fake, folder, ws.NEW, full.lists)
+    before = len(store.requests)
+    outcomes = importer(store, found, census).run(polled)
+    assert [(o.key, o.outcome) for o in outcomes if o.kind == "issue"] == [("ENG-1", "updated")]
+    assert not [o for o in outcomes if o.outcome == "missing"]
+    assert not [body for route, body in store.requests[before:] if route == "/v2/query" and body.get("depth") == "full"
+                and body["fetch"][0] not in {o.item for o in outcomes}]  # no item outside the poll is read
+    full, census, records = read(fake, folder)
+    assert {o.outcome for o in importer(store, full, census).run(records) if o.key == "ENG-1"} == {"current"}

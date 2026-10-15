@@ -3,6 +3,7 @@ to Read, saved owner-only at <config>/import/linear-key. Queries only; the key g
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, time as day_time, timezone
+import json
 import os
 import re
 import stat
@@ -44,16 +45,27 @@ PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
 REF = "id identifier team { id key private }"
 # An issue page of 25 asks about 3,600 of the 10,000 points one query may cost (by Linear's published rules: 0.1 a
 # property, 1 an object, children times their page size); the real cost is read from X-Complexity on a real workspace.
-NESTED = {"labels": ("first: 20", "id"), "attachments": ("first: 20", "id title subtitle url sourceType"),
-          "history": ("first: 20", "id createdAt actorId fromStateId toStateId fromAssigneeId toAssigneeId fromPriority "
+NESTED = {"labels": ("", "id"), "attachments": ("", "id title subtitle url sourceType"),
+          "history": ("", "id createdAt actorId fromStateId toStateId fromAssigneeId toAssigneeId fromPriority "
                       "toPriority fromEstimate toEstimate fromDueDate toDueDate fromCycleId toCycleId fromProjectId toProjectId "
                       "fromParentId toParentId fromTeamId toTeamId fromTitle toTitle addedLabelIds removedLabelIds archived "
                       "trashed autoArchived autoClosed updatedDescription")}
+IN_TEAMS = "team: { id: { in: $teams } }"
+RELATION = f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"
+# A poll reads each issue with what the full read gathers from its other lists: its children and both ends' relations.
+POLLED = {"children": (f"includeArchived: true, filter: {{ {IN_TEAMS} }}", "number " + REF),
+          "relations": ("includeArchived: true", RELATION), "inverseRelations": ("includeArchived: true", RELATION)}
+
+
+def connection(name: str, args: str, nodes: str, first: str = "20") -> str:
+    return f"{name}(first: {first}{', ' + args if args else ''}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }}"
+
+
 ISSUE = ("id identifier number previousIdentifiers url title description priority estimate dueDate createdAt updatedAt "
          "startedAt completedAt canceledAt archivedAt trashed reactionData state { id } team { id } parent { " + REF + " } "
          "project { id } projectMilestone { id } cycle { id } assignee { id } creator { id } "
-         + " ".join(f"{name}({args}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }}"
-                    for name, (args, nodes) in NESTED.items()))
+         + " ".join(connection(name, *spec) for name, spec in NESTED.items()))
+POLL = ISSUE + " " + " ".join(connection(name, *spec) for name, spec in POLLED.items())
 COMMENT = ("id body createdAt editedAt quotedText resolvedAt reactionData parent { id } issue { id } project { id } "
            "initiative { id } projectUpdate { id } initiativeUpdate { id } documentContent { document { id } } user { id } "
            "resolvingUser { id } botActor { name } externalUser { name }")
@@ -68,7 +80,7 @@ LISTS = {  # read whole at the start: (arguments, what each node holds)
                  "teams(first: 20) { nodes { id } } targetDate targetDateResolution health createdAt updatedAt completedAt "
                  "canceledAt archivedAt trashed"),
     "projectMilestones": ("includeArchived: true", "id name description targetDate status archivedAt project { id }"),
-    "issueRelations": ("includeArchived: true", f"id type issue {{ {REF} }} relatedIssue {{ {REF} }}"),
+    "issueRelations": ("includeArchived: true", RELATION),
     "projectRelations": ("", "id type project { id } relatedProject { id } projectMilestone { id } relatedProjectMilestone { id }"),
     "initiatives": ("includeArchived: true", "id name description content url status owner { id } targetDate health "
                     "parentInitiative { id } createdAt updatedAt archivedAt trashed"),
@@ -78,8 +90,9 @@ LISTS = {  # read whole at the start: (arguments, what each node holds)
     "projectUpdates": ("includeArchived: true", UPDATE + " project { id }"),
     "initiativeUpdates": ("includeArchived: true", UPDATE + " initiative { id }"),
 }
-PARTIAL = {"issueRelations"}  # lists whose answer may leave out what the key cannot read, with an error saying so
-IN_TEAMS = "team: { id: { in: $teams } }"
+# The IDs an issue or comment names, by the list that holds them; a poll reads a list again when it lacks one.
+NAMED = {"teams": ("team",), "workflowStates": ("state",), "users": ("assignee", "creator", "user", "resolvingUser"),
+         "cycles": ("cycle",), "projects": ("project",), "projectMilestones": ("projectMilestone",)}
 
 
 def due_at(day: str, zone: str | None) -> str:
@@ -175,7 +188,7 @@ class Linear:
         found, after = [], None
         while True:
             answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})},
-                                  name in PARTIAL)[name]
+                                  "relatedIssue" in nodes)[name]  # an answer may leave out what the key cannot read
             found += answer["nodes"]
             if not answer["pageInfo"]["hasNextPage"]:
                 return found
@@ -183,25 +196,36 @@ class Linear:
 
     def rest_of(self, node: dict, name: str) -> None:
         """An issue's nested connection longer than its first page, read to the end."""
-        query = (f"query($id: String!, $first: Int!, $after: String) {{ issue(id: $id) {{ {name}(first: $first, after: $after) "
-                 f"{{ pageInfo {{ hasNextPage endCursor }} nodes {{ {NESTED[name][1]} }} }} }} }}")
+        args, nodes = {**NESTED, **POLLED}[name]
+        teams = "$teams" in args
+        query = (f"query($id: String!, $first: Int!, $after: String{', $teams: [ID!]' if teams else ''}) {{ issue(id: $id) {{ "
+                 f"{connection(name, 'after: $after' + (', ' + args if args else ''), nodes, '$first')} }} }}")
         found = node[name]
         while found["pageInfo"]["hasNextPage"]:
-            more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"]})["issue"][name]
+            more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"],
+                                        **({"teams": sorted(self.chosen)} if teams else {})}, "relatedIssue" in nodes)["issue"][name]
             found = {"pageInfo": more["pageInfo"], "nodes": found["nodes"] + more["nodes"]}
         node[name] = found
 
     # ---------------------------------------------------------------- what to read
 
     def context(self, selected: list) -> render.Context:
-        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, frozenset(self.seen))
+        seen = frozenset(self.seen) if self.since is None else None  # a poll does not know what Linear no longer has
+        return render.Context(SOURCE, frozenset(selected), NOUN, LABELS, KINDS, DOCS, seen)
 
-    def read(self, selection: list) -> tuple[render.Census, list]:
-        lists = {name: self.every(name, args, nodes) for name, (args, nodes) in LISTS.items()}
+    def by_id(self) -> None:
         self.teams, self.states, self.users, self.labels, self.cycles, self.projects, self.milestones, self.initiatives = (
-            {node["id"]: node for node in lists[name]} for name in
+            {node["id"]: node for node in self.lists[name]} for name in
             ("teams", "workflowStates", "users", "issueLabels", "cycles", "projects", "projectMilestones", "initiatives"))
-        self.keys = keys = {team["key"]: team for team in lists["teams"]}
+        self.keys = {team["key"]: team for team in self.lists["teams"]}
+
+    def read(self, selection: list, since: str | None = None, lists: dict | None = None) -> tuple[render.Census, list]:
+        """The selection's records. With `since`, only the issues changed after it or whose comments changed, each read with
+        its children and relations so it renders as the full read renders it; the other lists are `lists`, the last full
+        read's `self.lists`, and an ID they lack reads that list again."""
+        self.since, self.lists = since, dict(lists or {name: self.every(name, *spec) for name, spec in LISTS.items()})
+        self.by_id()
+        lists, keys = self.lists, self.keys
         unknown = [word for word in selection if word not in keys]
         if unknown:
             raise Stop(f"Linear has no team {', '.join(unknown)} that this key can see",
@@ -210,29 +234,30 @@ class Linear:
         self.chosen = {team["id"] for team in chosen}
         self.seen = {node["id"] for name in ("projects", "projectMilestones", "initiatives", "documents", "projectUpdates",
                                              "initiativeUpdates") for node in lists[name]}  # in Linear, selected or not
-        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
-        for node in issues:
-            for name in NESTED:
-                self.rest_of(node, name)
+        if since is None:
+            issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
+            found = self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
+                               sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
+                                                                 COMMENT, 100)
+            relations, children = defaultdict(list), defaultdict(list)
+            for relation in filter(None, lists["issueRelations"]):
+                for end in {end["id"] for end in (relation["issue"], relation["relatedIssue"]) if end}:
+                    relations[end].append(relation)
+            for node in issues:
+                for name in NESTED:
+                    self.rest_of(node, name)
+                children[(node["parent"] or {}).get("id")].append(node)
+        else:
+            issues, found = self.changed(since)
+            relations = {node["id"]: node.pop("relations")["nodes"] + node.pop("inverseRelations")["nodes"] for node in issues}
+            children = {node["id"]: node.pop("children")["nodes"] for node in issues}
         comments = defaultdict(list)
-        for found in self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
-                                sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
-                                                                  COMMENT, 100):
-            parent = found["issue"] or found["projectUpdate"] or found["initiativeUpdate"] or \
-                (found["documentContent"] or {}).get("document") or found["project"] or found["initiative"]
-            comments[(parent or {}).get("id")].append(found)
-        read, related, children = {node["id"] for node in issues}, defaultdict(list), defaultdict(list)
-        readable = [r for r in lists["issueRelations"] if r and r["issue"] and r["relatedIssue"]]
-        for relation in readable:
-            ends, kinds = (relation["issue"], relation["relatedIssue"]), RELATIONS.get(relation["type"], ("related", "related"))
-            for this, other, kind in ((ends[0], ends[1], kinds[0]), (ends[1], ends[0], kinds[1])):
-                if this["id"] in read:
-                    related[this["id"]].append((kind, self.reference(other), relation))
-        for node in sorted(issues, key=lambda node: node["number"]):
-            if node["parent"]:
-                children[node["parent"]["id"]].append(node)
-        records = [self.record(node, comments[node["id"]], related[node["id"]], children[node["id"]]) for node in issues]
-        others = self.others(lists, issues, comments)
+        for each in found:
+            parent = each["issue"] or each["projectUpdate"] or each["initiativeUpdate"] or \
+                (each["documentContent"] or {}).get("document") or each["project"] or each["initiative"]
+            comments[(parent or {}).get("id")].append(each)
+        records = [self.record(node, comments[node["id"]], relations[node["id"]], children[node["id"]]) for node in issues]
+        others = self.others(lists, issues, comments) if since is None else []
         census = render.Census(selected=sorted(team["key"] for team in chosen), issues=len(records), points=self.points)
         census.skipped = [(team["key"], None) for team in sorted(lists["teams"], key=lambda t: t["key"])
                           if team["private"] and team not in chosen]
@@ -240,13 +265,38 @@ class Linear:
                                 for team in chosen if team["private"]]
         records += others
         census.comments = sum(len(record.comments) for record in records)
-        if len(readable) < len(lists["issueRelations"]):
-            census.notes.append(f"relations this key cannot read, left out: {len(lists['issueRelations']) - len(readable)}")
         census.external_images = sum(1 for record in records for text in [record.body] + [c.body for c in record.comments]
                                      for url in IMAGE.findall(text) if not UPLOAD.match(url))
-        counts = Counter(record.kind for record in others)
-        census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:]))
+        if since is None:
+            unreadable = sum(1 for r in lists["issueRelations"] if not (r and r["issue"] and r["relatedIssue"]))
+            census.notes += [f"relations this key cannot read, left out: {unreadable}"] if unreadable else []
+            counts = Counter(record.kind for record in others)
+            census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:]))
         return census, records
+
+    def changed(self, since: str) -> tuple[list, list]:
+        """The issues changed after `since` or whose comments did, with their comments; a list lacking an ID they name is
+        read again."""
+        after, teams = f"updatedAt: {{ gt: {json.dumps(since)} }}", sorted(self.chosen)
+        touched = {c["issue"]["id"] for c in self.every(
+            "comments", f"includeArchived: true, filter: {{ {after}, issue: {{ {IN_TEAMS} }} }}", "issue { id }", 100, teams)}
+        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS}, or: [{{ {after} }}, "
+                                      f"{{ id: {{ in: {json.dumps(sorted(touched))} }} }}] }}", POLL, PAGE, teams)
+        for node in issues:
+            for name in (*NESTED, *POLLED):
+                self.rest_of(node, name)
+        ids = json.dumps([node["id"] for node in issues])
+        comments = self.every("comments", f"includeArchived: true, filter: {{ issue: {{ id: {{ in: {ids} }} }} }}", COMMENT,
+                              100) if issues else []
+        named = {name: {(node[key] or {}).get("id") for node in issues + comments for key in keys if key in node}
+                 for name, keys in NAMED.items()}
+        named["issueLabels"] = {label["id"] for node in issues for label in node["labels"]["nodes"]}
+        lacking = [name for name, ids in named.items() if ids - {None} - {node["id"] for node in self.lists[name]}]
+        for name in lacking:
+            self.lists[name] = self.every(name, *LISTS[name])
+        if lacking:
+            self.by_id()
+        return issues, comments
 
     # ---------------------------------------------------------------- projects, milestones, initiatives, documents and updates
 
@@ -391,7 +441,15 @@ class Linear:
         bot, outsider = comment["botActor"], comment["externalUser"]
         return f"{bot['name']} (bot)" if bot else f"{outsider['name']} (external)" if outsider else "@unknown"
 
-    def record(self, node: dict, comments: list, related: list, children: list) -> render.Record:
+    def record(self, node: dict, comments: list, naming: list, children: list) -> render.Record:
+        """One issue, from its comments, the relations naming it and its sub-issues, as a poll or the full read finds them:
+        relations the key can read, by relation ID; sub-issues by number."""
+        related = []
+        readable = {r["id"]: r for r in naming if r and r["issue"] and r["relatedIssue"]}
+        for relation in sorted(readable.values(), key=lambda r: r["id"]):
+            ends, kinds = (relation["issue"], relation["relatedIssue"]), RELATIONS.get(relation["type"], ("related", "related"))
+            related += [(kind, self.reference(other), relation) for this, other, kind in
+                        ((ends[0], ends[1], kinds[0]), (ends[1], ends[0], kinds[1])) if this["id"] == node["id"]]
         team = self.teams[node["team"]["id"]]
         state = self.states.get((node["state"] or {}).get("id"), {"name": "Unknown", "type": "unstarted"})
         fields, facts = self.fields_and_facts(node, team, state)
@@ -401,7 +459,7 @@ class Linear:
         ordered, assignee = self.thread(comments), self.users.get((node["assignee"] or {}).get("id"))
         milestone, project = (node["projectMilestone"] or {}).get("id"), (node["project"] or {}).get("id")
         relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
-            [("sub_issue", self.reference(child)) for child in children] + \
+            [("sub_issue", self.reference(child)) for child in sorted(children, key=lambda child: child["number"])] + \
             ([("milestone", self.part(milestone))] if milestone in self.milestones else
              [("project", self.part(project))] if project in self.projects else []) + \
             sorted(((kind, other) for kind, other, _ in related), key=lambda pair: (pair[0], pair[1].key))
