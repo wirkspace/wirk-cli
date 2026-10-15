@@ -169,3 +169,10 @@ def test_an_overtaken_discussion_still_lets_its_issue_be_archived(fake):
     result = make(fake).run([archived], position={}, stale={"3000000001"})
     assert ("acme/api#1", "comments", "current") in [(o.key, o.kind, o.outcome) for o in result]
     assert [item["archived"] for item in fake.mine().values()] == [True]
+
+
+def test_progress_counts_every_record_including_those_a_position_passes(fake):
+    seen = []
+    make(fake, progress=lambda done, total: seen.append((done, total))).run([issue(1), issue(2), issue(3)],
+                                                                            position={"record": "3000000001"})
+    assert seen == [(2, 3), (3, 3)]

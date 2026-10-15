@@ -210,13 +210,8 @@ class Importer:
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
         self.plan_links(records)
-
-        def counted(done, record):
-            found = self.guarded(record.key, record.kind, self.attempt, record)
-            self.progress(done, len(records))
-            return found
-        walk(position, "record", [(record.ident, set(), partial(counted, done, record)) for done, record in enumerate(records, 1)],
-             self.outcomes)
+        walk(position, "record", [(record.ident, set(), partial(self.guarded, record.key, record.kind, self.attempt, record))
+                                  for record in records], self.outcomes, progress=self.progress)
         if not self.dry_run:
             self.outcomes += self.link_pass(position)
         self.outcomes += self.gone({record.ident for record in records})
@@ -647,17 +642,19 @@ def resume(position: dict, name: str, keys: list) -> int:
     return keys.index(position[name]) + 1 if position.get(name) in keys else 0
 
 
-def walk(position: dict, name: str, steps: list, out: list, unsettled: set = frozenset()) -> None:
-    """Each step (key, the keys it touches, its work) from where the position says to go on, its outcomes added to `out`.
-    The position moves in place past each step that, like every step before it, ended with no error and touched nothing
-    unsettled."""
-    steady = True
-    for key, touched, work in steps[resume(position, name, [step[0] for step in steps]):]:
+def walk(position: dict, name: str, steps: list, out: list, unsettled: set = frozenset(), progress=None) -> None:
+    """Each step (key, the keys it touches, its work) from where the position says to go on, its outcomes added to `out`
+    and its number told to `progress`. The position moves in place past each step that, like every step before it, ended
+    with no error and touched nothing unsettled."""
+    steady, start = True, resume(position, name, [step[0] for step in steps])
+    for done, (key, touched, work) in enumerate(steps[start:], start + 1):
         found = work()
         out += found
         steady = steady and not touched & unsettled and all(outcome.outcome != "error" for outcome in found)
         if steady:
             position[name] = key
+        if progress:
+            progress(done, len(steps))
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
