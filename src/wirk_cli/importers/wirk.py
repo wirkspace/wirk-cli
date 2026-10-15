@@ -200,10 +200,10 @@ class Importer:
         return you["you"]
 
     def run(self, records: list, position: dict | None = None, stale=frozenset()) -> list:
-        """Every record, then the links between them. A `position` (record, then link source) moves in place past what is
-        settled (see `walk`), and a later run with it goes on from there; links are planned over every record. `stale`
-        names records a later read has written since this one was made: a part of theirs older than its written version
-        is left as it is."""
+        """Every record, then the links between them; links are planned over every record. A `position` (record, then link
+        source) moves in place past what is settled (see `walk`), and a later run over the same records goes on from there:
+        it holds for one frozen list of records only, so each distinct read starts from a new one. `stale` names records a
+        later read has written since this one was made: a part of theirs older than its written version is left as it is."""
         self.overtaken = frozenset(stale)
         if position is None or self.dry_run:
             position = dict(position or {})  # a dry run goes on from the caller's position but never moves it
