@@ -105,6 +105,13 @@ def due_at(day: str, zone: str | None) -> str:
     return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def unreadable(error: dict) -> bool:
+    """Whether an error only says a relation's end is in a team the key cannot read, beside the null it leaves."""
+    path, code = error.get("path") or [], (error.get("extensions") or {}).get("code")
+    return (len(path) >= 4 and path[-4] in ("issueRelations", "relations", "inverseRelations") and path[-1] in ("issue", "relatedIssue")
+            and (code == "FORBIDDEN" or "not found" in (error.get("message") or "").lower()))
+
+
 def bracketed(name: str) -> str:
     """A name as a key: a ] inside it escaped, so `text='Linear project [<key>]'` finds that one object."""
     return name.replace("\\", "\\\\").replace("]", "\\]")
@@ -143,8 +150,8 @@ class Linear:
         self.key = key
         self.graphql("query { viewer { id } organization { urlKey } }", {})
 
-    def graphql(self, query: str, variables: dict, partial: bool = False) -> dict:
-        """The answer's data. With `partial`, an answer that left out what the key cannot read is taken as it is."""
+    def graphql(self, query: str, variables: dict) -> dict:
+        """The answer's data; one that left out only relation ends the key cannot read is taken as it is."""
         assert query.lstrip().startswith("query")  # the importer only reads
         failures = 0
         while True:
@@ -155,7 +162,7 @@ class Linear:
                 answer, body = None, {}
             errors = body.get("errors") or []
             codes = {(error.get("extensions") or {}).get("code") for error in errors}
-            whole = not (partial and isinstance(body.get("data"), dict))
+            whole = not (isinstance(body.get("data"), dict) and all(map(unreadable, errors)))
             if "RATELIMITED" in codes:  # waiting for the reset is not a failure
                 self.sleep(self.until(answer.headers))
                 continue
@@ -187,8 +194,7 @@ class Linear:
                  f"after: $after{', ' + args if args else ''}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }} }}")
         found, after = [], None
         while True:
-            answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})},
-                                  "relatedIssue" in nodes)[name]  # an answer may leave out what the key cannot read
+            answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})})[name]
             found += answer["nodes"]
             if not answer["pageInfo"]["hasNextPage"]:
                 return found
@@ -203,7 +209,7 @@ class Linear:
         found = node[name]
         while found["pageInfo"]["hasNextPage"]:
             more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"],
-                                        **({"teams": sorted(self.chosen)} if teams else {})}, "relatedIssue" in nodes)["issue"][name]
+                                        **({"teams": sorted(self.chosen)} if teams else {})})["issue"][name]
             found = {"pageInfo": more["pageInfo"], "nodes": found["nodes"] + more["nodes"]}
         node[name] = found
 

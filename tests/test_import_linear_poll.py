@@ -5,12 +5,14 @@ import json
 import re
 
 import httpx
+import pytest
 
 from import_fakes import FakeWirk
 from test_import_linear import FakeLinear, adapter, folder, issue, page, read, ref  # noqa: F401 (folder is a fixture)
 import linear_workspace as ws
 from wirk_cli.client import Service
 from wirk_cli.importers import DEFAULT_STATUSES, linear, render, wirk
+from wirk_cli.importers.render import Stop
 
 
 class PollingLinear(FakeLinear):
@@ -156,3 +158,22 @@ def test_a_poll_then_the_nights_read_write_a_changed_issue_once_and_a_poll_repor
                 and body["fetch"][0] not in {o.item for o in outcomes}]  # no item outside the poll is read
     full, census, records = read(fake, folder)
     assert {o.outcome for o in importer(store, full, census).run(records) if o.key == "ENG-1"} == {"current"}
+
+
+def test_a_poll_refuses_an_error_that_is_not_an_unreadable_relation_end(folder):
+    fake = PollingLinear(issues=[issue(1, updatedAt=ws.NEW, assignee={"id": "u-ada"})], relations=[], comments=[])
+    full, _, _ = read(fake, folder)
+    answer = fake.answer
+
+    def broken(query, variables):
+        data = answer(query, variables)
+        if "issues(" in query:
+            fake.errors = [{"message": "Internal error", "path": ["issues", "nodes", 0, "assignee"],
+                            "extensions": {"code": "INTERNAL_SERVER_ERROR"}}]
+            data["issues"]["nodes"][0]["assignee"] = None
+        return data
+    fake.answer = broken
+    with pytest.raises(Stop, match="Internal error"):
+        read(fake, folder)
+    with pytest.raises(Stop, match="Internal error"):
+        poll(fake, folder, ws.SINCE, full.lists)
