@@ -16,7 +16,7 @@ from wirk_cli.importers.render import Stop
 
 
 class PollingLinear(FakeLinear):
-    """Also answers a poll: updatedAt and ID filters given as literals, and an issue's children and relations nested."""
+    """Also answers a poll: its since and ids variables, and an issue's children and relations nested."""
 
     def __init__(self, issues=ws.ISSUES, relations=ws.RELATIONS, comments=ws.COMMENTS):
         super().__init__([dict(node) for node in issues], relations, comments)
@@ -42,10 +42,9 @@ class PollingLinear(FakeLinear):
         if more and more[1] in linear.POLLED:
             return {"issue": {more[1]: self.window(self.nested_of(variables["id"], variables["teams"])[more[1]], variables)}}
         name = re.search(r"\{\s*(\w+)\(", query)[1]
-        since, ids = re.search(r'updatedAt: \{ gt: ("[^"]*") \}', query), re.search(r"id: \{ in: (\[[^\]]*\]) \}", query)
-        if not (since or ids):
+        if not {"since", "ids"} & variables.keys():
             return super().answer(query, variables)
-        since, ids = json.loads(since[1]) if since else None, set(json.loads(ids[1])) if ids else set()
+        since, ids = variables.get("since"), set(variables.get("ids") or [])
         team = {n["id"]: n["team"]["id"] for n in self.lists["issues"]}
         if name == "comments":
             nodes = [c for c in self.lists["comments"] if c["issue"] and (c["issue"]["id"] in ids or since and c["updatedAt"] > since
@@ -86,8 +85,11 @@ def test_a_poll_asks_only_for_what_changed_and_takes_the_lists_from_the_last_ful
     assert sorted(record.key for record in records) == ["ENG-1", "ENG-6", "ENG-7"]  # ENG-6 through its comment
     assert {record.kind for record in records} == {"issue"} and census.issues == 3
     assert set(roots(fake)) == {"issues", "comments"}  # no team, label, project or relation list read again
-    asked = next(json.loads(r.content)["query"] for r in fake.requests if "issues(" in json.loads(r.content)["query"])
-    assert f'updatedAt: {{ gt: "{ws.SINCE}" }}' in asked and "includeArchived: true" in asked
+    sent = [json.loads(r.content) for r in fake.requests if r.method == "POST"]
+    asked, variables = next((body["query"], body["variables"]) for body in sent if "issues(" in body["query"])
+    assert "$since: DateTimeOrDuration!" in asked and "$ids: [ID!]" in asked and "updatedAt: { gt: $since }" in asked
+    assert variables["since"] == ws.SINCE and variables["ids"] == [ref(6)["id"]] and "includeArchived: true" in asked
+    assert not [body for body in sent if ws.SINCE in body["query"] or ref(6)["id"] in body["query"]]  # values travel as variables
     assert "id type issue { id identifier team { id key private } } relatedIssue { id identifier team { id key private } }" in asked
 
 

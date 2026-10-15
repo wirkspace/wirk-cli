@@ -3,7 +3,6 @@ to Read, saved owner-only at <config>/import/linear-key. Queries only; the key g
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, time as day_time, timezone
-import json
 import os
 import re
 import stat
@@ -105,6 +104,12 @@ def due_at(day: str, zone: str | None) -> str:
     return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def declared(variables: dict) -> str:
+    """The query's declarations of these variables; since is Linear's date comparator's type."""
+    types = {"teams": "[ID!]", "ids": "[ID!]", "since": "DateTimeOrDuration!"}
+    return "".join(f", ${name}: {types[name]}" for name in variables)
+
+
 def unreadable(error: dict) -> bool:
     """Whether an error only says a relation's end is in a team the key cannot read, beside the null it leaves."""
     path, code = error.get("path") or [], (error.get("extensions") or {}).get("code")
@@ -188,13 +193,13 @@ class Linear:
         resets = [int(headers.get(name) or 0) for name in ("X-RateLimit-Requests-Reset", "X-RateLimit-Complexity-Reset")]
         return max(1.0, max(resets) / 1000 - time.time()) + 1 if any(resets) else 60.0
 
-    def every(self, name: str, args: str, nodes: str, size: int = LIST, teams: list | None = None) -> list:
-        """A root list read to its end, a page at a time."""
-        query = (f"query($first: Int!, $after: String{', $teams: [ID!]' if teams is not None else ''}) {{ {name}(first: $first, "
+    def every(self, name: str, args: str, nodes: str, size: int = LIST, **variables) -> list:
+        """A root list read to its end, a page at a time; `variables` are the ones `args` names, such as teams."""
+        query = (f"query($first: Int!, $after: String{declared(variables)}) {{ {name}(first: $first, "
                  f"after: $after{', ' + args if args else ''}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {nodes} }} }} }}")
         found, after = [], None
         while True:
-            answer = self.graphql(query, {"first": size, "after": after, **({"teams": teams} if teams is not None else {})})[name]
+            answer = self.graphql(query, {"first": size, "after": after, **variables})[name]
             found += answer["nodes"]
             if not answer["pageInfo"]["hasNextPage"]:
                 return found
@@ -203,13 +208,12 @@ class Linear:
     def rest_of(self, node: dict, name: str) -> None:
         """An issue's nested connection longer than its first page, read to the end."""
         args, nodes = {**NESTED, **POLLED}[name]
-        teams = "$teams" in args
-        query = (f"query($id: String!, $first: Int!, $after: String{', $teams: [ID!]' if teams else ''}) {{ issue(id: $id) {{ "
+        variables = {"teams": sorted(self.chosen)} if "$teams" in args else {}
+        query = (f"query($id: String!, $first: Int!, $after: String{declared(variables)}) {{ issue(id: $id) {{ "
                  f"{connection(name, 'after: $after' + (', ' + args if args else ''), nodes, '$first')} }} }}")
         found = node[name]
         while found["pageInfo"]["hasNextPage"]:
-            more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"],
-                                        **({"teams": sorted(self.chosen)} if teams else {})})["issue"][name]
+            more = self.graphql(query, {"id": node["id"], "first": 100, "after": found["pageInfo"]["endCursor"], **variables})["issue"][name]
             found = {"pageInfo": more["pageInfo"], "nodes": found["nodes"] + more["nodes"]}
         node[name] = found
 
@@ -241,9 +245,9 @@ class Linear:
         self.seen = {node["id"] for name in ("projects", "projectMilestones", "initiatives", "documents", "projectUpdates",
                                              "initiativeUpdates") for node in lists[name]}  # in Linear, selected or not
         if since is None:
-            issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
+            issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, teams=sorted(self.chosen))
             found = self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
-                               sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
+                               teams=sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
                                                                  COMMENT, 100)
             relations, children = defaultdict(list), defaultdict(list)
             for relation in filter(None, lists["issueRelations"]):
@@ -283,17 +287,16 @@ class Linear:
     def changed(self, since: str) -> tuple[list, list]:
         """The issues changed after `since` or whose comments did, with their comments; a list lacking an ID they name is
         read again."""
-        after, teams = f"updatedAt: {{ gt: {json.dumps(since)} }}", sorted(self.chosen)
-        touched = {c["issue"]["id"] for c in self.every(
-            "comments", f"includeArchived: true, filter: {{ {after}, issue: {{ {IN_TEAMS} }} }}", "issue { id }", 100, teams)}
-        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS}, or: [{{ {after} }}, "
-                                      f"{{ id: {{ in: {json.dumps(sorted(touched))} }} }}] }}", POLL, PAGE, teams)
+        teams, after = sorted(self.chosen), "updatedAt: { gt: $since }"
+        touched = {c["issue"]["id"] for c in self.every("comments", f"includeArchived: true, filter: {{ {after}, issue: {{ {IN_TEAMS} }} }}",
+                                                        "issue { id }", 100, teams=teams, since=since)}
+        issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS}, or: [{{ {after} }}, {{ id: {{ in: $ids }} }}] }}",
+                            POLL, PAGE, teams=teams, since=since, ids=sorted(touched))
         for node in issues:
             for name in (*NESTED, *POLLED):
                 self.rest_of(node, name)
-        ids = json.dumps([node["id"] for node in issues])
-        comments = self.every("comments", f"includeArchived: true, filter: {{ issue: {{ id: {{ in: {ids} }} }} }}", COMMENT,
-                              100) if issues else []
+        comments = self.every("comments", "includeArchived: true, filter: { issue: { id: { in: $ids } } }", COMMENT, 100,
+                              ids=[node["id"] for node in issues]) if issues else []
         named = {name: {(node[key] or {}).get("id") for node in issues + comments for key in keys if key in node}
                  for name, keys in NAMED.items()}
         named["issueLabels"] = {label["id"] for node in issues for label in node["labels"]["nodes"]}
