@@ -100,7 +100,7 @@ def test_an_error_holds_the_position_before_it_while_the_run_goes_on(fake):
 
 def test_a_record_older_than_what_is_written_is_skipped_at_its_write_and_keeps_its_links(fake):
     make(fake).run([issue(1, title="Newer", version="2026-10-14T20:00:00Z")])
-    result = make(fake).run([issue(1, title="Older", relations=blocked_by(4)), issue(4)])
+    result = make(fake).run([issue(1, title="Older", relations=blocked_by(4)), issue(4)], position={})
     assert outcomes(result)[("acme/api#1", "issue")] == "current"
     assert [item["revisions"][-1]["title"] for item in fake.mine().values()] == ["Newer", "Issue 4"]
     assert [link["type"] for link in fake.links.values()] == ["requires"]
@@ -122,3 +122,26 @@ def test_a_dry_run_never_moves_the_position(fake):
     position = {"record": "3000000001"}
     result = make(fake, dry_run=True).run([issue(1), issue(2)], position=position)
     assert outcomes(result) == {("acme/api#2", "issue"): "would create"} and position == {"record": "3000000001"}
+
+
+def test_each_plan_is_compared_with_the_version_written_for_it(fake):
+    at = "2026-10-14T20:00:00Z"
+    make(fake).run([issue(1, version=at, comments=[said("A", "2026-10-14T19:00:00Z"), said("B", "2026-10-14T20:30:00Z")])])
+    replayed = make(fake).run([issue(1, version=at, comments=[said("A", "2026-10-14T19:00:00Z")])], position={})  # read before B
+    assert outcomes(replayed) == {("acme/api#1", "issue"): "current", ("acme/api#1", "comments"): "current"}
+    assert "B" in next(iter(fake.mine("record").values()))["revisions"][-1]["body"]
+    newer = make(fake).run([issue(1, version="2026-10-14T19:00:00Z", comments=[said("A", "2026-10-14T19:00:00Z"),
+                                                                               said("B", "2026-10-14T20:30:00Z"),
+                                                                               said("C", "2026-10-14T22:00:00Z")])], position={})
+    assert outcomes(newer) == {("acme/api#1", "issue"): "current", ("acme/api#1", "comments"): "updated"}
+
+
+def test_an_older_read_never_archives_or_restores_what_a_later_one_wrote(fake):
+    make(fake).run([issue(1, version="2026-10-14T20:00:00Z")])
+    result = make(fake).run([issue(1, archived="Archived in GitHub on 2026-10-01")], position={})
+    assert outcomes(result) == {("acme/api#1", "issue"): "current"} and not any(i["archived"] for i in fake.items.values())
+
+
+def test_without_a_position_a_discussion_that_lost_its_newest_comment_is_still_written(fake):
+    make(fake).run([issue(1, comments=[said("A", "2026-10-14T19:00:00Z"), said("B", "2026-10-14T20:30:00Z")])])
+    assert outcomes(make(fake).run([issue(1, comments=[said("A", "2026-10-14T19:00:00Z")])]))[("acme/api#1", "comments")] == "updated"
