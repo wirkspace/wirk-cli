@@ -48,6 +48,12 @@ def blocked_by(number):
     return [("blocked_by", Ref(f"acme/api#{number}", "acme/api", True, str(3000000000 + number)))]
 
 
+def refuse(fake, words):
+    answer = fake.write
+    fake.write = lambda body: refusal("invalid_field", "refused") if words in body["reason"] else answer(body)
+    return answer
+
+
 def written(fake, since=0):
     return [body["reason"] for body in fake.writes()[since:]]
 
@@ -84,8 +90,7 @@ def test_the_link_pass_resumes_from_its_own_position(fake):
 
 
 def test_an_error_holds_the_position_before_it_while_the_run_goes_on(fake):
-    answer = fake.write
-    fake.write = lambda body: refusal("invalid_field", "refused") if "acme/api#2 " in body["reason"] else answer(body)
+    refuse(fake, "acme/api#2 ")
     position = {}
     result = make(fake).run([issue(1), issue(2), issue(3)], position=position)
     assert outcomes(result) == {("acme/api#1", "issue"): "created", ("acme/api#2", "issue"): "error",
@@ -99,3 +104,15 @@ def test_a_record_older_than_what_is_written_is_skipped_at_its_write_and_keeps_i
     assert outcomes(result)[("acme/api#1", "issue")] == "current"
     assert [item["revisions"][-1]["title"] for item in fake.mine().values()] == ["Newer", "Issue 4"]
     assert [link["type"] for link in fake.links.values()] == ["requires"]
+
+
+@pytest.mark.parametrize("records", [[issue(1, relations=blocked_by(2)), issue(2), issue(3)],
+                                     [issue(1), issue(2, relations=blocked_by(1)), issue(3)]], ids=["target", "source"])
+def test_a_link_to_a_record_that_errored_is_written_when_the_run_resumes(fake, records):
+    answer, position = refuse(fake, "acme/api#2 "), {}
+    make(fake).run(records, position=position)
+    assert not fake.links and position["record"] == "3000000001"
+    fake.write = answer
+    make(fake).run(records, position=position)
+    assert [link["type"] for link in fake.links.values()] == ["requires"]
+    assert position == {"record": "3000000003", "link": "3000000002" if records[1].relations else "3000000001"}

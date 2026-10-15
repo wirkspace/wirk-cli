@@ -3,6 +3,7 @@ decision for each object, one issue per write, refusals, receipts and files. WIR
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+from functools import partial
 import hashlib
 import io
 import re
@@ -199,20 +200,19 @@ class Importer:
         return you["you"]
 
     def run(self, records: list, position: dict | None = None) -> list:
-        """Every record, then the links between them. A `position` (record, then link source) moves in place past each one
-        settled with no error before it, and a later run with it goes on from there; links are planned over every record."""
+        """Every record, then the links between them. A `position` (record, then link source) moves in place past what is
+        settled (see `walk`), and a later run with it goes on from there; links are planned over every record."""
         position = {} if position is None else position
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
         self.plan_links(records)
-        steady, start = True, resume(position, "record", [record.ident for record in records])
-        for done, record in enumerate(records[start:], start + 1):
+
+        def counted(done, record):
             found = self.guarded(record.key, record.kind, self.attempt, record)
-            self.outcomes += found
-            steady = steady and all(outcome.outcome != "error" for outcome in found)
-            if steady:
-                position["record"] = record.ident
             self.progress(done, len(records))
+            return found
+        walk(position, "record", [(record.ident, set(), partial(counted, done, record)) for done, record in enumerate(records, 1)],
+             self.outcomes)
         if not self.dry_run:
             self.outcomes += self.link_pass(position)
         self.outcomes += self.gone({record.ident for record in records})
@@ -308,13 +308,11 @@ class Importer:
         outcomes, by_source = [], defaultdict(list)
         for link in sorted(self.planned):
             by_source[link[1]].append(link)
-        steady, sources = True, list(by_source)
-        for ident in sources[resume(position, "link", sources):]:
-            found = self.guarded(self.keys[ident], "links", self.links_of, ident, by_source[ident])
-            outcomes += found
-            steady = steady and all(outcome.outcome != "error" for outcome in found)
-            if steady:
-                position["link"] = ident
+        records = list(self.keys)
+        unsettled = set(records[resume(position, "record", records):])  # past the records' position: not written yet
+        walk(position, "link", [(ident, {ident} | {link[2] for link in wanted},
+                                 partial(self.guarded, self.keys[ident], "links", self.links_of, ident, wanted))
+                                for ident, wanted in by_source.items()], outcomes, unsettled)
         return outcomes
 
     def links_of(self, ident: str, wanted: list) -> list:
@@ -638,6 +636,19 @@ class Importer:
 def resume(position: dict, name: str, keys: list) -> int:
     """Where a run goes on: past the position's last settled key, or from the start when that key is gone."""
     return keys.index(position[name]) + 1 if position.get(name) in keys else 0
+
+
+def walk(position: dict, name: str, steps: list, out: list, unsettled: set = frozenset()) -> None:
+    """Each step (key, the keys it touches, its work) from where the position says to go on, its outcomes added to `out`.
+    The position moves in place past each step that, like every step before it, ended with no error and touched nothing
+    unsettled."""
+    steady = True
+    for key, touched, work in steps[resume(position, name, [step[0] for step in steps]):]:
+        found = work()
+        out += found
+        steady = steady and not touched & unsettled and all(outcome.outcome != "error" for outcome in found)
+        if steady:
+            position[name] = key
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
