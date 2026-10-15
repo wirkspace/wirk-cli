@@ -198,15 +198,23 @@ class Importer:
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
 
-    def run(self, records: list) -> list:
+    def run(self, records: list, position: dict | None = None) -> list:
+        """Every record, then the links between them. A `position` (record, then link source) moves in place past each one
+        settled with no error before it, and a later run with it goes on from there; links are planned over every record."""
+        position = {} if position is None else position
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
         self.plan_links(records)
-        for done, record in enumerate(records, 1):
-            self.outcomes += self.guarded(record.key, record.kind, self.attempt, record)
+        steady, start = True, resume(position, "record", [record.ident for record in records])
+        for done, record in enumerate(records[start:], start + 1):
+            found = self.guarded(record.key, record.kind, self.attempt, record)
+            self.outcomes += found
+            steady = steady and all(outcome.outcome != "error" for outcome in found)
+            if steady:
+                position["record"] = record.ident
             self.progress(done, len(records))
         if not self.dry_run:
-            self.outcomes += self.link_pass()
+            self.outcomes += self.link_pass(position)
         self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
 
@@ -295,13 +303,18 @@ class Importer:
             makers.update({found["id"]: found.get("created_by") for found in answer["data"]["results"]})
         return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) in self.mine]
 
-    def link_pass(self) -> list:
+    def link_pass(self, position: dict) -> list:
         """The missing links, one write per issue (more when over 32), read from each issue's own fetch."""
         outcomes, by_source = [], defaultdict(list)
         for link in sorted(self.planned):
             by_source[link[1]].append(link)
-        for ident, wanted in by_source.items():
-            outcomes += self.guarded(self.keys[ident], "links", self.links_of, ident, wanted)
+        steady, sources = True, list(by_source)
+        for ident in sources[resume(position, "link", sources):]:
+            found = self.guarded(self.keys[ident], "links", self.links_of, ident, by_source[ident])
+            outcomes += found
+            steady = steady and all(outcome.outcome != "error" for outcome in found)
+            if steady:
+                position["link"] = ident
         return outcomes
 
     def links_of(self, ident: str, wanted: list) -> list:
@@ -399,6 +412,9 @@ class Importer:
         blocked = self.index.blocked_keys.get((record.kind, record.ident))
         if blocked:
             return [Outcome(record.key, record.kind, "blocked", f"imported by {blocked}")]
+        held = self.single(record.ident)
+        if held and held.version > render.compact(record.version):  # a later read wrote it first
+            return [Outcome(record.key, record.kind, "current", "a later version is already written", held.item)]
         plans = self.plans(record)
         decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest)) for plan in plans]
         _, action, held, message = decided[0]
@@ -617,6 +633,11 @@ class Importer:
             return []
         return [Outcome(key, kind, "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; nothing was archived",
                         found.item)]
+
+
+def resume(position: dict, name: str, keys: list) -> int:
+    """Where a run goes on: past the position's last settled key, or from the start when that key is gone."""
+    return keys.index(position[name]) + 1 if position.get(name) in keys else 0
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
