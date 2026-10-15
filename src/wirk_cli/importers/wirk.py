@@ -422,8 +422,9 @@ class Importer:
         later = {plan.kind for plan, action, _, _ in decided if action == "later"}  # what the later read left stays
         decided = [(plan, "current" if action == "later" else action, held, message) for plan, action, held, message in decided]
 
-        def tidy():
-            return [] if later else self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+        def tidy():  # parts beyond the discussion follow the discussion; the archive state follows the work item
+            return ([] if later - {record.kind} else self.stale(record, len(plans) - 1)) + \
+                ([] if record.kind in later else self.mirror(record, plans))
         _, action, held, message = decided[0]
         if action == "ambiguous" or (action == "skipped" and held.archived):  # the discussion follows its work item
             return [Outcome(record.key, plan.kind, action, message, found.item if found else None)

@@ -160,3 +160,12 @@ def test_a_night_read_lands_a_deleted_newest_comment_and_archives_an_issue_archi
         ("acme/api#1", "issue", "current"), ("acme/api#1", "comments", "updated"), ("acme/api#2", "issue", "current"),
         ("acme/api#2", "comments", "updated"), ("acme/api#2", "issue", "archived"), ("acme/api#2", "comments", "archived")]
     assert [item["archived"] for item in fake.mine().values()] == [False, True]
+
+
+def test_an_overtaken_discussion_still_lets_its_issue_be_archived(fake):
+    make(fake).run([issue(1, comments=[said("A", "2026-10-14T19:00:00Z"), said("B", "2026-10-14T20:30:00Z")])])
+    archived = issue(1, version="2026-10-15T09:00:00Z", archived="Archived in GitHub on 2026-10-15",
+                     comments=[said("A", "2026-10-14T19:00:00Z")])
+    result = make(fake).run([archived], position={}, stale={"3000000001"})
+    assert ("acme/api#1", "comments", "current") in [(o.key, o.kind, o.outcome) for o in result]
+    assert [item["archived"] for item in fake.mine().values()] == [True]
