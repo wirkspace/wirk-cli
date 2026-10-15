@@ -25,7 +25,7 @@ class PollingLinear(FakeLinear):
         keys = {team["id"]: team for team in self.lists["teams"]}
         children = [{"id": n["id"], "identifier": n["identifier"], "number": n["number"],
                      "team": {key: keys[n["team"]["id"]][key] for key in ("id", "key", "private")}}
-                    for n in reversed(self.lists["issues"]) if (n["parent"] or {}).get("id") == ident and n["team"]["id"] in teams]
+                    for n in reversed(self.lists["issues"]) if (n["parent"] or {}).get("id") == ident and n["team"]["id"] in (teams or ())]
         return {"children": children,
                 "relations": [r for r in self.lists["issueRelations"] if (r["issue"] or {}).get("id") == ident],
                 "inverseRelations": [r for r in self.lists["issueRelations"] if (r["relatedIssue"] or {}).get("id") == ident]}
@@ -40,7 +40,7 @@ class PollingLinear(FakeLinear):
         if "viewer" in query:
             return super().answer(query, variables)
         if more and more[1] in linear.POLLED:
-            return {"issue": {more[1]: self.window(self.nested_of(variables["id"], variables["teams"])[more[1]], variables)}}
+            return {"issue": {more[1]: self.window(self.nested_of(variables["id"], variables.get("teams"))[more[1]], variables)}}
         name = re.search(r"\{\s*(\w+)\(", query)[1]
         if not {"since", "ids"} & variables.keys():
             return super().answer(query, variables)
@@ -216,3 +216,15 @@ def test_lists_serve_only_a_read_of_changes(folder):
     full, _, _ = read(fake, folder)
     with pytest.raises(ValueError, match="since"):
         full.read([], lists=full.lists)  # a full read reads every list itself, so nothing it names is ever missing
+
+
+def test_relations_past_the_first_page_are_paged_both_ways(folder):
+    others = [issue(n) for n in range(2, 44)]
+    relations = [ws.relation(f"r-{n:02d}", "blocks", ref(1), ref(n)) for n in range(2, 23)] + \
+        [ws.relation(f"r-{n:02d}", "related", ref(n), ref(1)) for n in range(23, 44)]  # 21 outgoing, 21 incoming
+    fake = PollingLinear(issues=[issue(1, updatedAt=ws.NEW)] + others, relations=relations, comments=[])
+    full, _, records = read(fake, folder)
+    _, _, polled = poll(fake, folder, ws.SINCE, full.lists)
+    assert polled == [next(r for r in records if r.key == "ENG-1")] and len(polled[0].raw["relations"]) == 42
+    asked = [json.loads(r.content)["query"] for r in fake.requests if r.method == "POST"]
+    assert any("issue(id: $id) { relations(" in q for q in asked) and any("issue(id: $id) { inverseRelations(" in q for q in asked)
