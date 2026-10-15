@@ -255,3 +255,34 @@ def test_connected_owner_or_mixed_scope_refuses_before_preview(hosted, selection
     code, output, _ = run(*selection, "--dry-run", "--json")
     assert code == 2 and json.loads(output)["errors"][0]["code"] == "unsupported_import_scope"
     assert fake.preview_calls == 0
+
+
+@pytest.mark.parametrize("damage", ["invalid_json", "non_private", "wrong_scope"])
+def test_unusable_cache_requires_manual_preserved_move_before_new_preview(hosted, damage):
+    fake, run, home = hosted
+    assert run("acme/repo", "--dry-run", "--json")[0] == 0
+    cache = next((home / "import").glob("github-connected-*.json"))
+    if damage == "invalid_json":
+        cache.write_text("{")
+    elif damage == "non_private":
+        cache.chmod(0o644)
+    else:
+        record = json.loads(cache.read_text())
+        record["scope"] = "another-source"
+        cache.write_text(json.dumps(record))
+    original = cache.read_bytes()
+
+    code, output, error = run("acme/repo", "--dry-run", "--json")
+    assert code == 2 and json.loads(output)["errors"][0]["code"] == "preview_required"
+    assert str(cache) in error
+    assert "move" in error.lower() or "rename" in error.lower()
+    assert "wirk import github acme/repo --dry-run" in error
+    assert cache.read_bytes() == original
+    assert fake.preview_calls == 1
+
+    preserved = cache.with_suffix(".saved")
+    cache.rename(preserved)
+    code, output, _ = run("acme/repo", "--dry-run", "--json")
+    assert code == 0 and json.loads(output)["data"]["state"] == "ready"
+    assert preserved.read_bytes() == original
+    assert fake.preview_calls == 2

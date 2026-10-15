@@ -113,21 +113,23 @@ class Hosted:
                            "Use the standard connected preview, or use a local source with this map.",
                            "unsupported_import_option")
 
+    def unusable_cache(self, message):
+        return Stop(message, f"Move or rename {self.path} yourself and keep it for reconciling any pending request; "
+                    f"then run: {self.dry_command}", "preview_required")
+
     def load(self):
         try:
             info = self.path.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-                raise Stop("the saved connected import reference is not a private regular file",
-                           "Run a new --dry-run preview.", "preview_required")
+                raise self.unusable_cache("the saved connected import reference is not a private regular file")
             record = json.loads(self.path.read_text())
         except FileNotFoundError:
             return None
         except ValueError:
-            raise Stop("the saved connected import reference is damaged",
-                       "Run a new --dry-run preview.", "preview_required") from None
+            raise self.unusable_cache("the saved connected import reference is damaged") from None
         if not isinstance(record, dict) or record.get("scope") != self.scope:
-            raise Stop("the saved connected import reference does not match this source and destination",
-                       "Run a new --dry-run preview.", "preview_required")
+            raise self.unusable_cache(
+                "the saved connected import reference does not match this source and destination")
         return record
 
     def save(self, record):
