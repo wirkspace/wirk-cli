@@ -269,25 +269,33 @@ def upload(words, options, transport):
 
 
 def send_file(source, path: str, request_id: str, options: dict, service: Service) -> int:
-    """The service keeps the base name; a retry repeats the path as given, with the same request ID and description."""
+    """A retry repeats the path as given, with the same request ID and description."""
+    retry = command("wirk", "upload", path, "--request-id", request_id,
+                    *(["--description", options["--description"]] if "--description" in options else []),
+                    *present(options, "--json"))
+    return emit(store(source, path, request_id, retry, service, options.get("--description"), form=fmt(options)), options)
+
+
+def store(source, path: str, request_id: str, retry: str, service: Service, description: str | None = None,
+          workspace_id: str | None = None, form: str = "json") -> dict:
+    """Declare, PUT unless present, confirm: the answer of the confirm (or of a refused declare), printing nothing.
+    The service keeps only the base name."""
     size, sha256 = file_digest(source)
     declared = {"bytes": size, "sha256": sha256}
-    described = {"description": options["--description"]} if "--description" in options else {}
-    retry = command("wirk", "upload", path, "--request-id", request_id,
-                    *(["--description", options["--description"]] if described else []), *present(options, "--json"))
+    place = {"workspace_id": workspace_id} if workspace_id else {}
     for attempt in (1, 2):
-        issued = service.post("/v2/files", {"upload": declared, "format": "json"})
+        issued = service.post("/v2/files", {"upload": declared, **place, "format": "json"})
         if not issued["ok"]:
-            return emit(issued, options)
+            return issued
         if not issued["data"]["present"]:
             source.seek(0)
             service.put(issued["data"]["put"], source, size, retry)
-        confirm_body = {"filename": Path(path).name, **declared, **described}
-        confirmed = service.post("/v2/files", {"request_id": request_id, "confirm": confirm_body, "format": fmt(options)},
+        confirm = {"filename": Path(path).name, **declared, **({"description": description} if description is not None else {})}
+        confirmed = service.post("/v2/files", {"request_id": request_id, "confirm": confirm, **place, "format": form},
                                  uncertain=request_id)
         if attempt == 1 and not confirmed["ok"] and confirmed["errors"][0]["code"] == "upload_incomplete":
             continue
-        return emit(confirmed, options)
+        return confirmed
 
 
 def download(words, options, transport):
