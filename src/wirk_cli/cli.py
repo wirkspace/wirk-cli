@@ -263,17 +263,11 @@ def upload(words, options, transport):
         raise UsageError("upload takes one file; several files for one item go through wirk write --request")
     if words[0] == "-":
         raise UsageError("upload takes a file, not standard input")
-    request_id = options.get("--request-id") or new_id("u")
+    request_id, description = options.get("--request-id") or new_id("u"), options.get("--description")
+    retry = command("wirk", "upload", words[0], "--request-id", request_id,  # the path as given, the same ID and description
+                    *(["--description", description] if description is not None else []), *present(options, "--json"))
     with readable(words[0]) as source:
-        return send_file(source, words[0], request_id, options, connect(transport))
-
-
-def send_file(source, path: str, request_id: str, options: dict, service: Service) -> int:
-    """A retry repeats the path as given, with the same request ID and description."""
-    retry = command("wirk", "upload", path, "--request-id", request_id,
-                    *(["--description", options["--description"]] if "--description" in options else []),
-                    *present(options, "--json"))
-    return emit(store(source, path, request_id, retry, service, options.get("--description"), form=fmt(options)), options)
+        return emit(store(source, words[0], request_id, retry, connect(transport), description, form=fmt(options)), options)
 
 
 def store(source, path: str, request_id: str, retry: str, service: Service, description: str | None = None,

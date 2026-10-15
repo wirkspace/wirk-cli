@@ -165,8 +165,8 @@ def test_store_returns_the_confirmed_answer_prints_nothing_and_names_the_wirkspa
     fake = Fake(lambda r: envelope(data={"upload": {"id": "upload_" + "7e" * 16}}) if r.url.host != "storage.test"
                 and "confirm" in json.loads(r.content) else answer(r))
     with open(tmp_path / "report.pdf", "rb") as source:
-        found = cli.store(source, str(tmp_path / "report.pdf"), "w-1/0/0", "retry", Service(URL, TOKEN, httpx.MockTransport(fake)),
-                          workspace_id="wsp_9")
+        service = Service(URL, TOKEN, httpx.MockTransport(fake))
+        found = cli.store(source, str(tmp_path / "report.pdf"), "w-1/0/0", "retry", service, workspace_id="wsp_9")
     sha = hashlib.sha256(b"%PDF data").hexdigest()
     bodies = [json.loads(r.content) for r in fake.requests if r.url.host != "storage.test"]
     assert bodies[0] == {"upload": {"bytes": 9, "sha256": sha}, "workspace_id": "wsp_9", "format": "json"}
