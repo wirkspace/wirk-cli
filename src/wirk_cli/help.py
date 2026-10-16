@@ -20,7 +20,7 @@ Start with: wirk status
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
   upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
-  login                                connect this machine to https://api.wirk.life
+  login                                connect this machine with one click in your browser
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
 Decide proposals when your role may review; a background agent only proposes and never decides.
@@ -143,7 +143,7 @@ Decide proposals at the revision you read; ACTION is accept, reject or defer, an
 Anyone whose role may review decides: a person, or an agent working for one. Other roles are refused
 (not_authorized: your role (editor) cannot review). A background agent only proposes.
 --person decides as yourself, a person at your own terminal, with the token made once by
-wirk login --person; it asks you to type the decision back.
+wirk login --person (one click in your browser); it asks you to type the decision back.
 
   review c4a1e902@1 accept --reason 'Matches the agreed criteria'
   review c4a1e902@1 e7b35d16@2 defer --reason 'Wait for the load test'""",
@@ -171,18 +171,21 @@ Save a stored file, checked against its SHA-256. FILE is the file ID on the item
         "login": """usage: wirk login [--person] [--url URL] [--new]
 
 Connect this machine. It makes this machine's token, keeps it in ~/.config/wirk (or $WIRK_CONFIG_DIR),
-readable only by you, and asks WIRK to approve the machine: open the link it prints, sign in and approve.
+readable only by you, and opens your browser on WIRK's approval: one click approves it.
+With no browser here (SSH, a container) it prints a link to open in a browser on any computer;
+your own sign-in (--person) then asks for the code it shows. A login lasts until you revoke the
+machine on your account page or it goes 90 days unused; then run login --new.
 Where a service has no web sign-in, it prints the token's digest instead (safe to share; the token stays
 here) for your WIRK administrator to register. The token is only ever sent to its address.
 
-  login                                connect to https://api.wirk.life
-  login --url https://wirk.example.org --new        another address needs a new token
-  login --person                       a person's own token, made at their own terminal, for review --person""",
+  login                                connect your agents on this machine
+  login --person                       also your own sign-in, at your own terminal, for review --person
+  login --url https://wirk.example.org --new        another address needs a new token""",
         "admin": """usage: wirk admin show wirkspace|account [workspace_id=ID]
        wirk admin --request FILE
 
 For people who administer WIRK, at a terminal, as themselves (the token made with
-wirk login --person). Each asks you to type a confirmation naming the action.
+wirk login --person, one click in your browser). Each asks you to type a confirmation naming the action.
 
 A batch that brings a person and their agents in:
   {"request_id": "admin-alice-1", "operations": [
