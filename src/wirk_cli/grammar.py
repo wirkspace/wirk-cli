@@ -142,6 +142,8 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
     positionals, pairs = split(words)
     if positionals:
         raise UsageError(f"write new takes one title (quote it): {' '.join(positionals)}")
+    if "reservation" in pairs:
+        raise UsageError("reservation is only available on edit; new items start vacant")
     workspace, kind, level = pairs.pop("workspace_id", None), pairs.pop("kind", "record"), pairs.pop("level", None)
     if kind not in ("record", "doc", "work", "wirk", "context"):  # doc and wirk are older words, read and never shown
         raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
@@ -171,8 +173,10 @@ def write_edit(target: str, words: list[str], options: dict, body_text: str | No
         raise UsageError("write edit changes fields, owner, title, body, links and files; for kind, context or "
                          "criteria use wirk write --request")
     workspace = pairs.pop("workspace_id", None)
+    reservation = pairs.pop("reservation", None)
     fields, work = fields_and_owner(pairs, clearing=True)
     patch = {**({"title": options["--title"]} if "--title" in options else {}),
+             **({"reservation": reservation} if reservation is not None else {}),
              **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {}),
              **({"work": work} if work else {}), **({"attach_uploads": options["--upload"]} if options.get("--upload") else {})}
     expect = {item: read}

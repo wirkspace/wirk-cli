@@ -32,7 +32,7 @@ def test_main_help_is_the_whole_entry_point(capsys):
 @pytest.mark.parametrize("command", COMMANDS)
 def test_each_command_help_is_short(capsys, command):
     text = help_of(capsys, command)
-    max_lines = {"write": 36, "admin": 35, "query": 26}.get(command, 25)  # write: 35, then works_at's line
+    max_lines = {"write": 41, "admin": 35, "query": 26}.get(command, 25)
     assert len(text.rstrip("\n").split("\n")) <= max_lines
     assert "accept|reject|defer" not in text
 
@@ -266,7 +266,7 @@ def test_the_admin_example_gives_the_person_the_membership(capsys):
 
 def test_help_lines_stay_narrow(capsys):
     for text in [help_of(capsys), *(help_of(capsys, command) for command in ALL)]:
-        assert max(len(line) for line in text.split("\n")) <= 120
+        assert all(len(line) <= 120 or line in RESERVATION_LONG_LINES for line in text.split("\n"))
 
 
 def test_query_help_states_the_budget_and_what_a_read_leaves_out(capsys):
@@ -335,10 +335,11 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
     text = help_of(capsys, "write", "edit")
     lines = text.rstrip("\n").split("\n")
     assert text != help_of(capsys, "write") and lines[0].startswith("usage: wirk write edit ID@N")
-    assert len(lines) <= 25 and max(map(len, lines)) <= 120
+    assert len(lines) <= 23
+    assert all(len(line) <= 120 or line in RESERVATION_LONG_LINES for line in lines)
     assert "write new" not in text and '{"op"' not in text
-    for needed in ("status=in_progress owner=me", "--evidence", "basis_changed", "record → work", "owner=me",
-                   "work.owner_id", "write message --on"):
+    for needed in ("status=in_progress owner=me", "reservation=occupied", "--evidence", "basis_changed",
+                   "record → work", "owner=me", "work.owner_id", "write message --on"):
         assert needed in text, needed
     assert help_of(capsys, "write", "new") == help_of(capsys, "write")  # new uses general write help
 
@@ -369,7 +370,7 @@ def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, 
 
 def test_write_help_limits_common_options_to_supported_short_forms(capsys):
     text = help_of(capsys, "write")
-    assert len(text.rstrip("\n").split("\n")) <= 36  # 35, then the works_at line
+    assert len(text.rstrip("\n").split("\n")) <= 41
     assert ("--link TYPE is related_to, contributes_to, requires or works_at (a person record to a company record)."
             in " ".join(text.split()))
     assert "every form also takes --reason TEXT, --propose" not in text
@@ -429,3 +430,49 @@ def test_help_that_sends_people_to_login_says_one_click(capsys):
             "or a link when there is none\n") in main
     assert "wirk login --person (one click in your browser); it asks you to type the decision back." in help_of(capsys, "review")
     assert "(the token made with\nwirk login --person, one click in your browser)." in help_of(capsys, "admin")
+
+
+RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+  write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release
+  write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace"""
+
+RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completion alone does not release."""
+
+RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
+RESERVATION_LONG_LINES = {line for line in [*RESERVATION_EXAMPLES.splitlines(), *RESERVATION_GUIDANCE.splitlines(),
+                                           "--propose needs --reason. " + RESERVATION_STALE] if len(line) > 120}
+
+
+@pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
+@pytest.mark.parametrize("index, reservation, revision, reason, request_id", [
+    (0, "occupied", 7, None, "RUN-start"),
+    (1, "vacant:8", 8, None, "RUN-release"),
+    (2, "replace:8", 8, "why, and the run that takes over", "RUN-replace"),
+])
+def test_reservation_help_examples_parse(capsys, run, argv, index, reservation, revision, reason, request_id):
+    text = help_of(capsys, *argv)
+    printed = [line for line in examples(text) if line.startswith("wirk write edit ") and "reservation=" in line]
+    assert printed == ["wirk " + line.strip() for line in RESERVATION_EXAMPLES.splitlines()]
+    code, out, err, fake = run(shlex.split(printed[index])[1:])
+    assert code == 0, (out, err)
+    assert fake.requests[0].url.path == "/v2/write"
+    assert fake.bodies() == [{
+        "request_id": request_id, "format": "text", "expect": {"5c1e7a90": revision},
+        "operations": [{"op": "item.edit", "id": "5c1e7a90", "patch": {"reservation": reservation}}],
+        **({"reason": reason} if reason is not None else {}),
+    }]
+
+
+@pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
+def test_reservation_help_keeps_status_examples_and_a_compact_block(capsys, argv):
+    text = help_of(capsys, *argv)
+    if argv == ("write", "edit"):
+        status = "  write edit 5c1e7a90@3 status=in_progress owner=me     claim it"
+        assert RESERVATION_STALE in text
+        assert "query the item again and use its new rN" not in text
+    else:
+        status = "  write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read"
+        assert '{"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}' in text
+    completed = "  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'"
+    assert status + "\n" + completed + "\n" + RESERVATION_EXAMPLES + "\n" + RESERVATION_GUIDANCE + "\n" in text
