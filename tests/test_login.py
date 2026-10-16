@@ -5,7 +5,9 @@ import http.client
 import json
 import os
 import re
+import socket
 import stat
+import time
 
 import httpx
 import pytest
@@ -250,6 +252,17 @@ def test_anything_else_is_404_and_waiting_continues(listener, capsys, path, host
     assert status == 200 and listener.get(1) == VALUE
     out, err = capsys.readouterr()
     assert VALUE not in out + err
+
+
+def test_an_idle_connection_blocks_neither_the_click_nor_close(listener):
+    idle = socket.create_connection(("127.0.0.1", listener.port))  # a browser's preconnect that sends nothing
+    try:
+        start = time.monotonic()
+        assert visit(listener.port, f"/done?c={VALUE}")[0] == 200 and listener.get(1) == VALUE
+        listener.close()
+        assert time.monotonic() - start < 1
+    finally:
+        idle.close()
 
 
 def test_the_listener_closes(listener):

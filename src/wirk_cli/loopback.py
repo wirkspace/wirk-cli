@@ -15,6 +15,8 @@ PAGE = b"<!doctype html><meta charset=utf-8><title>WIRK</title><p>Connected. You
 class Done(BaseHTTPRequestHandler):
     """Only GET /done?c=VALUE addressed to 127.0.0.1:PORT; another path, a rebound name or a junk value gets 404."""
 
+    timeout = 5  # a connection that sends nothing is dropped
+
     def do_GET(self):
         parts = urlsplit(self.path)
         value = parse_qs(parts.query).get("c", [""])[0]
@@ -32,8 +34,11 @@ class Done(BaseHTTPRequestHandler):
         pass
 
 
-class Listener(socketserver.TCPServer):
-    """127.0.0.1 on a port the kernel chooses, answering in the background until closed."""
+class Listener(socketserver.ThreadingTCPServer):
+    """127.0.0.1 on a port the kernel chooses, answering in the background until closed; each connection on its own
+    thread, so an idle one never holds up the click or the close."""
+
+    daemon_threads = True
 
     def __init__(self):
         super().__init__(("127.0.0.1", 0), Done)
