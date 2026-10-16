@@ -410,6 +410,7 @@ def test_login_help_is_the_plans_text(capsys):
 
 def test_help_that_sends_people_to_login_says_one_click(capsys):
     main = help_of(capsys)
-    assert "\n  login                                connect this machine with one click in your browser\n" in main
+    assert ("\n  login                                connect this machine: one click in your browser, "
+            "or a link when there is none\n") in main
     assert "wirk login --person (one click in your browser); it asks you to type the decision back." in help_of(capsys, "review")
     assert "(the token made with\nwirk login --person, one click in your browser)." in help_of(capsys, "admin")
