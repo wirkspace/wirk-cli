@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import stat
+import struct
 import time
 
 import httpx
@@ -263,6 +264,17 @@ def test_an_idle_connection_blocks_neither_the_click_nor_close(listener):
         assert time.monotonic() - start < 1
     finally:
         idle.close()
+
+
+def test_a_connection_reset_before_the_answer_prints_nothing(listener, capfd):
+    for _ in range(50):
+        client = socket.create_connection(("127.0.0.1", listener.port))
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))  # close with a reset
+        client.sendall(f"GET /done?c={VALUE} HTTP/1.1\r\nHost: 127.0.0.1:{listener.port}\r\n\r\n".encode())
+        client.close()
+    time.sleep(0.5)
+    listener.close()
+    assert capfd.readouterr() == ("", "")
 
 
 def test_the_listener_closes(listener):

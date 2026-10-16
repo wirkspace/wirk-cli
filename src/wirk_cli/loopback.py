@@ -45,6 +45,9 @@ class Listener(socketserver.ThreadingTCPServer):
         self.port, self.values = self.server_address[1], queue.Queue()
         threading.Thread(target=self.serve_forever, args=(0.1,), daemon=True).start()
 
+    def handle_error(self, request, client_address):  # a browser that hung up early: nothing to say, nothing printed
+        pass
+
     def get(self, seconds: float) -> str | None:
         """The next value a browser brought, waiting up to `seconds`."""
         try:
