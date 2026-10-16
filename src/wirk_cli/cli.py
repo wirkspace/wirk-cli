@@ -388,9 +388,9 @@ def approve(asks: list, listener) -> int:
                 waiting.append((service, request, answer["data"]))
         if not waiting:
             return 0
-        if not shown:
-            listener, shown = show_link(waiting, listener), True
-            waiting = waiting if listener else waiting[:1]  # a pair needs the browser's port
+        if not shown and not show_link(waiting, listener):
+            listener, waiting = None, waiting[:1]  # no browser opened: the link has no port, and a pair needs one
+        shown = True
         interval = waiting[0][2]["interval"]
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login"
@@ -404,9 +404,9 @@ def approve(asks: list, listener) -> int:
                 for service, request, _ in waiting]
 
 
-def show_link(waiting: list, listener):
-    """The link and codes. The browser opens on one link with every code and the listener's port; answers the listener
-    when it did, else None: the link then has no port, and polling alone sees the approval."""
+def show_link(waiting: list, listener) -> bool:
+    """The link and codes; answers whether the browser opened on the link with every code and the listener's port.
+    Without it, the service's link has no port: one click for an agent, the typed code for a person."""
     codes = [f"Code {data['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
              f"expires {data['expires_at'][11:16]} UTC" for _, request, data in waiting]
     if listener:
@@ -414,14 +414,10 @@ def show_link(waiting: list, listener):
         link = f"{waiting[0][2]['url'].split('?')[0]}?{query}"
         if webbrowser.open(link):
             print(f"Approve this machine in your browser: {link}", *codes, sep="\n", flush=True)
-            return listener
-    _, request, data = waiting[0]
-    if request["for"] == "person":  # without a browser here, a person types the code; no link carries it
-        print(f"Type this code at {data['url'].split('?')[0]}: {data['code']}", flush=True)
-    else:
-        print(f"No browser on this machine. Open this link in your browser on any computer and approve:\n{data['url']}"
-              f"\n{codes[0]}", flush=True)
-    return None
+            return True
+    print("No browser on this machine. Open this link in your browser on any computer and approve:",
+          waiting[0][2]["url"], codes[0], sep="\n", flush=True)
+    return False
 
 
 def login_text(service: Service, request: dict) -> str:

@@ -8,24 +8,23 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 
-VALUE = re.compile(r"[A-Za-z0-9_-]{16,64}")  # the service's shape for the value; anything else is not it
+VALUE = re.compile(r"[A-Za-z0-9_-]{16,64}")  # the service's shape for the value; nothing else is passed on
 PAGE = b"<!doctype html><meta charset=utf-8><title>WIRK</title><p>Connected. You can close this tab.\n"
 
 
 class Done(BaseHTTPRequestHandler):
-    """Only GET /done?c=… addressed to 127.0.0.1:PORT, so a rebound name or another path never reaches the value."""
+    """Only GET /done?c=VALUE addressed to 127.0.0.1:PORT; another path, a rebound name or a junk value gets 404."""
 
     def do_GET(self):
-        parts, port = urlsplit(self.path), self.server.port
+        parts = urlsplit(self.path)
         value = parse_qs(parts.query).get("c", [""])[0]
-        if parts.path != "/done" or self.headers.get("Host") != f"127.0.0.1:{port}" or not VALUE.fullmatch(value):
-            self.send_error(404)
-            return
+        if parts.path != "/done" or self.headers["Host"] != f"127.0.0.1:{self.server.port}" or not VALUE.fullmatch(value):
+            return self.send_error(404)
         self.server.values.put(value)
         self.send_response(200)
-        for name, content in (("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(PAGE))),
-                              ("Content-Security-Policy", "default-src 'none'"), ("Cache-Control", "no-store")):
-            self.send_header(name, content)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Security-Policy", "default-src 'none'")
+        self.send_header("Content-Length", str(len(PAGE)))
         self.end_headers()
         self.wfile.write(PAGE)
 

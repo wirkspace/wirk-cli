@@ -424,7 +424,8 @@ def test_person_login_without_a_browser_keeps_the_typed_code(fresh, capsys, cloc
             sent["person"].append({"complete": VALUE})
         return answer(request)
     code, out, err, requests = login(["--person"], typed, capsys)
-    assert code == 0 and out == "Type this code at https://app.wirk.life/device: CDFG-MNPQ\n" + PERSON_IN + "\n"
+    assert code == 0 and out == ("No browser on this machine. Open this link in your browser on any computer and approve:\n"
+                                 "https://app.wirk.life/device\nCode CDFG-MNPQ · for you · expires 14:05 UTC\n" + PERSON_IN + "\n")
     assert not (fresh / "agent-token").exists() and "agent" not in sent
 
 

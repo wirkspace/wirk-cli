@@ -122,7 +122,7 @@ def test_person_login_without_a_browser_shows_the_code_to_type_and_never_a_link_
     url, seen, server = serve_login()
     directory = tmp_path / "person-config"
     env = {**os.environ, "WIRK_CONFIG_DIR": str(directory), "BROWSER": "true", "SSH_CONNECTION": "10.0.0.1 50000 10.0.0.2 22"}
-    code, output = at_terminal(["login", "--person", "--url", url], "person token", env)
+    code, output = at_terminal(["login", "--person", "--url", url], "", env)
     server.shutdown()
     assert code == 0, output
     assert "BDFG-HJKL" in output and "https://app.wirk.life/device" in output and "code=" not in output
