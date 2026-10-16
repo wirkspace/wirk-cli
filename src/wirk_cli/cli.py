@@ -380,9 +380,8 @@ def browser_here() -> bool:
 
 
 def show_link(asks: list, listener):
-    """The browser opens on one link with every code and the listener's port; answers the listener, or None after
-    closing it when no browser opened. Then each login shows the service's own link, without a port: one click for
-    an agent, the typed code for a person; polling alone sees the approval."""
+    """Open the browser on one link with every code and the port, answering the listener; or close it, answer None and
+    show each login's own link without a port: one click for an agent, the typed code for a person."""
     codes = [f"Code {answer['data']['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
              f"expires {answer['data']['expires_at'][11:16]} UTC" for _, request, answer in asks]
     if listener:

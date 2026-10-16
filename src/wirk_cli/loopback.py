@@ -35,8 +35,7 @@ class Done(BaseHTTPRequestHandler):
 
 
 class Listener(socketserver.ThreadingTCPServer):
-    """127.0.0.1 on a port the kernel chooses, answering in the background until closed; each connection on its own
-    thread, so an idle one never holds up the click or the close."""
+    """127.0.0.1 on a port the kernel chooses; a thread per connection, so an idle one holds up neither click nor close."""
 
     daemon_threads = True
 
@@ -48,8 +47,7 @@ class Listener(socketserver.ThreadingTCPServer):
     def handle_error(self, request, client_address):  # a browser that hung up early: nothing to say, nothing printed
         pass
 
-    def get(self, seconds: float) -> str | None:
-        """The next value a browser brought, waiting up to `seconds`."""
+    def get(self, seconds: float) -> str | None:  # the next value a browser brought, or None after `seconds`
         try:
             return self.values.get(timeout=seconds)
         except queue.Empty:
