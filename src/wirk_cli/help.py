@@ -71,24 +71,16 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
 
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
-  write edit 5c1e7a90@7 reservation=occupied --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-start
-  write edit 5c1e7a90@8 reservation=vacant:8 --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-release
-  write edit 5c1e7a90@8 reservation=replace:8 --reason "Requested by Samuel after reconciliation; execution moves to b28f87aa-fb0a-4a37-93b3-e48cfd8c854c" --request-id b28f87aa-fb0a-4a37-93b3-e48cfd8c854c-replace
-  write edit 5c1e7a90@8 status=completed reservation=vacant:8 --evidence 'tests/test_retry.py passes' --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-complete
+  write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
+  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+  write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release
+  write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completion alone does not release.
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
 
-KEY=VALUE also takes reservation=occupied|occupied:G|vacant:G|replace:G on edit.
-Generate the UUID once per run and keep it with each request body for retries.
-Start with occupied; retain the returned G for guarded edits (occupied:G) and release (vacant:G).
-Carry occupied:G on any ordinary edit as its precondition.
-N in ID@N is the revision you read. Refresh N when needed; never adopt G from a reread.
-Replace uses the observed G, reviewer or administrator authority, and --reason naming why and the intended run.
-Replacement is an act a person asks for, recorded with the reason.
-The release, replacement and completion examples are alternative next steps after the start.
-A completion without reservation changes work status only; it does not end execution.
-After an uncertain result, reuse the identical request_id and body; a stored success is historical, so check current state before resuming.
-Reservation transitions apply directly. For a custom enum named reservation, use fields.reservation in write --request.
 KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its
@@ -114,24 +106,16 @@ expect: each edited, archived or linked-from item's rN; contributes_to also need
 
 Change one item at the revision you read: N is the rN on its card, its fetch or your last receipt.
 
-  write edit 5c1e7a90@7 reservation=occupied --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-start
-  write edit 5c1e7a90@8 reservation=vacant:8 --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-release
-  write edit 5c1e7a90@8 reservation=replace:8 --reason "Requested by Samuel after reconciliation; execution moves to b28f87aa-fb0a-4a37-93b3-e48cfd8c854c" --request-id b28f87aa-fb0a-4a37-93b3-e48cfd8c854c-replace
-  write edit 5c1e7a90@8 status=completed reservation=vacant:8 --evidence 'tests/test_retry.py passes' --request-id f73830ae-a937-4e8e-b4e0-bc91cb58ee8b-complete
+  write edit 5c1e7a90@3 status=in_progress owner=me     claim it
+  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+  write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release
+  write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completion alone does not release.
   write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
   write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner
 
-KEY=VALUE also takes reservation=occupied|occupied:G|vacant:G|replace:G on edit.
-Generate the UUID once per run and keep it with each request body for retries.
-Start with occupied; retain the returned G for guarded edits (occupied:G) and release (vacant:G).
-Carry occupied:G on any ordinary edit as its precondition.
-N in ID@N is the revision you read. Refresh N when needed; never adopt G from a reread.
-Replace uses the observed G, reviewer or administrator authority, and --reason naming why and the intended run.
-Replacement is an act a person asks for, recorded with the reason.
-The release, replacement and completion examples are alternative next steps after the start.
-A completion without reservation changes work status only; it does not end execution.
-After an uncertain result, reuse the identical request_id and body; a stored success is historical, so check current state before resuming.
-Reservation transitions apply directly. For a custom enum named reservation, use fields.reservation in write --request.
 KEY=VALUE: owner (me or an ID) and the wirkspace's fields (status=open; a comma list for several).
 The owner is owner=me here, work.owner_id in a request body and owner at the top of what query returns.
 An owner turns a record into work and the receipt says so (record → work); a status alone on a record is refused.
