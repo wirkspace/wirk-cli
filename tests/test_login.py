@@ -531,3 +531,19 @@ def test_a_pair_whose_browser_does_not_open_shows_both_links(fresh, capsys, cloc
                                  "https://app.wirk.life/device\nCode CDFG-MNPQ · for you · expires 14:05 UTC\n"
                                  "https://app.wirk.life/device?code=BDFG-HJKL\n"
                                  "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + PERSON_IN + "\n" + LOGGED_IN + "\n")
+
+
+def test_person_login_says_when_the_agents_token_is_refused(fresh, capsys, browser, at_terminal):
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text(TOKEN)
+    (fresh / "agent-token").chmod(0o600)
+    answer, sent = pair()
+    words = f"{STALE}; make a new one: wirk login --new"
+
+    def stale_agents(request):
+        if json.loads(request.content)["for"] == "agent":
+            return envelope(ok=False, errors=[{"code": "not_authorized", "message": words}], data={}, status=403)
+        return answer(request)
+    code, out, err, requests = login(["--person"], stale_agents, capsys)
+    assert code == 1 and f"Error not_authorized: {words}\n" in out + err and out.endswith(PERSON_IN + "\n")
+    assert "code=BDFG-HJKL" not in browser["urls"][0] and (fresh / "agent-token").read_text() == TOKEN

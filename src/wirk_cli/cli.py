@@ -354,17 +354,20 @@ def login(words, options, transport):
     if pending and browser_here():
         from .loopback import Listener
         listener = Listener()
-    asks = [(service, request, answer)]
+    asks, refused = [(service, request, answer)], False
     try:
         if person and listener:  # the same click connects your agents here, unless they are already
             agents = Service(url, read_token(other) if other.exists() else new_token(other), transport)
             theirs = {**request, "for": "agent"}
             answer = agents.post("/v2/login", {**theirs, "format": "json"})
-            if answer["ok"] and answer["data"]["state"] == "pending":
+            refused = not answer["ok"]
+            if refused:  # say why, and never exit 0 as if both were connected
+                print(problem_text(answer), flush=True)
+            elif answer["data"]["state"] == "pending":
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
-        return approve(asks, listener, "wirk login --person" if person else "wirk login")
+        return approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
     finally:
         if listener:
             listener.close()
