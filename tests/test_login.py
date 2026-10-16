@@ -181,6 +181,54 @@ def test_an_agent_gives_up_after_100_seconds_and_says_how_to_resume(fresh, capsy
     assert 95 <= sum(clock["slept"]) <= 100
 
 
+@pytest.fixture
+def interrupted_wait(monkeypatch):
+    class Listener:
+        closed = False
+
+        def get(self, interval):
+            raise KeyboardInterrupt
+
+        def close(self):
+            self.closed = True
+
+    listener = Listener()
+    monkeypatch.setattr("time.sleep", listener.get)
+    return listener
+
+
+@pytest.mark.parametrize("with_listener", [True, False], ids=["listener", "sleep"])
+@pytest.mark.parametrize("rerun", ["wirk login", "wirk login --person"])
+def test_interrupted_approval_wait_stops_cleanly(capsys, interrupted_wait, with_listener, rerun):
+    asks = [(None, {}, {"ok": True, "data": {"state": "pending", "interval": 5}})]
+    try:
+        code = cli.approve(asks, interrupted_wait if with_listener else None, rerun)
+    except KeyboardInterrupt:
+        pytest.fail("approval wait leaked KeyboardInterrupt")
+    assert code == 130
+    assert capsys.readouterr() == ("", "Stopped waiting. The approval link and this machine's token stay valid "
+                                   f"until the code expires; after approving, run: {rerun}\n")
+
+
+@pytest.mark.parametrize("person", [False, True])
+def test_interrupted_login_closes_the_listener(fresh, capsys, monkeypatch, interrupted_wait, at_terminal, person):
+    monkeypatch.setattr(cli, "browser_here", lambda: True)
+    monkeypatch.setattr("wirk_cli.loopback.Listener", lambda: interrupted_wait)
+    monkeypatch.setattr(cli, "show_link", lambda asks, listener: listener)
+    argv = ["--person"] if person else []
+    try:
+        code, out, err, requests = login(argv, device(["pending", "pending"]), capsys)
+    except KeyboardInterrupt:
+        pytest.fail("login leaked KeyboardInterrupt")
+    assert interrupted_wait.closed and code == 130
+    assert out == "" and err == ("Stopped waiting. The approval link and this machine's token stay valid "
+                                "until the code expires; after approving, run: wirk login"
+                                + (" --person" if person else "") + "\n")
+    assert (fresh / "agent-token").exists()
+    if person:
+        assert (fresh / "person-token").exists()
+
+
 def test_a_denied_or_revoked_token_prints_the_services_refusal(fresh, capsys, clock):
     words = "This machine's token was revoked; make a new one: wirk login --new"
     code, out, err, requests = login([], lambda r: refusal("not_authorized", words, status=403,
