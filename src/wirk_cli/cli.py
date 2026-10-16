@@ -336,8 +336,6 @@ def login(words, options, transport):
         raise Failure("other_address", f"This machine's tokens belong to {saved}; they are only ever sent there.",
                       f"A new address needs a new token: wirk login --url {url} --new" + (
                           f" (after removing {other}, which belongs to {saved})" if other.exists() else ""), 2)
-    if person:
-        confirm("person token", "make or check your own token")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
@@ -352,11 +350,18 @@ def login(words, options, transport):
     if answer is None or (not answer["ok"] and answer["errors"][0]["code"] != "not_authorized"):
         return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
     listener = None
-    if not person and answer["ok"] and answer["data"]["state"] == "pending" and browser_here():
+    if answer["ok"] and answer["data"]["state"] == "pending" and browser_here():
         from .loopback import Listener
         listener = Listener()
+    asks = [(service, request, answer)]
     try:
-        return approve(service, request, person, answer, listener)
+        if person and listener:  # the same click connects your agents here, unless they are already
+            agents = Service(url, read_token(other) if other.exists() else new_token(other), transport)
+            theirs = {**request, "for": "agent"}
+            answer = agents.post("/v2/login", {**theirs, "format": "json"})
+            if answer["ok"] and answer["data"]["state"] == "pending":
+                asks.append((agents, theirs, answer))
+        return approve(asks, listener)
     finally:
         if listener:
             listener.close()
@@ -368,42 +373,54 @@ def browser_here() -> bool:
         sys.platform != "linux" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
 
 
-def approve(service: Service, request: dict, person: bool, answer: dict, listener) -> int:
-    """Until the person approves: the value their click brings to the listener finishes the login, and polling sees
+def approve(asks: list, listener) -> int:
+    """Until the person approves: the value their click brings to the listener finishes each login, and polling sees
     an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
     deadline, shown, value = time.monotonic() + (600 if sys.stdout.isatty() else 100), False, None
     while True:
-        if not answer["ok"]:
-            return emit(answer, {})
-        data = answer["data"]
-        if data["state"] == "logged_in":
-            print(login_text(service, request), flush=True)  # the service's words end with what to run next
+        waiting = []
+        for service, request, answer in asks:
+            if not answer["ok"]:
+                return emit(answer, {})
+            if answer["data"]["state"] == "logged_in":
+                print(login_text(service, request), flush=True)  # the service's words end with what to run next
+            else:
+                waiting.append((service, request, answer["data"]))
+        if not waiting:
             return 0
         if not shown:
-            listener, shown = show_link(data, person, listener), True
-        if time.monotonic() + data["interval"] > deadline:
-            raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login")
+            listener, shown = show_link(waiting, listener), True
+            waiting = waiting if listener else waiting[:1]  # a pair needs the browser's port
+        interval = waiting[0][2]["interval"]
+        if time.monotonic() + interval > deadline:
+            raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login"
+                          + (" --person" if waiting[0][1]["for"] == "person" else ""))
         if listener:
-            value = listener.get(data["interval"])
+            value = listener.get(interval)
         else:
-            time.sleep(data["interval"])
-        answer = service.post("/v2/login", {**request, "format": "json", **({"complete": value} if value else {})})
+            time.sleep(interval)
+        asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
+                                                               **({"complete": value} if value else {})}))
+                for service, request, _ in waiting]
 
 
-def show_link(data: dict, person: bool, listener):
-    """The link and code. The browser opens on a link with the listener's port; answers the listener when it did,
-    else None: the link then has no port, and polling alone sees the approval."""
-    code = f"Code {data['code']} · for your agents · expires {data['expires_at'][11:16]} UTC"
+def show_link(waiting: list, listener):
+    """The link and codes. The browser opens on one link with every code and the listener's port; answers the listener
+    when it did, else None: the link then has no port, and polling alone sees the approval."""
+    codes = [f"Code {data['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
+             f"expires {data['expires_at'][11:16]} UTC" for _, request, data in waiting]
     if listener:
-        link = f"{data['url'].split('?')[0]}?{urlencode([('code', data['code']), ('port', listener.port)])}"
+        query = urlencode([("code", data["code"]) for *_, data in waiting] + [("port", listener.port)])
+        link = f"{waiting[0][2]['url'].split('?')[0]}?{query}"
         if webbrowser.open(link):
-            print(f"Approve this machine in your browser: {link}\n{code}", flush=True)
+            print(f"Approve this machine in your browser: {link}", *codes, sep="\n", flush=True)
             return listener
-    if person:  # without a browser here, a person types the code; no link carries it
+    _, request, data = waiting[0]
+    if request["for"] == "person":  # without a browser here, a person types the code; no link carries it
         print(f"Type this code at {data['url'].split('?')[0]}: {data['code']}", flush=True)
     else:
         print(f"No browser on this machine. Open this link in your browser on any computer and approve:\n{data['url']}"
-              f"\n{code}", flush=True)
+              f"\n{codes[0]}", flush=True)
     return None
 
 

@@ -358,3 +358,77 @@ def test_without_a_browser_the_link_has_no_port_and_login_polls(fresh, capsys, c
     if made:  # the browser was asked, refused, and the listener closed
         with pytest.raises(OSError):
             visit(int(made[0].rsplit("=", 1)[1]), f"/done?c={VALUE}")
+
+
+PERSON_IN = "Logged in as alice · registered as a person · account Acme\nnext: status"
+
+
+def pair():
+    """Core's /v2/login for two tokens: the person's (code CDFG-MNPQ, typed on a page without it) and the agents'."""
+    sent = {}
+
+    def answer(request):
+        body, token = json.loads(request.content), request.headers["authorization"][7:]
+        person = body["for"] == "person"
+        sent.setdefault(body["for"], []).append(body)
+        done = any(b.get("complete") == VALUE for b in sent[body["for"]])
+        if done:
+            return envelope(PERSON_IN if person else LOGGED_IN) if body["format"] == "text" else envelope(data={
+                "state": "logged_in", "principal": "alice" if person else "alice-agents"})
+        return envelope(data={"state": "pending", "code": "CDFG-MNPQ" if person else "BDFG-HJKL",
+                              "url": "https://app.wirk.life/device" + ("" if person else "?code=BDFG-HJKL"),
+                              "expires_at": "2026-10-02T14:05:00Z", "interval": 5})
+    return answer, sent
+
+
+@pytest.fixture
+def at_terminal(monkeypatch):
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+
+
+def test_person_login_makes_both_tokens_and_one_click_approves_the_pair(fresh, capsys, browser, at_terminal):
+    answer, sent = pair()
+    code, out, err, requests = login(["--person"], answer, capsys)
+    [url] = browser["urls"]
+    port = int(url.rsplit("=", 1)[1])
+    assert url == f"https://app.wirk.life/device?code=CDFG-MNPQ&code=BDFG-HJKL&port={port}"
+    assert code == 0 and out == (f"Approve this machine in your browser: {url}\n"
+                                 "Code CDFG-MNPQ · for you · expires 14:05 UTC\n"
+                                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + PERSON_IN + "\n" + LOGGED_IN + "\n")
+    for wants in ("person", "agent"):
+        asked = [body for body in sent[wants] if body["format"] == "json"]
+        assert [body.get("complete") for body in asked] == [None, VALUE]  # one ask each, then one complete each
+    tokens = {name: (fresh / name).read_text() for name in ("person-token", "agent-token")}
+    assert len(set(tokens.values())) == 2 and all(stat.S_IMODE(os.stat(fresh / name).st_mode) == 0o600 for name in tokens)
+    assert {r.headers["authorization"][7:] for r in requests} == set(tokens.values())
+    assert VALUE not in out + err and not any(token in out + err for token in tokens.values())
+
+
+def test_person_login_leaves_a_connected_agent_token_alone(fresh, capsys, browser, at_terminal):
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text("wirk_" + "c" * 43)
+    (fresh / "agent-token").chmod(0o600)
+    answer, sent = pair()
+    sent["agent"] = [{"complete": VALUE}]  # the agents' token is connected already
+    code, out, err, requests = login(["--person"], answer, capsys)
+    assert browser["urls"][0].startswith("https://app.wirk.life/device?code=CDFG-MNPQ&port=")
+    assert code == 0 and out.endswith(PERSON_IN + "\n") and "for your agents" not in out and LOGGED_IN not in out
+    assert (fresh / "agent-token").read_text() == "wirk_" + "c" * 43 and len(sent["agent"]) == 2
+
+
+def test_person_login_without_a_browser_keeps_the_typed_code(fresh, capsys, clock, at_terminal):
+    answer, sent = pair()
+
+    def typed(request):
+        if sent.get("person"):  # after the first ask, the person typed the code on the page
+            sent["person"].append({"complete": VALUE})
+        return answer(request)
+    code, out, err, requests = login(["--person"], typed, capsys)
+    assert code == 0 and out == "Type this code at https://app.wirk.life/device: CDFG-MNPQ\n" + PERSON_IN + "\n"
+    assert not (fresh / "agent-token").exists() and "agent" not in sent
+
+
+def test_person_login_asks_nothing_at_the_terminal(fresh, capsys, browser, at_terminal):
+    answer, sent = pair()
+    login(["--person"], answer, capsys)  # the browser fixture fails the test on any input()
+    assert 'Type "' not in capsys.readouterr().out
