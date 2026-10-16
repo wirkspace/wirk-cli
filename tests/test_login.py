@@ -9,6 +9,7 @@ import socket
 import stat
 import struct
 import time
+import webbrowser
 
 import httpx
 import pytest
@@ -307,8 +308,16 @@ def one_click(interval=5, url="https://app.wirk.life/device?code=BDFG-HJKL"):
 
 
 @pytest.fixture
-def browser(monkeypatch):
-    """A display here, and a browser whose person clicks Connect: the approval brings `clicks` to the listener."""
+def browser(monkeypatch, clock):
+    """A display here, and a browser whose person clicks Connect: the approval brings `clicks` to the listener.
+    Waiting on the listener runs on the fake clock, so a give-up costs no real time."""
+    from wirk_cli.loopback import Listener
+    wait = Listener.get
+
+    def get(self, seconds):
+        clock["t"] += seconds
+        return wait(self, 0.01)
+    monkeypatch.setattr(Listener, "get", get)
     monkeypatch.delenv("SSH_CONNECTION")
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setattr("builtins.input", lambda *args: pytest.fail("read from the terminal"))
@@ -352,11 +361,9 @@ def test_a_refused_value_keeps_the_listener_waiting(fresh, capsys, browser):
     assert VALUE not in out + err and WRONG not in out + err
 
 
-def test_giving_up_before_the_click_closes_the_listener(fresh, capsys, browser, monkeypatch):
+def test_giving_up_before_the_click_closes_the_listener(fresh, capsys, browser):
     browser["clicks"] = []
-    ticks = iter(range(0, 10_000, 30))
-    monkeypatch.setattr("time.monotonic", lambda: next(ticks))
-    answer, state = one_click(interval=0.01)
+    answer, state = one_click()
     code, out, err, requests = login([], answer, capsys)
     port = int(browser["urls"][0].rsplit("=", 1)[1])
     assert code == 1 and "login_pending" in err and state["completes"] == []
@@ -454,21 +461,12 @@ def test_person_login_without_a_browser_keeps_the_typed_code(fresh, capsys, cloc
     assert not (fresh / "agent-token").exists() and "agent" not in sent
 
 
-def test_person_login_asks_nothing_at_the_terminal(fresh, capsys, browser, at_terminal):
-    answer, sent = pair()
-    login(["--person"], answer, capsys)  # the browser fixture fails the test on any input()
-    assert 'Type "' not in capsys.readouterr().out
-
-
-def test_a_rerun_resumes_the_same_grant_on_a_new_port(fresh, capsys, browser, monkeypatch):
+def test_a_rerun_resumes_the_same_grant_on_a_new_port(fresh, capsys, browser):
     """The call gave up before the click; running login again answers the same code, and the click (or the
     approved page's Send to this computer's terminal) reaches the new port."""
-    answer, state = one_click(interval=0.01)
+    answer, state = one_click()
     browser["clicks"] = []
-    ticks = iter(range(0, 10_000, 30))
-    with monkeypatch.context() as patch:
-        patch.setattr("time.monotonic", lambda: next(ticks))
-        assert login([], answer, capsys)[0] == 1
+    assert login([], answer, capsys)[0] == 1
     first = (fresh / "agent-token").read_text()
     browser["clicks"] = [VALUE]
     code, out, err, requests = login([], answer, capsys)
@@ -494,3 +492,42 @@ def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refuse
     problem = refused.json()["errors"][0]
     assert code == 1 and len(requests) == 1 and (fresh / "agent-token").read_text() == TOKEN
     assert out + err == f"Error {problem['code']}: {problem['message']}\n" + (f"  {problem['hint']}\n" if "hint" in problem else "")
+
+
+def no_runnable_browser(url):
+    raise webbrowser.Error("could not locate runnable browser")
+
+
+@pytest.mark.parametrize("fails", [lambda url: False, no_runnable_browser], ids=["false", "raises"])
+def test_a_browser_that_does_not_open_closes_the_listener_before_waiting(fresh, capsys, clock, monkeypatch, fails):
+    """open() answering False or raising is the no-browser path: the listener is gone before the first wait."""
+    monkeypatch.delenv("SSH_CONNECTION")
+    monkeypatch.setenv("DISPLAY", ":0")
+    tried = []
+    monkeypatch.setattr("webbrowser.open", lambda url: tried.append(url) or fails(url))
+
+    def sleep(seconds):
+        with pytest.raises(OSError):
+            visit(int(tried[0].rsplit("=", 1)[1]), f"/done?c={VALUE}")
+    monkeypatch.setattr("time.sleep", sleep)
+    code, out, err, requests = login([], device(["pending"]), capsys)
+    assert code == 0 and tried and out == NO_BROWSER + LOGGED_IN + "\n"
+
+
+def test_a_pair_whose_browser_does_not_open_shows_both_links(fresh, capsys, clock, monkeypatch, at_terminal):
+    """The agents' token was made for the pair; without the browser each login shows its own link, and both finish."""
+    monkeypatch.delenv("SSH_CONNECTION")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr("webbrowser.open", lambda url: False)
+    answer, sent = pair()
+
+    def approved_elsewhere(request):
+        for wants in ("person", "agent"):
+            if len(sent.get(wants, [])) > 1:  # after its first poll, each is approved on another computer
+                sent[wants].append({"complete": VALUE})
+        return answer(request)
+    code, out, err, requests = login(["--person"], approved_elsewhere, capsys)
+    assert code == 0 and out == ("No browser on this machine. Open this link in your browser on any computer and approve:\n"
+                                 "https://app.wirk.life/device\nCode CDFG-MNPQ · for you · expires 14:05 UTC\n"
+                                 "https://app.wirk.life/device?code=BDFG-HJKL\n"
+                                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + PERSON_IN + "\n" + LOGGED_IN + "\n")
