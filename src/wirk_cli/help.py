@@ -155,7 +155,22 @@ A service without views configured answers views_unavailable.
 
   show status                          what is waiting, in progress and recent
   show --file view.json                a page from a view config
-  show --revoke LINK                   end a link now""",
+  show --revoke LINK                   end a link now
+
+A file needs title and nonempty blocks. Blocks support note, facts, items and item.
+For multiple wirkspaces, workspace_id goes in the file (otherwise omit it);
+show status does not take workspace_id=.
+Replace the sample IDs using wirk query.
+Example view.json:
+    {
+      "workspace_id": "WORKSPACE_ID", "title": "Handoff",
+      "blocks": [
+        {"title": "Next action", "note": "Confirm the incoming owner."},
+        {"title": "Decision", "item": "ITEM_ID"},
+        {"title": "Discussion", "items": {"kind": "message", "linked": "ITEM_ID"}, "limit": 10}
+      ]
+    }
+Run: wirk show --file view.json --no-open""",
         "upload": """usage: wirk upload PATH [--description TEXT] [--request-id ID] [--json]
 
 Store one file; the bytes go straight to storage, and the answer prints how to attach it.
