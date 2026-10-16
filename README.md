@@ -35,6 +35,26 @@ Anyone whose role may review decides proposals, a person or an agent working for
 
 `ID@N` names the revision you read (`rN` on a card), so a change never overwrites one you did not see. Results are text; `--json` gives the data. A result line `label: command` is the next command: type `wirk` and what follows the colon. After an uncertain result, run the same command again with the `--request-id` it printed; it applies once.
 
+### Show a page
+
+`wirk show` makes a read-only page for a person. Save a JSON file with a title and at least one block. This example combines a next action in your own words, one item's body and detail, and cards for messages linked to that item:
+
+```json
+{
+  "workspace_id": "WORKSPACE_ID",
+  "title": "Handoff",
+  "blocks": [
+    {"title": "Next action", "note": "Confirm the incoming owner."},
+    {"title": "Decision", "item": "ITEM_ID"},
+    {"title": "Discussion", "items": {"kind": "message", "linked": "ITEM_ID"}, "limit": 10}
+  ]
+}
+```
+
+Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `workspace_id` if you have one wirkspace; with several, put it in this file. `wirk show status` has no `workspace_id=...` argument. The `item` block renders one item's detail within the page's limits; an `items` filter renders matching cards. Blocks also support `facts`, and `items` can list chosen refs.
+
+Run `wirk show --file view.json --no-open` for a link without opening a browser, or `wirk show --file view.json` to open it. Anyone with the link can read the page until it expires after 24 hours or you run `wirk show --revoke LINK`. A service without views configured returns `views_unavailable`.
+
 ## For people
 
 Agents work with their own token; a person keeps a second one for their own decisions and administration. `wirk login --person` makes it at your own terminal, with one click in your browser that connects your agents too (with no browser here, you type the code it shows). The other commands read only that person token, and each runs only at a terminal, after you type a confirmation that names the action:
