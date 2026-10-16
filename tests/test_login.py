@@ -1,6 +1,7 @@
 """wirk login: the machine makes its own token, binds it to one address, and shows only its digest."""
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -190,3 +191,58 @@ def test_without_web_sign_in_the_digest_flow_stays(fresh, capsys, clock, missing
 def test_the_services_next_line_is_the_only_one(fresh, capsys, clock):
     code, out, err, requests = login([], device([]), capsys)
     assert code == 0 and out == LOGGED_IN + "\n"
+
+
+# ---------------------------------------------------------------- one-click login (wirk-core docs/plans/one-click-login.md)
+
+VALUE = "Zx9_-" + "q" * 17  # the shape of the one-time value the service makes (22 URL-safe characters)
+
+
+def visit(port, path, host=None):
+    """A browser's GET to the listener, with the Host it would send (or another)."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request("GET", path, headers={"Host": host or f"127.0.0.1:{port}"})
+    answer = connection.getresponse()
+    result = answer.status, dict(answer.getheaders()), answer.read().decode()
+    connection.close()
+    return result
+
+
+@pytest.fixture
+def listener():
+    from wirk_cli.loopback import Listener
+    found = Listener()
+    yield found
+    found.close()
+
+
+def test_the_listener_takes_the_value_only_from_done_on_its_own_host(listener, capsys):
+    assert listener.server_address[0] == "127.0.0.1" and listener.port >= 1024
+    status, headers, page = visit(listener.port, f"/done?c={VALUE}")
+    assert status == 200 and "Connected. You can close this tab." in page and listener.get(1) == VALUE
+    assert headers["Content-Security-Policy"] == "default-src 'none'" and "src=" not in page and "href=" not in page
+    out, err = capsys.readouterr()
+    assert VALUE not in out + err
+
+
+@pytest.mark.parametrize("path, host", [
+    (f"/done?c={VALUE}", "localhost:{port}"),           # DNS rebinding: another name for this address
+    (f"/done?c={VALUE}", "evil.example:{port}"),
+    (f"/done?c={VALUE}", "127.0.0.1"),
+    ("/favicon.ico", None), ("/", None), (f"/other?c={VALUE}", None), ("/done", None),
+    ("/done?c=short", None), ("/done?c=" + "a" * 65, None), ("/done?c=%3Cscript%3E" + "a" * 20, None),
+])
+def test_anything_else_is_404_and_waiting_continues(listener, capsys, path, host):
+    status, headers, page = visit(listener.port, path, host and host.format(port=listener.port))
+    assert status == 404 and listener.get(0.05) is None
+    status, headers, page = visit(listener.port, f"/done?c={VALUE}")  # the real value still arrives afterwards
+    assert status == 200 and listener.get(1) == VALUE
+    out, err = capsys.readouterr()
+    assert VALUE not in out + err
+
+
+def test_the_listener_closes(listener):
+    port = listener.port
+    listener.close()
+    with pytest.raises(OSError):
+        visit(port, f"/done?c={VALUE}")
