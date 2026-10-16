@@ -115,6 +115,10 @@ PENDING_TEXT = ("Approve this machine: https://app.wirk.life/device?code=BDFG-HJ
                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\nafter approving: login")
 
 
+NO_BROWSER = ("No browser on this machine. Open this link in your browser on any computer and approve:\n"
+              "https://app.wirk.life/device?code=BDFG-HJKL\nCode BDFG-HJKL · for your agents · expires 14:05 UTC\n")
+
+
 LOGGED_IN = "Logged in as alice-agents · agent of alice · account Acme\nnext: status"  # the service's words
 
 
@@ -154,7 +158,7 @@ def clock(monkeypatch):
 def test_login_waits_for_the_person_to_approve(fresh, capsys, clock):
     code, out, err, requests = login([], device(["pending", "pending"]), capsys)
     token = (fresh / "agent-token").read_text()
-    assert code == 0 and PENDING_TEXT in out and "Logged in as alice-agents" in out
+    assert code == 0 and NO_BROWSER in out and "Logged in as alice-agents" in out
     assert clock["slept"] == [5, 5] and token not in out + err
     assert all(r.url.path == "/v2/login" and r.headers["authorization"] == f"Bearer {token}" for r in requests)
     first = json.loads(requests[0].content)
@@ -333,3 +337,24 @@ def test_giving_up_before_the_click_closes_the_listener(fresh, capsys, browser, 
     assert code == 1 and "login_pending" in err and state["completes"] == []
     with pytest.raises(OSError):
         visit(port, f"/done?c={VALUE}")
+
+
+@pytest.mark.parametrize("place", ["ssh", "linux without a display", "browser fails"])
+def test_without_a_browser_the_link_has_no_port_and_login_polls(fresh, capsys, clock, monkeypatch, place):
+    made = []
+    if place != "ssh":
+        monkeypatch.delenv("SSH_CONNECTION")
+    if place == "linux without a display":
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        monkeypatch.setattr("wirk_cli.loopback.Listener", lambda: pytest.fail("listened"))
+    if place == "browser fails":
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.setattr("webbrowser.open", lambda url: made.append(url) and False)
+    code, out, err, requests = login([], device(["pending"]), capsys)
+    assert code == 0 and out == NO_BROWSER + LOGGED_IN + "\n" and clock["slept"] == [5]
+    assert all("complete" not in json.loads(r.content) for r in requests)
+    if made:  # the browser was asked, refused, and the listener closed
+        with pytest.raises(OSError):
+            visit(int(made[0].rsplit("=", 1)[1]), f"/done?c={VALUE}")

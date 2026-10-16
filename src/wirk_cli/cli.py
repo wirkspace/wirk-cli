@@ -379,18 +379,8 @@ def approve(service: Service, request: dict, person: bool, answer: dict, listene
         if data["state"] == "logged_in":
             print(login_text(service, request), flush=True)  # the service's words end with what to run next
             return 0
-        if not shown and listener:
-            link = f"{data['url'].split('?')[0]}?{urlencode([('code', data['code']), ('port', listener.port)])}"
-            webbrowser.open(link)
-            print(f"Approve this machine in your browser: {link}\nCode {data['code']} · for your agents · "
-                  f"expires {data['expires_at'][11:16]} UTC", flush=True)
-            shown = True
         if not shown:
-            page = data["url"].split("?")[0] if person else data["url"]  # a person types the code; no link carries it
-            print(f"Type this code at {page}: {data['code']}" if person else login_text(service, request), flush=True)
-            if sys.stdout.isatty():
-                webbrowser.open(page)
-            shown = True
+            listener, shown = show_link(data, person, listener), True
         if time.monotonic() + data["interval"] > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login")
         if listener:
@@ -398,6 +388,23 @@ def approve(service: Service, request: dict, person: bool, answer: dict, listene
         else:
             time.sleep(data["interval"])
         answer = service.post("/v2/login", {**request, "format": "json", **({"complete": value} if value else {})})
+
+
+def show_link(data: dict, person: bool, listener):
+    """The link and code. The browser opens on a link with the listener's port; answers the listener when it did,
+    else None: the link then has no port, and polling alone sees the approval."""
+    code = f"Code {data['code']} · for your agents · expires {data['expires_at'][11:16]} UTC"
+    if listener:
+        link = f"{data['url'].split('?')[0]}?{urlencode([('code', data['code']), ('port', listener.port)])}"
+        if webbrowser.open(link):
+            print(f"Approve this machine in your browser: {link}\n{code}", flush=True)
+            return listener
+    if person:  # without a browser here, a person types the code; no link carries it
+        print(f"Type this code at {data['url'].split('?')[0]}: {data['code']}", flush=True)
+    else:
+        print(f"No browser on this machine. Open this link in your browser on any computer and approve:\n{data['url']}"
+              f"\n{code}", flush=True)
+    return None
 
 
 def login_text(service: Service, request: dict) -> str:
