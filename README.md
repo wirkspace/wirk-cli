@@ -12,7 +12,7 @@ curl -fsSL https://wirk.life/install | sh
 
 It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
-`wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and asks WIRK to approve the machine: open the link it prints, sign in and approve. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
+`wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
@@ -37,10 +37,10 @@ Anyone whose role may review decides proposals, a person or an agent working for
 
 ## For people
 
-Agents work with their own token; a person keeps a second one for their own decisions and administration. These commands read only that person token, and each runs only at a terminal, after you type a confirmation that names the action:
+Agents work with their own token; a person keeps a second one for their own decisions and administration. `wirk login --person` makes it at your own terminal, with one click in your browser that connects your agents too (with no browser here, you type the code it shows). The other commands read only that person token, and each runs only at a terminal, after you type a confirmation that names the action:
 
 ```
-wirk login --person                                   make or check your own token
+wirk login --person                                   your own sign-in, with one click in your browser
 wirk review c4a1e902@1 accept --reason 'Checked it' --person    decide as yourself, not as your agent
 wirk admin show account                               what your account holds (administrators)
 wirk admin --request batch.json                       people, tokens, wirkspaces and fields (administrators)
@@ -61,6 +61,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- `wirk login` opens your browser, at a terminal or not, and one click connects this machine; `wirk login --person` connects you and your agents in the same click, with no typed phrase. With no browser here it prints a link to open on any computer.
 - Connected GitHub sources can be previewed and imported through the existing `wirk import github` command with an ordinary agent login and an explicit source delegation.
 
 ### 0.4.10
