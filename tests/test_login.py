@@ -547,3 +547,11 @@ def test_person_login_says_when_the_agents_token_is_refused(fresh, capsys, brows
     code, out, err, requests = login(["--person"], stale_agents, capsys)
     assert code == 1 and f"Error not_authorized: {words}\n" in out + err and out.endswith(PERSON_IN + "\n")
     assert "code=BDFG-HJKL" not in browser["urls"][0] and (fresh / "agent-token").read_text() == TOKEN
+
+
+def test_only_a_service_without_web_sign_in_falls_back_to_the_digest(fresh, capsys):
+    words = "label must be one line"
+    code, out, err, requests = login([], lambda request: refusal("invalid_input", words, status=422,
+                                                                 text=f"Error invalid_input: {words}"), capsys)
+    assert code == 1 and [r.url.path for r in requests] == ["/v2/login"] and words in out + err
+    assert "digest" not in out + err
