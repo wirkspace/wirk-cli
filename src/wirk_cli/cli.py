@@ -419,7 +419,12 @@ def approve(asks: list, listener, rerun: str) -> int:
             return 0
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
-        value = listener.get(interval) if listener else time.sleep(interval)  # time.sleep answers None
+        try:
+            value = listener.get(interval) if listener else time.sleep(interval)  # time.sleep answers None
+        except KeyboardInterrupt:
+            print("Stopped waiting. The approval link and this machine's token stay valid until the code expires; "
+                  f"after approving, run: {rerun}", file=sys.stderr)
+            return 130
         asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
                                                                **({"complete": value} if value else {})}))
                 for service, request in waiting]
