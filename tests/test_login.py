@@ -14,6 +14,13 @@ from conftest import envelope, refusal
 from wirk_cli import cli
 
 
+@pytest.fixture(autouse=True)
+def no_display(monkeypatch):
+    """No browser unless a test gives one: these tests never open a real browser."""
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
+    monkeypatch.setattr("webbrowser.open", lambda url: pytest.fail(f"opened {url}"))
+
+
 @pytest.fixture
 def fresh(tmp_path, monkeypatch):
     directory = tmp_path / "wirk"
@@ -244,5 +251,85 @@ def test_anything_else_is_404_and_waiting_continues(listener, capsys, path, host
 def test_the_listener_closes(listener):
     port = listener.port
     listener.close()
+    with pytest.raises(OSError):
+        visit(port, f"/done?c={VALUE}")
+
+
+LOGGED_IN_DATA = {"state": "logged_in", "principal": "alice-agents", "kind": "agent", "person": "alice", "account": "Acme"}
+WRONG = "W" * 22
+
+
+def one_click(interval=5, url="https://app.wirk.life/device?code=BDFG-HJKL"):
+    """Core's /v2/login: pending until the token comes back with the value the approval sent to the listener."""
+    state = {"done": False, "completes": [], "then": None}
+
+    def answer(request):
+        body = json.loads(request.content)
+        if "complete" in body:
+            state["completes"].append(body["complete"])
+            state["done"] = state["done"] or body["complete"] == VALUE
+            if state["then"] and not state["done"]:
+                state["then"]()
+        if state["done"]:
+            return envelope(LOGGED_IN) if body["format"] == "text" else envelope(data=LOGGED_IN_DATA)
+        return envelope(data={"state": "pending", "code": "BDFG-HJKL", "url": url,
+                              "expires_at": "2026-10-02T14:05:00Z", "interval": interval})
+    return answer, state
+
+
+@pytest.fixture
+def browser(monkeypatch):
+    """A display here, and a browser whose person clicks Connect: the approval brings `clicks` to the listener."""
+    monkeypatch.delenv("SSH_CONNECTION")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr("builtins.input", lambda *args: pytest.fail("read from the terminal"))
+    seen = {"urls": [], "clicks": [VALUE]}
+
+    def click(value):
+        port = int(re.search(r"port=(\d+)", seen["urls"][-1]).group(1))
+        assert visit(port, f"/done?c={value}")[0] == 200
+
+    def open_(url):
+        seen["urls"].append(url)
+        for value in seen["clicks"]:
+            click(value)
+        return True
+    monkeypatch.setattr("webbrowser.open", open_)
+    seen["click"] = click
+    return seen
+
+
+def test_an_agent_run_login_opens_the_browser_and_one_click_logs_in(fresh, capsys, browser):
+    answer, state = one_click()
+    code, out, err, requests = login([], answer, capsys)
+    token = (fresh / "agent-token").read_text()
+    [url] = browser["urls"]
+    port = int(url.rsplit("=", 1)[1])
+    assert url == f"https://app.wirk.life/device?code=BDFG-HJKL&port={port}"
+    assert code == 0 and out == (f"Approve this machine in your browser: {url}\n"
+                                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + LOGGED_IN + "\n")
+    assert state["completes"] == [VALUE] and VALUE not in out + err and token not in out + err
+    assert all(r.headers["authorization"] == f"Bearer {token}" for r in requests)
+    with pytest.raises(OSError):  # closed once the login finished
+        visit(port, f"/done?c={VALUE}")
+
+
+def test_a_refused_value_keeps_the_listener_waiting(fresh, capsys, browser):
+    answer, state = one_click()
+    browser["clicks"] = [WRONG]  # say a page on another site navigated here first
+    state["then"] = lambda: browser["click"](VALUE)
+    code, out, err, requests = login([], answer, capsys)
+    assert code == 0 and state["completes"] == [WRONG, VALUE] and "Logged in as alice-agents" in out
+    assert VALUE not in out + err and WRONG not in out + err
+
+
+def test_giving_up_before_the_click_closes_the_listener(fresh, capsys, browser, monkeypatch):
+    browser["clicks"] = []
+    ticks = iter(range(0, 10_000, 30))
+    monkeypatch.setattr("time.monotonic", lambda: next(ticks))
+    answer, state = one_click(interval=0.01)
+    code, out, err, requests = login([], answer, capsys)
+    port = int(browser["urls"][0].rsplit("=", 1)[1])
+    assert code == 1 and "login_pending" in err and state["completes"] == []
     with pytest.raises(OSError):
         visit(port, f"/done?c={VALUE}")

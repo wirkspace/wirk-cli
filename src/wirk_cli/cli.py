@@ -9,6 +9,7 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
 from . import __version__, context, grammar
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, check_url, config_dir, digest, file_digest, new_token, \
@@ -350,12 +351,27 @@ def login(words, options, transport):
         answer = None
     if answer is None or (not answer["ok"] and answer["errors"][0]["code"] != "not_authorized"):
         return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
-    return approve(service, request, person, answer)
+    listener = None
+    if not person and answer["ok"] and answer["data"]["state"] == "pending" and browser_here():
+        from .loopback import Listener
+        listener = Listener()
+    try:
+        return approve(service, request, person, answer, listener)
+    finally:
+        if listener:
+            listener.close()
 
 
-def approve(service: Service, request: dict, person: bool, answer: dict) -> int:
-    """Poll until the person approves: 10 minutes at a terminal, 100 seconds for an agent's tool call."""
-    deadline, shown = time.monotonic() + (600 if sys.stdout.isatty() else 100), False
+def browser_here() -> bool:
+    """A display is likely: not over SSH, and on Linux only with X11 or Wayland (else a text browser would answer)."""
+    return not os.environ.get("SSH_CONNECTION") and (
+        sys.platform != "linux" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
+
+
+def approve(service: Service, request: dict, person: bool, answer: dict, listener) -> int:
+    """Until the person approves: the value their click brings to the listener finishes the login, and polling sees
+    an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
+    deadline, shown, value = time.monotonic() + (600 if sys.stdout.isatty() else 100), False, None
     while True:
         if not answer["ok"]:
             return emit(answer, {})
@@ -363,6 +379,12 @@ def approve(service: Service, request: dict, person: bool, answer: dict) -> int:
         if data["state"] == "logged_in":
             print(login_text(service, request), flush=True)  # the service's words end with what to run next
             return 0
+        if not shown and listener:
+            link = f"{data['url'].split('?')[0]}?{urlencode([('code', data['code']), ('port', listener.port)])}"
+            webbrowser.open(link)
+            print(f"Approve this machine in your browser: {link}\nCode {data['code']} · for your agents · "
+                  f"expires {data['expires_at'][11:16]} UTC", flush=True)
+            shown = True
         if not shown:
             page = data["url"].split("?")[0] if person else data["url"]  # a person types the code; no link carries it
             print(f"Type this code at {page}: {data['code']}" if person else login_text(service, request), flush=True)
@@ -371,8 +393,11 @@ def approve(service: Service, request: dict, person: bool, answer: dict) -> int:
             shown = True
         if time.monotonic() + data["interval"] > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login")
-        time.sleep(data["interval"])
-        answer = service.post("/v2/login", {**request, "format": "json"})
+        if listener:
+            value = listener.get(data["interval"])
+        else:
+            time.sleep(data["interval"])
+        answer = service.post("/v2/login", {**request, "format": "json", **({"complete": value} if value else {})})
 
 
 def login_text(service: Service, request: dict) -> str:
