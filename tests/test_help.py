@@ -1,5 +1,6 @@
 """Help is short and runnable; the wording, privacy and v2-only rules hold for every text the clients carry."""
 
+import json
 import os
 import re
 import shlex
@@ -165,6 +166,20 @@ def test_show_help_describes_hosted_lifetime_and_unconfigured_services(capsys):
     text = help_of(capsys, "show")
     assert "24 hours" in text and "revoked" in text and "views_unavailable" in text
     assert "Not live yet" not in text
+
+
+def test_show_help_gives_a_complete_handoff_view_file(capsys):
+    text = help_of(capsys, "show")
+    recipe = json.loads(text.split("Example view.json:\n", 1)[1].split("\nRun:", 1)[0])
+    assert recipe["workspace_id"] == "WORKSPACE_ID"
+    assert recipe["title"] and len(recipe["blocks"]) == 3
+    assert recipe["blocks"][0]["note"]
+    assert recipe["blocks"][1]["item"] == "ITEM_ID"
+    assert recipe["blocks"][2]["items"] == {"kind": "message", "linked": "ITEM_ID"}
+    assert recipe["blocks"][2]["limit"] == 10
+    assert "note, facts, items and item" in text
+    assert "workspace_id goes in the file" in text
+    assert "show status does not take workspace_id=" in text
 
 
 def test_write_help_says_who_adds_context_and_names_two_refusals(capsys):
