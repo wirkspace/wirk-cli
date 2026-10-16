@@ -10,7 +10,7 @@ import stat
 import httpx
 import pytest
 
-from conftest import envelope, refusal
+from conftest import TOKEN, envelope, refusal
 from wirk_cli import cli
 
 
@@ -432,3 +432,39 @@ def test_person_login_asks_nothing_at_the_terminal(fresh, capsys, browser, at_te
     answer, sent = pair()
     login(["--person"], answer, capsys)  # the browser fixture fails the test on any input()
     assert 'Type "' not in capsys.readouterr().out
+
+
+def test_a_rerun_resumes_the_same_grant_on_a_new_port(fresh, capsys, browser, monkeypatch):
+    """The call gave up before the click; running login again answers the same code, and the click (or the
+    approved page's Send to this computer's terminal) reaches the new port."""
+    answer, state = one_click(interval=0.01)
+    browser["clicks"] = []
+    ticks = iter(range(0, 10_000, 30))
+    with monkeypatch.context() as patch:
+        patch.setattr("time.monotonic", lambda: next(ticks))
+        assert login([], answer, capsys)[0] == 1
+    first = (fresh / "agent-token").read_text()
+    browser["clicks"] = [VALUE]
+    code, out, err, requests = login([], answer, capsys)
+    old, new = (int(url.rsplit("=", 1)[1]) for url in browser["urls"])
+    assert code == 0 and old != new and "code=BDFG-HJKL" in browser["urls"][1] and "Logged in as alice-agents" in out
+    assert (fresh / "agent-token").read_text() == first and state["completes"] == [VALUE]
+
+
+STALE = "This machine's token stopped after 90 days unused"
+
+
+@pytest.mark.parametrize("refused", [  # the gate's refusal is text with its hint; the route's, for format json, is data
+    refusal("unauthenticated", STALE, status=401, hint="Run: wirk login --new",
+            text=f"Error unauthenticated: {STALE}\n  Run: wirk login --new"),
+    envelope(ok=False, errors=[{"code": "not_authorized", "message": f"{STALE}; make a new one: wirk login --new"}],
+             data={}, status=403),
+])
+def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refused):
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text(TOKEN)
+    (fresh / "agent-token").chmod(0o600)
+    code, out, err, requests = login([], lambda request: refused, capsys)
+    problem = refused.json()["errors"][0]
+    assert code == 1 and len(requests) == 1 and (fresh / "agent-token").read_text() == TOKEN
+    assert out + err == f"Error {problem['code']}: {problem['message']}\n" + (f"  {problem['hint']}\n" if "hint" in problem else "")

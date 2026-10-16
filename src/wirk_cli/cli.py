@@ -347,7 +347,7 @@ def login(words, options, transport):
         if failure.code != "missing_route":
             raise
         answer = None
-    if answer is None or (not answer["ok"] and answer["errors"][0]["code"] != "not_authorized"):
+    if answer is None or (not answer["ok"] and answer["errors"][0]["code"] == "not_available"):
         return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
     listener = None
     if answer["ok"] and answer["data"]["state"] == "pending" and browser_here():
