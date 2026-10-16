@@ -59,6 +59,51 @@ def test_status_bodies():
         grammar.status_body(["status=open"])
 
 
+@pytest.mark.parametrize("reservation, revision, words, options, extra, reason", [
+    ("occupied", 7, [], [], {}, None),
+    ("occupied:8", 9, ["owner=me"], [], {"work": {"owner_id": "me"}}, None),
+    ("vacant:8", 10, ["status=completed"], ["--evidence", "tests/test_retry.py passes"],
+     {"fields": {"status": "completed"}}, "tests/test_retry.py passes"),
+    ("replace:8", 11, [], ["--reason", "Requested after reconciliation; execution moves to run-2"], {},
+     "Requested after reconciliation; execution moves to run-2"),
+])
+def test_reservation_edit_shortcuts_emit_patch_and_expect(run, reservation, revision, words, options, extra, reason):
+    code, out, err, fake = run(["write", "edit", f"5c1e7a90@{revision}", f"reservation={reservation}",
+                               *words, *options, "--request-id", "run-1-edit"])
+    assert code == 0, (out, err)
+    assert fake.requests[0].url.path == "/v2/write"
+    assert fake.bodies() == [{
+        "request_id": "run-1-edit", "format": "text", "expect": {"5c1e7a90": revision},
+        "operations": [{"op": "item.edit", "id": "5c1e7a90", "patch": {"reservation": reservation, **extra}}],
+        **({"reason": reason} if reason is not None else {}),
+    }]
+
+
+@pytest.mark.parametrize("reservation", ["foo", "", "null", "vacant", "occupied:01", "occupied:8,vacant:8"])
+def test_reservation_values_reach_the_server_unchanged(run, reservation):
+    code, out, err, fake = run(["write", "edit", "5c1e7a90@8", f"reservation={reservation}"])
+    assert code == 0, (out, err)
+    assert fake.bodies()[0]["operations"] == [
+        {"op": "item.edit", "id": "5c1e7a90", "patch": {"reservation": reservation}}]
+
+
+@pytest.mark.parametrize("reservation", ["occupied", "queued", ""])
+def test_write_new_does_not_take_reservation(run, reservation):
+    code, out, err, fake = run(["write", "new", "Title", f"reservation={reservation}"])
+    assert code == 2 and fake.requests == []
+    assert "reservation is only available on edit; new items start vacant" in err
+
+
+def test_custom_reservation_enum_is_reachable_through_request(run, tmp_path):
+    body = {"request_id": "enum-1", "expect": {"5c1e7a90": 8}, "operations": [
+        {"op": "item.edit", "id": "5c1e7a90", "patch": {"fields": {"reservation": "queued"}}}]}
+    request = tmp_path / "enum.json"
+    request.write_text(json.dumps(body))
+    code, out, err, fake = run(["write", "--request", str(request)])
+    assert code == 0, (out, err)
+    assert fake.bodies() == [body]
+
+
 @pytest.mark.parametrize("words", [["limit=five"], ["max_bytes=1k"], ["inbox=me", "wait=1m"], ["status=open", "status=done"]])
 def test_bad_numbers_and_repeated_keys_are_refused(words):
     with pytest.raises(grammar.UsageError):
