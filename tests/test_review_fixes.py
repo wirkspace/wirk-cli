@@ -122,13 +122,15 @@ def test_login_flushes_its_link_to_a_pipe(tmp_path):
             self.wfile.write(payload)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Pending)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    env = {**os.environ, "WIRK_CONFIG_DIR": str(tmp_path / "wirk"), "BROWSER": "true"}  # a browser that opens nothing
+    env = {**{k: v for k, v in os.environ.items() if k != "SSH_CONNECTION"}, "WIRK_CONFIG_DIR": str(tmp_path / "wirk"),
+           "DISPLAY": ":0", "BROWSER": "true"}  # a display, and a browser that opens nothing, wherever this runs
     process = subprocess.Popen([sys.executable, "-m", "wirk_cli", "login", "--url", f"http://127.0.0.1:{server.server_address[1]}"],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     try:
         start = time.monotonic()
         line = process.stdout.readline().decode()
-        assert "device?code=BDFG-HJKL" in line and time.monotonic() - start < 5  # with a browser here or without
+        assert "Approve this machine in your browser: https://wirk.test/device?code=BDFG-HJKL&port=" in line
+        assert time.monotonic() - start < 5
     finally:
         process.kill()
         server.shutdown()
