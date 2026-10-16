@@ -9,6 +9,7 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
 from . import __version__, context, grammar
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, check_url, config_dir, digest, file_digest, new_token, \
@@ -335,8 +336,6 @@ def login(words, options, transport):
         raise Failure("other_address", f"This machine's tokens belong to {saved}; they are only ever sent there.",
                       f"A new address needs a new token: wirk login --url {url} --new" + (
                           f" (after removing {other}, which belongs to {saved})" if other.exists() else ""), 2)
-    if person:
-        confirm("person token", "make or check your own token")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
@@ -348,31 +347,82 @@ def login(words, options, transport):
         if failure.code != "missing_route":
             raise
         answer = None
-    if answer is None or (not answer["ok"] and answer["errors"][0]["code"] != "not_authorized"):
+    if answer is None or (not answer["ok"] and answer["errors"][0]["code"] == "not_available"):
         return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
-    return approve(service, request, person, answer)
+    pending = answer["ok"] and answer["data"]["state"] == "pending"
+    listener = None
+    if pending and browser_here():
+        from .loopback import Listener
+        listener = Listener()
+    asks, refused = [(service, request, answer)], False
+    try:
+        if person and listener:  # the same click connects your agents here, unless they are already
+            agents = Service(url, read_token(other) if other.exists() else new_token(other), transport)
+            theirs = {**request, "for": "agent"}
+            answer = agents.post("/v2/login", {**theirs, "format": "json"})
+            refused = not answer["ok"]
+            if refused:  # say why, and never exit 0 as if both were connected
+                print(problem_text(answer), flush=True)
+            elif answer["data"]["state"] == "pending":
+                asks.append((agents, theirs, answer))
+        if pending:
+            listener = show_link(asks, listener)
+        return approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+    finally:
+        if listener:
+            listener.close()
 
 
-def approve(service: Service, request: dict, person: bool, answer: dict) -> int:
-    """Poll until the person approves: 10 minutes at a terminal, 100 seconds for an agent's tool call."""
-    deadline, shown = time.monotonic() + (600 if sys.stdout.isatty() else 100), False
+def browser_here() -> bool:
+    """A display is likely: not over SSH, and on Linux only with X11 or Wayland (else a text browser would answer)."""
+    return not os.environ.get("SSH_CONNECTION") and (
+        sys.platform != "linux" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
+
+
+def show_link(asks: list, listener):
+    """Open the browser on one link with every code and the port, answering the listener; or close it, answer None and
+    show each login's own link without a port: one click for an agent, the typed code for a person."""
+    codes = [f"Code {answer['data']['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
+             f"expires {answer['data']['expires_at'][11:16]} UTC" for _, request, answer in asks]
+    if listener:
+        query = urlencode([("code", answer["data"]["code"]) for *_, answer in asks] + [("port", listener.port)])
+        link = f"{asks[0][2]['data']['url'].split('?')[0]}?{query}"
+        try:
+            opened = webbrowser.open(link)
+        except webbrowser.Error:
+            opened = False
+        if opened:
+            print(f"Approve this machine in your browser: {link}", *codes, sep="\n", flush=True)
+            return listener
+        listener.close()
+    links = [line for (*_, answer), code in zip(asks, codes) for line in (answer["data"]["url"], code)]
+    print("No browser on this machine. Open this link in your browser on any computer and approve:", *links,
+          sep="\n", flush=True)
+    return None
+
+
+def approve(asks: list, listener, rerun: str) -> int:
+    """Until the person approves: the value their click brings to the listener finishes each login, and polling sees
+    an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
+    deadline = time.monotonic() + (600 if sys.stdout.isatty() else 100)
     while True:
-        if not answer["ok"]:
-            return emit(answer, {})
-        data = answer["data"]
-        if data["state"] == "logged_in":
-            print(login_text(service, request), flush=True)  # the service's words end with what to run next
+        waiting = []
+        for service, request, answer in asks:
+            if not answer["ok"]:
+                return emit(answer, {})
+            if answer["data"]["state"] == "logged_in":
+                print(login_text(service, request), flush=True)  # the service's words end with what to run next
+            else:
+                waiting.append((service, request))
+                interval = answer["data"]["interval"]
+        if not waiting:
             return 0
-        if not shown:
-            page = data["url"].split("?")[0] if person else data["url"]  # a person types the code; no link carries it
-            print(f"Type this code at {page}: {data['code']}" if person else login_text(service, request), flush=True)
-            if sys.stdout.isatty():
-                webbrowser.open(page)
-            shown = True
-        if time.monotonic() + data["interval"] > deadline:
-            raise Failure("login_pending", "This machine is still waiting for approval.", "after approving, run: wirk login")
-        time.sleep(data["interval"])
-        answer = service.post("/v2/login", {**request, "format": "json"})
+        if time.monotonic() + interval > deadline:
+            raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
+        value = listener.get(interval) if listener else time.sleep(interval)  # time.sleep answers None
+        asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
+                                                               **({"complete": value} if value else {})}))
+                for service, request in waiting]
 
 
 def login_text(service: Service, request: dict) -> str:

@@ -23,6 +23,12 @@ ADMIN = os.environ.get("WIRK_TEST_ADMIN_TOKEN_FILE")
 pytestmark = pytest.mark.skipif(not (URL and ADMIN), reason="no scratch WIRK service configured")
 
 
+@pytest.fixture(autouse=True)
+def no_browser(monkeypatch):
+    """wirk login opens a browser wherever a display is likely, terminal or not; these tests never should."""
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
+
+
 def admin(body):
     token = Path(ADMIN).read_text().strip()
     answer = httpx.post(f"{URL}/v2/admin", json={**body, "format": "json"},
