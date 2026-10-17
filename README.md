@@ -14,11 +14,15 @@ It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), t
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
+In a Codex CLI chat with verified host binding, run `wirk login` once before its first WIRK call. It enrolls a private actor credential under the already approved machine agent token; resuming that CLI chat keeps the same actor, while a new CLI chat or fork gets another. If `status` says `actor_setup_required`, run `wirk login` and retry. A named worker can set `WIRK_ACTOR_HOME` to its own absolute directory before login. Codex desktop, helper agents, Claude Code, and other hosts have not yet been qualified for distinct chat binding. Without a verified binding they continue to use the shared machine agent token; status labels that identity as shared.
+
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
 ## Use
 
-Start with `wirk status`. `wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
+Start with `wirk status`. Use `wirk query assigned=me` to find work currently assigned to this actor or its human. To choose one actor for human-owned work, use the existing `wirk write --request FILE` form with `work.agent_id`; set `agent_id` in the work patch; the existing owner, due date and criteria are retained. Assignment messages have a fixed recipient list, and each recipient acknowledges its own inbox entry.
+
+`wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
 
 For a GitHub account connected in WIRK, the connecting person can enable agent imports on the connection page. Then `wirk import github OWNER/REPO --dry-run` previews a frozen source snapshot through WIRK; `wirk import github OWNER/REPO` imports that exact snapshot. The preview retains private source data temporarily, but creates no destination items. Agents need only their ordinary WIRK login. Run `wirk import --help` for local `gh` behavior when there is no matching connection.
 

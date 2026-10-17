@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from . import __version__, context, grammar
-from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, check_url, config_dir, digest, file_digest, new_token, \
+from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_base, actor_binding, actor_current, actor_path, actor_secret, check_url, config_dir, digest, file_digest, new_token, save_actor_current, \
     read_token, save_url, saved_url
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
@@ -125,11 +125,24 @@ def confirm(phrase: str, purpose: str) -> None:
         raise UsageError("not confirmed; nothing was sent")
 
 
-def connect(transport, person: bool = False) -> Service:
+def connect(transport, person: bool = False, actor_id: str | None = None) -> Service:
     directory = config_dir()
-    token, url = read_token(directory / (PERSON if person else AGENT)), saved_url(directory)
+    url = saved_url(directory)
     if url is None:
         raise Failure("not_configured", "WIRK is not set up on this machine.", f"Run: wirk login   (connects to {DEFAULT_URL})")
+    binding = None if person else actor_binding(actor_id)
+    if binding:
+        base = actor_base(url, binding)
+        parent, human = actor_current(base, url)
+        try:
+            token = read_token(actor_path(base, parent, human))
+        except Failure as failure:
+            if failure.code != "not_configured":
+                raise
+            raise Failure("actor_setup_required", "This chat has no WIRK actor credential.",
+                          "Run: wirk login   (then retry this call)") from None
+    else:
+        token = read_token(directory / (PERSON if person else AGENT))
     return Service(url, token, transport)
 
 
@@ -340,6 +353,7 @@ def login(words, options, transport):
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
     service = Service(url, token, transport)
+    binding = None if person else actor_binding()
     request = {"for": "person" if person else "agent", "label": f"wirk-cli on {platform.system() or 'unknown'}"}
     try:
         answer = service.post("/v2/login", {**request, "format": "json"})
@@ -348,7 +362,12 @@ def login(words, options, transport):
             raise
         answer = None
     if answer is None or (not answer["ok"] and answer["errors"][0]["code"] == "not_available"):
-        return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
+        result = digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
+        if result or not binding:
+            return result
+        checked = service.post("/v2/status", {"format": "json", "max_bytes": 1024})
+        identity = checked.get("data", {}).get("you") if checked["ok"] else None
+        return enroll_actor(service, url, binding, identity)
     pending = answer["ok"] and answer["data"]["state"] == "pending"
     listener = None
     if pending and browser_here():
@@ -367,10 +386,36 @@ def login(words, options, transport):
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
-        return approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+        result = approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+        return enroll_actor(service, url, binding) if result == 0 and binding else result
     finally:
         if listener:
             listener.close()
+
+
+
+def enroll_actor(parent: Service, url: str, binding: tuple[str, str], identity: dict | None = None) -> int:
+    """Explicit login's second step: one private actor bearer under the already approved parent."""
+    if identity is None:
+        checked = parent.post("/v2/login", {"for": "agent", "format": "json"})
+        if not checked["ok"]:
+            return emit(checked, {})
+        identity = checked["data"]
+    principal, person = identity.get("principal"), identity.get("person")
+    if identity.get("kind") != "agent" or not isinstance(principal, str) or not isinstance(person, str):
+        raise Failure("actor_setup_required", "This token is not an approved parent agent.",
+                      "Run: wirk login   (complete parent approval first)")
+    base = actor_base(url, binding)
+    child = actor_secret(actor_path(base, principal, person))
+    enrolled = parent.post("/v2/login", {"for": "actor", "label": "wirk actor", "format": "json"},
+                           headers={"Wirk-Actor-Authorization": f"Bearer {child}"})
+    if not enrolled["ok"]:
+        return emit(enrolled, {})
+    save_actor_current(base, url, principal, person)
+    actor = enrolled["data"]["principal"]
+    print(f"Logged in as {actor} · actor for {person}\nnext: status", flush=True)
+    return 0
+
 
 
 def browser_here() -> bool:
