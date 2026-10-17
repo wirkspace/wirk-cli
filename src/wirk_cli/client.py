@@ -245,9 +245,9 @@ class Service:
             return data
         status = answer.status_code
         if 300 <= status < 400:
-            raise Failure("unexpected_redirect", f"{self.url} answered {status} for POST {route}, pointing to "
-                          f"{answer.headers.get('location', 'nowhere')}; WIRK clients never follow redirects, so nothing "
-                          "was sent there.", "Ask your WIRK administrator for the service's address.")
+            raise Failure("unexpected_redirect", f"{self.url} answered {status} for POST {route}; "
+                          "WIRK clients never follow redirects, so nothing was sent there.",
+                          "Ask your WIRK administrator for the service's address.")
         if uncertain and status >= 500:
             raise unknown(self.url, f"HTTP {status} with a page that is not from WIRK", uncertain)
         if status == 404:
