@@ -599,5 +599,5 @@ def test_eleven_local_repositories_remain_accepted_when_no_connection(world, mon
                                           {name: [] for name in choices}))
     code, output, error = world["run"]("github", *choices, "--dry-run")
     assert code == 0 and "selection: 11 repositories" in output, output + error
-    assert "local source mode" in error
+    assert "local source mode" in error and "linked discussion records" in error
     assert not world["fake"].writes()
