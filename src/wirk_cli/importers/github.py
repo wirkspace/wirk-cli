@@ -90,7 +90,7 @@ def connections(projects: bool) -> dict:
     events = {name: extra for name, extra in EVENTS.items() if projects or name not in PROJECT_EVENTS}
     types = ", ".join(re.sub(r"(?<!^)(?=[A-Z])", "_", name).upper().replace("PROJECT_V_2", "PROJECT_V2") for name in events)
     timeline = "nodes { __typename " + " ".join(f"... on {name} {{ createdAt {ACTOR} {extra} }}" for name, extra in events.items()) + " }"
-    return {"labels": ("first: 100", "nodes { name description }"), "subIssues": ("first: 100", f"nodes {{ {REF} }}"),
+    return {"labels": ("first: 100", "nodes { id name description color url }"), "subIssues": ("first: 100", f"nodes {{ {REF} }}"),
             "blockedBy": ("first: 100", f"nodes {{ {REF} }}"), "blocking": ("first: 100", f"nodes {{ {REF} }}"),
             "relatesTo": ("first: 100", f"nodes {{ {REF} }}"), "comments": ("first: 100", COMMENT),
             "timelineItems": (f"first: 100, itemTypes: [{types}]", timeline)}
@@ -103,7 +103,7 @@ def issue_fields(projects: bool) -> str:
                      for name, (args, nodes) in connections(projects).items() if name != "timelineItems")
     return (f"id fullDatabaseId number title body url state stateReason(enableDuplicate: true) createdAt updatedAt closedAt "
             f"lastEditedAt locked activeLockReason isPinned author {{ __typename login }} assignees(first: 10) {{ nodes {{ login }} }} "
-            f"milestone {{ title dueOn state }} issueType {{ name }} parent {{ {REF} }} duplicateOf {{ {REF} }} "
+            f"milestone {{ id number title description dueOn state url }} issueType {{ name }} parent {{ {REF} }} duplicateOf {{ {REF} }} "
             f"issueFieldValues(first: 20) {{ nodes {{ __typename ... on IssueFieldSingleSelectValue {{ name {FIELD_NAME} }} "
             f"... on IssueFieldMultiSelectValue {{ options {{ name }} {FIELD_NAME} }} ... on IssueFieldDateValue {{ value {FIELD_NAME} }} "
             f"... on IssueFieldTextValue {{ value {FIELD_NAME} }} ... on IssueFieldNumberValue {{ value {FIELD_NAME} }} }} }} "
