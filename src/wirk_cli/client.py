@@ -134,14 +134,27 @@ def actor_path(base: Path, principal: str, person: str) -> Path:
     return base / key / "actor-token"
 
 
+def read_actor_metadata(file: Path) -> object:
+    """Read the private chat selector through a descriptor that cannot follow a planted symlink."""
+    try:
+        descriptor = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise
+    except OSError:
+        raise Failure("insecure_actor_file", f"{file} must be a private regular file") from None
+    with os.fdopen(descriptor) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise Failure("insecure_actor_file", f"{file} must be a private regular file")
+        return json.load(stream)
+
+
 def actor_current(base: Path, url: str) -> tuple[str, str]:
     file = base / "current.json"
     try:
-        info = os.lstat(file)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise Failure("insecure_actor_file", f"{file} must be a private regular file")
-        data = json.loads(file.read_text())
-        if data.get("service_url") == url and all(isinstance(data.get(k), str) for k in ("principal", "person")):
+        data = read_actor_metadata(file)
+        if isinstance(data, dict) and data.get("service_url") == url and all(
+                isinstance(data.get(k), str) for k in ("principal", "person")):
             return data["principal"], data["person"]
     except FileNotFoundError:
         pass
@@ -160,7 +173,7 @@ def save_actor_current(base: Path, url: str, principal: str, person: str) -> Non
     except FileExistsError:
         for _ in range(50):
             try:
-                if json.loads(file.read_text()) == json.loads(data):
+                if read_actor_metadata(file) == json.loads(data):
                     return
             except (FileNotFoundError, ValueError):
                 pass
@@ -178,7 +191,10 @@ def actor_secret(path: Path) -> str:
     """One durable child credential when two explicit logins start together."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock = path.with_name(path.name + ".lock")
-    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    except OSError:
+        raise Failure("insecure_actor_file", f"{lock} must be a private regular lock file") from None
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:

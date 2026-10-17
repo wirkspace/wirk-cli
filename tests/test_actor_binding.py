@@ -1,7 +1,10 @@
 """One host chat keeps its actor bearer; a new chat cannot use the shared parent silently."""
 
 import json
+import os
 import uuid
+
+import pytest
 
 from conftest import TOKEN, URL, envelope, write_token
 from wirk_cli import client
@@ -109,3 +112,63 @@ def test_concurrent_first_actor_setup_reuses_one_secret(tmp_path, monkeypatch):
         release.set()
         assert first.result() == second.result() == client.read_token(path)
     assert len(calls) == 1
+
+
+def test_current_actor_metadata_is_private_and_never_follows_a_symlink(tmp_path):
+    base = tmp_path / "actors"
+    base.mkdir()
+    target = tmp_path / "other.json"
+    target.write_text(json.dumps({"service_url": URL, "principal": "alice-agents", "person": "alice"}))
+    current = base / "current.json"
+    current.symlink_to(target)
+    with pytest.raises(client.Failure) as error:
+        client.actor_current(base, URL)
+    assert error.value.code == "insecure_actor_file"
+    current.unlink()
+    current.write_text(target.read_text())
+    current.chmod(0o644)
+    with pytest.raises(client.Failure) as error:
+        client.actor_current(base, URL)
+    assert error.value.code == "insecure_actor_file"
+
+
+def test_concurrent_actor_metadata_save_refuses_symlinked_current(tmp_path):
+    base = tmp_path / "actors"
+    base.mkdir()
+    target = tmp_path / "other.json"
+    expected = {"service_url": URL, "principal": "alice-agents", "person": "alice"}
+    target.write_text(json.dumps(expected) + "\n")
+    (base / "current.json").symlink_to(target)
+    (base / "current.json.new").write_text("another writer")
+    with pytest.raises(client.Failure) as error:
+        client.save_actor_current(base, URL, "alice-agents", "alice")
+    assert error.value.code == "insecure_actor_file"
+    assert json.loads(target.read_text()) == expected
+
+
+def test_actor_secret_refuses_planted_lock_symlink(tmp_path):
+    path = tmp_path / "actor-token"
+    target = tmp_path / "other"
+    target.write_text("do not touch")
+    path.with_name("actor-token.lock").symlink_to(target)
+    with pytest.raises(client.Failure) as error:
+        client.actor_secret(path)
+    assert error.value.code == "insecure_actor_file"
+    assert target.read_text() == "do not touch"
+
+
+def test_current_actor_metadata_refuses_a_named_pipe_without_waiting(tmp_path):
+    base = tmp_path / "actors"
+    base.mkdir()
+    os.mkfifo(base / "current.json", 0o600)
+    with pytest.raises(client.Failure) as error:
+        client.actor_current(base, URL)
+    assert error.value.code == "insecure_actor_file"
+
+
+def test_saved_actor_metadata_is_private_and_readable(tmp_path):
+    base = tmp_path / "actors"
+    client.save_actor_current(base, URL, "alice-agents", "alice")
+    current = base / "current.json"
+    assert current.stat().st_mode & 0o777 == 0o600
+    assert client.actor_current(base, URL) == ("alice-agents", "alice")
