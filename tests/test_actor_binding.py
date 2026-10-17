@@ -1,5 +1,6 @@
 """One host chat keeps its actor bearer; a new chat cannot use the shared parent silently."""
 
+import errno
 import json
 import os
 import uuid
@@ -172,3 +173,62 @@ def test_saved_actor_metadata_is_private_and_readable(tmp_path):
     current = base / "current.json"
     assert current.stat().st_mode & 0o777 == 0o600
     assert client.actor_current(base, URL) == ("alice-agents", "alice")
+
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_directory_actor_metadata_is_refused_and_its_descriptor_closed(tmp_path, monkeypatch, collision):
+    base = tmp_path / "actors"
+    base.mkdir()
+    current = base / "current.json"
+    current.mkdir(mode=0o700)
+    if collision:
+        (base / "current.json.new").write_text("another writer")
+    opened = []
+    real_open = os.open
+
+    def tracked_open(*args, **kwargs):
+        descriptor = real_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(client.os, "open", tracked_open)
+    with pytest.raises(client.Failure) as error:
+        if collision:
+            client.save_actor_current(base, URL, "alice-agents", "alice")
+        else:
+            client.actor_current(base, URL)
+    assert error.value.code == "insecure_actor_file"
+    assert str(error.value) == f"{current} must be a private regular file"
+    assert len(opened) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(opened[0])
+    assert closed.value.errno == errno.EBADF
+
+
+def test_actor_metadata_wrap_error_refuses_and_closes_descriptor(tmp_path, monkeypatch):
+    base = tmp_path / "actors"
+    base.mkdir()
+    current = base / "current.json"
+    current.write_text("{}")
+    current.chmod(0o600)
+    opened = []
+    real_open = os.open
+
+    def tracked_open(*args, **kwargs):
+        descriptor = real_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    def cannot_wrap(_descriptor):
+        raise OSError("cannot wrap")
+
+    monkeypatch.setattr(client.os, "open", tracked_open)
+    monkeypatch.setattr(client.os, "fdopen", cannot_wrap)
+    with pytest.raises(client.Failure) as error:
+        client.actor_current(base, URL)
+    assert error.value.code == "insecure_actor_file"
+    assert str(error.value) == f"{current} must be a private regular file"
+    assert len(opened) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(opened[0])
+    assert closed.value.errno == errno.EBADF

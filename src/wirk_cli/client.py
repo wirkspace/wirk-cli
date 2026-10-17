@@ -142,10 +142,20 @@ def read_actor_metadata(file: Path) -> object:
         raise
     except OSError:
         raise Failure("insecure_actor_file", f"{file} must be a private regular file") from None
-    with os.fdopen(descriptor) as stream:
-        info = os.fstat(stream.fileno())
+    try:
+        info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise Failure("insecure_actor_file", f"{file} must be a private regular file")
+        stream = os.fdopen(descriptor)
+    except BaseException as error:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        if isinstance(error, OSError):
+            raise Failure("insecure_actor_file", f"{file} must be a private regular file") from None
+        raise
+    with stream:
         return json.load(stream)
 
 
