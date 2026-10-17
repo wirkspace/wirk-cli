@@ -39,7 +39,7 @@ Fetch, list, find by words (by meaning on Pro), look up a receipt or wait for a 
 
   query 5c1e7a90                       one item with its links and context; 5c1e7a90@2 is revision 2; 'Exact title' too
   query about='webhook retries'        what matters for these words (meaning on Pro); text='exact words' matches words
-  query status=open,in_progress kind=work owner=me     a list; a comma means any of
+  query assigned=me kind=work          current work for this actor or its human; a comma means any of
   query proposal=proposed,deferred     proposals waiting for a decision; kind=context state=active lists initiatives
   query kind=message linked=5c1e7a90   the messages on an item's board; inbox=me yours unseen, participant=ID by or to
   query receipt=w-3f9a2c41d0           the stored receipt of a write or review

@@ -4,12 +4,14 @@ The token is sent only as the bearer header to the address it was made for: neve
 storage link or a redirect, and never into output, logs or errors.
 """
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import secrets
 import stat
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -101,6 +103,90 @@ def new_token(path: Path) -> str:
         os.fsync(stream.fileno())
     os.replace(temporary, path)
     return token
+
+
+
+def actor_binding(thread_id: str | None = None) -> tuple[str, str] | None:
+    """A stable host key selects a local file; the child bearer in that file is the server credential."""
+    home = os.environ.get("WIRK_ACTOR_HOME")
+    if home:
+        path = Path(home).expanduser()
+        if not path.is_absolute():
+            raise Failure("invalid_actor_home", "WIRK_ACTOR_HOME must be an absolute directory")
+        return "home", str(path.resolve())
+    thread = thread_id if thread_id is not None else os.environ.get("CODEX_THREAD_ID")
+    if thread and re.fullmatch(r"[0-9a-fA-F-]{36}", thread):
+        return "thread", thread.lower()
+    return None
+
+
+def actor_base(url: str, binding: tuple[str, str]) -> Path:
+    kind, value = binding
+    if kind == "home":
+        origin = hashlib.sha256(url.encode()).hexdigest()
+        return Path(value) / "wirk" / origin
+    key = hashlib.sha256(json.dumps([url, kind, value], separators=(",", ":")).encode()).hexdigest()
+    return config_dir() / "actors" / key
+
+
+def actor_path(base: Path, principal: str, person: str) -> Path:
+    key = hashlib.sha256(json.dumps([principal, person], separators=(",", ":")).encode()).hexdigest()
+    return base / key / "actor-token"
+
+
+def actor_current(base: Path, url: str) -> tuple[str, str]:
+    file = base / "current.json"
+    try:
+        info = os.lstat(file)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise Failure("insecure_actor_file", f"{file} must be a private regular file")
+        data = json.loads(file.read_text())
+        if data.get("service_url") == url and all(isinstance(data.get(k), str) for k in ("principal", "person")):
+            return data["principal"], data["person"]
+    except FileNotFoundError:
+        pass
+    except (ValueError, TypeError):
+        pass
+    raise Failure("actor_setup_required", "This chat has no WIRK actor credential.",
+                  "Run: wirk login   (then retry this call)")
+
+
+def save_actor_current(base: Path, url: str, principal: str, person: str) -> None:
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    file, temporary = base / "current.json", base / "current.json.new"
+    data = json.dumps({"service_url": url, "principal": principal, "person": person}) + "\n"
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        for _ in range(50):
+            try:
+                if json.loads(file.read_text()) == json.loads(data):
+                    return
+            except (FileNotFoundError, ValueError):
+                pass
+            time.sleep(0.02)
+        raise Failure("actor_setup_busy", "Another WIRK actor setup is in progress.",
+                      "Retry: wirk login") from None
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, file)
+
+
+def actor_secret(path: Path) -> str:
+    """One durable child credential when two explicit logins start together."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".lock")
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise Failure("insecure_actor_file", f"{lock} must be a private regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        return read_token(path) if path.exists() else new_token(path)
+    finally:
+        os.close(descriptor)
 
 
 def file_digest(stream) -> tuple[int, str]:
