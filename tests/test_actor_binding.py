@@ -23,7 +23,7 @@ def answer(request):
                               "person": "alice", "account": "Acme"})
     assert request.url.path == "/v2/status"
     return envelope(data={"you": {"principal": "agent-11111111111111111111111111111111",
-                                  "wirkspace": {"id": "wsp_11111111111111111111111111111111", "name": "Acme"}}})
+                                  "wirkspace": {"id": "wsp_example", "name": "Acme"}}})
 
 
 def test_bound_read_requires_explicit_login_and_two_chats_get_separate_secrets(run, home, monkeypatch):
