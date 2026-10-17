@@ -149,7 +149,8 @@ class FakeLinear:
                 "errors": [{"message": "Rate limit exceeded", "extensions": {"code": "RATELIMITED"}}]})
         headers = {"X-Complexity": str(self.complexity), "X-RateLimit-Requests-Remaining": "2400",
                    "X-RateLimit-Complexity-Remaining": "2900000", "X-RateLimit-Requests-Reset": reset}
-        data, self.errors = self.answer(query, variables), []
+        self.errors = []  # what this answer sets, sent with it
+        data = self.answer(query, variables)
         return httpx.Response(200, headers=headers, json={"data": data, **({"errors": self.errors} if self.errors else {})})
 
     def answer(self, query, variables):
@@ -472,3 +473,16 @@ def test_archived_milestones_and_updates_are_read_so_they_are_mirrored_not_missi
     queries = [json.loads(r.content)["query"] for r in fake.requests if r.method == "POST"]
     for name in ("projectMilestones", "projectUpdates", "initiativeUpdates"):
         assert any(f"{name}(first: $first, after: $after, includeArchived: true" in q for q in queries), name
+
+
+def test_an_error_the_fake_is_told_to_send_reaches_the_adapter(folder):
+    fake = FakeLinear([issue(1)])
+    answer = fake.answer
+
+    def erring(query, variables):
+        if "teams(" in query:
+            fake.errors = [{"message": "boom", "path": ["teams"], "extensions": {"code": "INTERNAL_SERVER_ERROR"}}]
+        return answer(query, variables)
+    fake.answer = erring
+    with pytest.raises(Stop, match="boom"):
+        read(fake, folder)

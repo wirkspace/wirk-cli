@@ -3,6 +3,7 @@ decision for each object, one issue per write, refusals, receipts and files. WIR
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+from functools import partial
 import hashlib
 import io
 import re
@@ -47,6 +48,7 @@ class Held:
     by: str
     archived: bool
     hash: str
+    version: str  # the source's, as its first line carries it
 
 
 class Wirk:
@@ -117,8 +119,8 @@ class Wirk:
 class Index:
     """Index prior imported items by this source's provenance line."""
 
-    def __init__(self, wirk: Wirk, source: str, me: str):
-        self.wirk, self.source, self.me = wirk, source, me
+    def __init__(self, wirk: Wirk, source: str, mine: set):
+        self.wirk, self.source, self.mine = wirk, source, mine  # the principals whose items are the importer's own
         self.held, self.blocked_keys, self.blocked, self.forged = defaultdict(list), {}, Counter(), 0
         self.keys = {}  # item -> (kind, source ID), for the importer's own items
 
@@ -137,10 +139,10 @@ class Index:
         """An importer's item is keyed by the line of its own latest revision, so a person's edit, even a line written
         above it, never hides or moves it; another importer's keys are blocked; anyone else's provenance line is forged."""
         creator = card["by"]
-        if creator != self.me or not parsed:
+        if creator not in self.mine or not parsed:
             whole = self.wirk.item(card["id"], "all")["all"]
             creator = whole["metadata"]["created_by"]
-            if creator != self.me and not creator.endswith(f"-{self.source.lower()}-import"):
+            if creator not in self.mine and not creator.endswith(f"-{self.source.lower()}-import"):
                 self.forged += parsed is not None
                 return
             if card["by"] != creator or not parsed:
@@ -148,11 +150,11 @@ class Index:
                 parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
                 if not parsed or parsed[0] != self.source:
                     return
-        if creator != self.me:
+        if creator not in self.mine:
             self.blocked_keys[parsed[1:3]] = creator
             self.blocked[creator] += 1
         else:
-            self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4]))
+            self.add(*parsed[1:3], Held(card["id"], card["r"], card["by"], archived, parsed[4], parsed[3]))
 
     def add(self, kind: str, ident: str, held: Held):
         self.held[(kind, ident)] = [h for h in self.held[(kind, ident)] if h.item != held.item] + [held]
@@ -170,16 +172,18 @@ class Plan:
     files: list  # (name, bytes) the importer makes
     attachments: list
     digest: str
+    version: str
 
 
 class Importer:
     def __init__(self, wirk: Wirk, ctx: render.Context, *, users: dict, statuses: dict, plan: dict, withheld, download,
-                 dry_run: bool, overwrite: bool, progress=None):
+                 dry_run: bool, overwrite: bool, progress=None, mine=()):
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
         self.not_members = set()  # owners WIRK refused this run: their issues are planned without an owner
         self.outcomes, self.notes, self.progress = [], {}, progress or (lambda done, total: None)
+        self.mine = set(mine)  # other principals whose items are the importer's own, such as an earlier connection's
 
     # ---------------------------------------------------------------- the run
 
@@ -187,22 +191,29 @@ class Importer:
         """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
         you = self.wirk.ok("/v2/status", {"max_bytes": 65536})["data"]
         self.me = me or you["you"]["principal"]
+        self.mine.add(self.me)
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
         self.managed = {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
-        self.index = Index(self.wirk, self.ctx.source, self.me).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
+        self.index = Index(self.wirk, self.ctx.source, self.mine).build([f"{self.ctx.source} {kind} " for kind in self.ctx.kinds]
                                                                       + [f"{self.ctx.source} comments"])
         return you["you"]
 
-    def run(self, records: list) -> list:
+    def run(self, records: list, position: dict | None = None, stale=frozenset()) -> list:
+        """Every record, then the links between them; links are planned over every record. A `position` (record, then link
+        source) moves in place past what is settled (see `walk`), and a later run over the same records goes on from there:
+        it holds for one frozen list of records only, so each distinct read starts from a new one. `stale` names records a
+        later read has written since this one was made: a part of theirs older than its written version is left as it is."""
+        self.overtaken = frozenset(stale)
+        if position is None or self.dry_run:
+            position = dict(position or {})  # a dry run goes on from the caller's position but never moves it
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
         self.plan_links(records)
-        for done, record in enumerate(records, 1):
-            self.outcomes += self.guarded(record.key, record.kind, self.attempt, record)
-            self.progress(done, len(records))
+        walk(position, "record", [(record.ident, set(), partial(self.guarded, record.key, record.kind, self.attempt, record))
+                                  for record in records], self.outcomes, progress=self.progress)
         if not self.dry_run:
-            self.outcomes += self.link_pass()
+            self.outcomes += self.link_pass(position)
         self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
 
@@ -289,15 +300,18 @@ class Importer:
         for start in range(0, len(stale), 32):
             answer = self.wirk.ok("/v2/query", {"fetch": stale[start:start + 32], "depth": "card"})
             makers.update({found["id"]: found.get("created_by") for found in answer["data"]["results"]})
-        return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) == self.me]
+        return [{"op": "link.remove", "id": link} for link in stale if makers.get(link) in self.mine]
 
-    def link_pass(self) -> list:
+    def link_pass(self, position: dict) -> list:
         """The missing links, one write per issue (more when over 32), read from each issue's own fetch."""
         outcomes, by_source = [], defaultdict(list)
         for link in sorted(self.planned):
             by_source[link[1]].append(link)
-        for ident, wanted in by_source.items():
-            outcomes += self.guarded(self.keys[ident], "links", self.links_of, ident, wanted)
+        records = list(self.keys)
+        unsettled = set(records[resume(position, "record", records):])  # past the records' position: not written yet
+        walk(position, "link", [(ident, {ident} | {link[2] for link in wanted},
+                                 partial(self.guarded, self.keys[ident], "links", self.links_of, ident, wanted))
+                                for ident, wanted in by_source.items()], outcomes, unsettled)
         return outcomes
 
     def links_of(self, ident: str, wanted: list) -> list:
@@ -372,18 +386,20 @@ class Importer:
         names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
         return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
-                    files, attachments, digest)
+                    files, attachments, digest, render.compact(made.version))
 
-    def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
-        active = [h for h in held if not h.archived or h.by == self.me]  # an archive the importer made is its own to undo
+    def decide(self, held: list, plan: Plan, overtaken: bool = False) -> tuple[str, Held | None, str]:
+        active = [h for h in held if not h.archived or h.by in self.mine]  # an archive the importer made is its own to undo
         if len(active) > 1:
             return "ambiguous", None, ", ".join(h.item[5:13] for h in active) + " all claim it"
         if not active:
             return ("skipped", held[0], "archived in WIRK") if held else ("create", None, "")
         found = active[0]
-        if found.hash == digest:
+        if overtaken and found.version > plan.version:  # a later read wrote it first
+            return "later", found, "a later version is already written"
+        if found.hash == plan.digest:
             return "current", found, ""
-        if found.by == self.me:
+        if found.by in self.mine:
             return "update", found, ""
         changed = f"changed in WIRK since import (r{found.r} by {found.by})"
         return ("update", found, changed + "; replaced by --overwrite") if self.overwrite else \
@@ -396,7 +412,14 @@ class Importer:
         if blocked:
             return [Outcome(record.key, record.kind, "blocked", f"imported by {blocked}")]
         plans = self.plans(record)
-        decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest)) for plan in plans]
+        decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan, record.ident in self.overtaken))
+                   for plan in plans]
+        later = {plan.kind for plan, action, _, _ in decided if action == "later"}  # what the later read left stays
+        decided = [(plan, "current" if action == "later" else action, held, message) for plan, action, held, message in decided]
+
+        def tidy():  # parts beyond the discussion follow the discussion; the archive state follows the work item
+            return ([] if later - {record.kind} else self.stale(record, len(plans) - 1)) + \
+                ([] if record.kind in later else self.mirror(record, plans))
         _, action, held, message = decided[0]
         if action == "ambiguous" or (action == "skipped" and held.archived):  # the discussion follows its work item
             return [Outcome(record.key, plan.kind, action, message, found.item if found else None)
@@ -407,8 +430,7 @@ class Importer:
         said = {plan.kind: message for plan, _, _, message in decided}
         if self.dry_run:  # what --overwrite would replace says who changed it
             return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
-                               for plan, action, held, message in decided if action in ("create", "update")] + \
-                self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+                               for plan, action, held, message in decided if action in ("create", "update")] + tidy()
         # the work item and the discussion's first part go in one write; later parts one to a write
         together = [entry for entry in acting if entry[0].kind in (record.kind, "comments")]
         work = held.item if held else None
@@ -418,14 +440,14 @@ class Importer:
         for entry in acting:
             if entry not in together:
                 outcomes += self.send(record, [entry], work, said)
-        return outcomes + self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+        return outcomes + tidy()
 
     def mirror(self, record, plans) -> list:
         """Archive what the source archived, and restore what the importer archived once the source restores it; an archive
         or an edit someone else made is theirs."""
         want = record.archived is not None
         found = [(plan.kind, h) for plan in plans for h in self.index.held.get((plan.kind, record.ident), [])
-                 if h.archived != want and h.by == self.me]
+                 if h.archived != want and h.by in self.mine]
         word = "archive" if want else "restore"
         if not found or self.dry_run:
             return [Outcome(record.key, kind, f"would {word}", item=h.item) for kind, h in found]
@@ -528,7 +550,7 @@ class Importer:
         outcomes = []
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
-                                                         plan.digest))
+                                                         plan.digest, plan.version))
             message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
@@ -544,7 +566,7 @@ class Importer:
             choices = [choice.get("key") or choice.get("id") for choice in problem.get("choices") or []][:8]
             # an item the importer made is kept separate only when the index knows it as another issue's work
             if not choices or any(self.ident_of(choice) == record.ident or self.ident_of(choice) is None and
-                                  self.wirk.item(choice, "all")["all"]["metadata"]["created_by"] == self.me
+                                  self.wirk.item(choice, "all")["all"]["metadata"]["created_by"] in self.mine
                                   for choice in choices):
                 return None
             operation["allow_duplicate_of"] = choices
@@ -576,7 +598,7 @@ class Importer:
             for found in self.index.held[(kind, record.ident)]:
                 if found.archived:
                     continue
-                if found.by != self.me:
+                if found.by not in self.mine:
                     outcomes.append(Outcome(record.key, kind, "skipped", f"no longer needed, but changed in WIRK (r{found.r} by {found.by})",
                                             found.item))
                 elif self.dry_run:
@@ -594,7 +616,9 @@ class Importer:
 
     def gone(self, present: set) -> list:
         """The importer's active items that the source no longer has: an issue missing from a complete read of its scope, or
-        another object missing from everything the source showed, selected or not."""
+        another object missing from everything the source showed, selected or not. A read of changes only finds nothing."""
+        if not self.ctx.complete:
+            return []
         outcomes = []
         for (kind, ident), held in self.index.held.items():
             if kind.startswith("comments") or ident in present or kind != "issue" and ident in self.ctx.seen:
@@ -611,6 +635,26 @@ class Importer:
             return []
         return [Outcome(key, kind, "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; nothing was archived",
                         found.item)]
+
+
+def resume(position: dict, name: str, keys: list) -> int:
+    """Where a run goes on: past the position's last settled key, or from the start when that key is gone."""
+    return keys.index(position[name]) + 1 if position.get(name) in keys else 0
+
+
+def walk(position: dict, name: str, steps: list, out: list, unsettled: set = frozenset(), progress=None) -> None:
+    """Each step (key, the keys it touches, its work) from where the position says to go on, its outcomes added to `out`
+    and its number told to `progress`. The position moves in place past each step that, like every step before it, ended
+    with no error and touched nothing unsettled."""
+    steady, start = True, resume(position, name, [step[0] for step in steps])
+    for done, (key, touched, work) in enumerate(steps[start:], start + 1):
+        found = work()
+        out += found
+        steady = steady and not touched & unsettled and all(outcome.outcome != "error" for outcome in found)
+        if steady:
+            position[name] = key
+        if progress:
+            progress(done, len(steps))
 
 
 def normal(kind: str, source: str, target: str) -> tuple:
