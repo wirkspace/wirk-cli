@@ -242,7 +242,9 @@ your gh login, writes nothing to WIRK and leaves setup under ~/.config/wirk/impo
 the account applies it at their own terminal (an agent cannot):
      wirk login --person && wirk admin --request ~/.config/wirk/import/github-setup.json
 Then run the same import command without --dry-run. The local importer can use map=FILE and --overwrite.
-People and statuses map in ~/.config/wirk/import/github-map.json.
+People and statuses map in ~/.config/wirk/import/github-map.json. Local GitHub imports keep comments in
+linked discussion records; the connected import preserves per-comment board messages, original author/date,
+and permanently silent historical notifications.
 
 Linear is read with a personal API key restricted to Read, saved at ~/.config/wirk/import/linear-key.
 No team named means every public team; a private team only when named. Jira is read with a scoped

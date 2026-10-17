@@ -15,6 +15,8 @@ from .wirk import WirkError
 
 ROUTE = "/v2/import"
 OLD_ROUTE = "No such route: the service answers /health and /v2/…"
+LEGACY_NOTE = ("Local GitHub imports store comments in linked discussion records. Use a connected GitHub import "
+               "for per-comment board messages with original author/date and permanently silent history.")
 ACTIVE = {"requested", "previewing", "queued", "running"}
 WAIT_SECONDS = 2
 FOREGROUND_SECONDS = 20 * 60
@@ -50,7 +52,7 @@ def dispatch(run):
     if (mode == "local" and discovery["data"].get("reason") == "no_connection"
             and discovery["data"].get("provider") == "github"
             and discovery["data"].get("workspace", {}).get("id") == workspace):
-        print("GitHub import: local source mode", file=sys.stderr)
+        print("GitHub import: local source mode. " + LEGACY_NOTE, file=sys.stderr)
         return None
     if mode != "connected" or discovery["data"].get("delegated") is not True:
         raise Stop("the import service did not identify a usable source mode",

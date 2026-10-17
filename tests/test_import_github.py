@@ -381,3 +381,25 @@ def test_a_fourth_secondary_limit_still_retries_after_its_pause(refusals, read_t
 def test_an_empty_target_date_stays_empty():
     issue = node(6, issueFieldValues={"nodes": [{"__typename": "IssueFieldDateValue", "value": None, "field": {"name": "Target date"}}]})
     assert read(FakeGh([repo("acme/web")], {"acme/web": [issue]}))[2][0].due is None
+
+
+def test_frozen_source_query_requests_stable_label_and_milestone_identity():
+    from wirk_cli.importers.github import issue_fields, connections
+    fields = issue_fields(False)
+    labels = connections(False)["labels"][1]
+    assert "id" in labels and "color" in labels and "description" in labels
+    assert "milestone { id number title description dueOn state url" in fields
+
+
+def test_record_archive_retains_label_and_milestone_source_metadata():
+    selected = node(8, labels=page([{"id": "LA_8", "name": "bug", "description": "A defect",
+                                     "color": "aabbcc", "url": "https://github.com/acme/web/labels/bug"}]),
+                    milestone={"id": "MI_3", "number": 3, "title": "v1", "description": "First release",
+                               "dueOn": None, "state": "OPEN",
+                               "url": "https://github.com/acme/web/milestone/3"})
+    _, _, records = read(FakeGh([repo("acme/web")], {"acme/web": [selected]}))
+    raw = records[0].raw["issue"]
+    assert raw["labels"]["nodes"][0]["id"] == "LA_8"
+    assert raw["labels"]["nodes"][0]["color"] == "aabbcc"
+    assert raw["milestone"]["id"] == "MI_3"
+    assert raw["milestone"]["description"] == "First release"
