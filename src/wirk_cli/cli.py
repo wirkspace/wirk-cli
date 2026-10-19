@@ -379,14 +379,18 @@ def browser_here() -> bool:
         sys.platform != "linux" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
 
 
+def bound_link(asks: list, port: int) -> str:
+    query = urlencode([("code", answer["data"]["code"]) for *_, answer in asks] + [("port", port)])
+    return f"{asks[0][2]['data']['url'].split('?')[0]}?{query}"
+
+
 def show_link(asks: list, listener):
     """Open the browser on one link with every code and the port, answering the listener; or close it, answer None and
     show each login's own link without a port: one click for an agent, the typed code for a person."""
     codes = [f"Code {answer['data']['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
              f"expires {answer['data']['expires_at'][11:16]} UTC" for _, request, answer in asks]
     if listener:
-        query = urlencode([("code", answer["data"]["code"]) for *_, answer in asks] + [("port", listener.port)])
-        link = f"{asks[0][2]['data']['url'].split('?')[0]}?{query}"
+        link = bound_link(asks, listener.port)
         try:
             opened = webbrowser.open(link)
         except webbrowser.Error:
@@ -406,17 +410,24 @@ def approve(asks: list, listener, rerun: str) -> int:
     an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
     deadline = time.monotonic() + (600 if sys.stdout.isatty() else 100)
     while True:
-        waiting = []
+        waiting, finished = [], False
         for service, request, answer in asks:
             if not answer["ok"]:
                 return emit(answer, {})
             if answer["data"]["state"] == "logged_in":
                 print(login_text(service, request), flush=True)  # the service's words end with what to run next
+                finished = True
             else:
-                waiting.append((service, request))
+                waiting.append((service, request, answer))
                 interval = answer["data"]["interval"]
         if not waiting:
             return 0
+        if finished:
+            for service, request, answer in waiting:
+                who = "your own sign-in" if request["for"] == "person" else "your agents"
+                data = answer["data"]
+                url = bound_link([(service, request, answer)], listener.port) if listener else data["url"]
+                print(f"Still waiting for {who}: {url}\nCode {data['code']}", flush=True)
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
         try:
@@ -427,7 +438,7 @@ def approve(asks: list, listener, rerun: str) -> int:
             return 130
         asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
                                                                **({"complete": value} if value else {})}))
-                for service, request in waiting]
+                for service, request, _ in waiting]
 
 
 def login_text(service: Service, request: dict) -> str:
