@@ -379,14 +379,18 @@ def browser_here() -> bool:
         sys.platform != "linux" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
 
 
+def bound_link(asks: list, port: int) -> str:
+    query = urlencode([("code", answer["data"]["code"]) for *_, answer in asks] + [("port", port)])
+    return f"{asks[0][2]['data']['url'].split('?')[0]}?{query}"
+
+
 def show_link(asks: list, listener):
     """Open the browser on one link with every code and the port, answering the listener; or close it, answer None and
     show each login's own link without a port: one click for an agent, the typed code for a person."""
     codes = [f"Code {answer['data']['code']} · for {'you' if request['for'] == 'person' else 'your agents'} · "
              f"expires {answer['data']['expires_at'][11:16]} UTC" for _, request, answer in asks]
     if listener:
-        query = urlencode([("code", answer["data"]["code"]) for *_, answer in asks] + [("port", listener.port)])
-        link = f"{asks[0][2]['data']['url'].split('?')[0]}?{query}"
+        link = bound_link(asks, listener.port)
         try:
             opened = webbrowser.open(link)
         except webbrowser.Error:
@@ -419,10 +423,11 @@ def approve(asks: list, listener, rerun: str) -> int:
         if not waiting:
             return 0
         if finished:
-            for _, request, answer in waiting:
+            for service, request, answer in waiting:
                 who = "your own sign-in" if request["for"] == "person" else "your agents"
                 data = answer["data"]
-                print(f"Still waiting for {who}: {data['url']}\nCode {data['code']}", flush=True)
+                url = bound_link([(service, request, answer)], listener.port) if listener else data["url"]
+                print(f"Still waiting for {who}: {url}\nCode {data['code']}", flush=True)
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
         try:

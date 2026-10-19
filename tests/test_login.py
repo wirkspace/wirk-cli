@@ -485,8 +485,12 @@ def test_person_login_makes_both_tokens_and_one_click_approves_the_pair(fresh, c
 
 
 @pytest.mark.parametrize("first", ["person", "agent"])
-def test_partial_pair_names_the_remaining_grants_own_approval_page(fresh, capsys, browser, at_terminal, first):
+@pytest.mark.parametrize("with_listener", [True, False], ids=["bound", "unbound"])
+def test_partial_pair_names_the_remaining_grants_own_approval_page(
+        fresh, capsys, browser, at_terminal, monkeypatch, first, with_listener):
     browser["clicks"] = []  # one code was approved on the typed page, not through the paired loopback link
+    if not with_listener:
+        monkeypatch.setattr("webbrowser.open", lambda url: False)  # pair was requested, then browser failed to open
     calls = {"person": 0, "agent": 0}
 
     def answer(request):
@@ -505,11 +509,19 @@ def test_partial_pair_names_the_remaining_grants_own_approval_page(fresh, capsys
 
     code, out, err, requests = login(["--person"], answer, capsys)
     remaining = "agent" if first == "person" else "person"
-    url = "https://app.wirk.life/device?code=BDFG-HJKL" if remaining == "agent" else "https://app.wirk.life/device"
+    remaining_code = "BDFG-HJKL" if remaining == "agent" else "CDFG-MNPQ"
+    if with_listener:
+        port = int(browser["urls"][0].rsplit("=", 1)[1])
+        url = f"https://app.wirk.life/device?code={remaining_code}&port={port}"
+    else:
+        assert browser["urls"] == []
+        url = "https://app.wirk.life/device?code=BDFG-HJKL" if remaining == "agent" else "https://app.wirk.life/device"
     label = "your agents" if remaining == "agent" else "your own sign-in"
+    consumed_code = "CDFG-MNPQ" if remaining == "agent" else "BDFG-HJKL"
+    assert consumed_code not in url
     assert code == 0 and not err
     assert out.count(f"Still waiting for {label}: {url}") == 1
-    assert out.count(f"Code {'BDFG-HJKL' if remaining == 'agent' else 'CDFG-MNPQ'}") >= 1
+    assert out.count(f"Code {remaining_code}") >= 1
     assert PERSON_IN in out and LOGGED_IN in out
     assert all("complete" not in json.loads(request.content) for request in requests)
 
