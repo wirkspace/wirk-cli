@@ -433,11 +433,11 @@ def test_help_that_sends_people_to_login_says_one_click(capsys):
 
 
 RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
-  write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release
+  write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace"""
 
 RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
-RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completion alone does not release."""
+RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it."""
 
 RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
 RESERVATION_LONG_LINES = {line for line in [*RESERVATION_EXAMPLES.splitlines(), *RESERVATION_GUIDANCE.splitlines(),
@@ -453,7 +453,7 @@ RESERVATION_LONG_LINES = {line for line in [*RESERVATION_EXAMPLES.splitlines(), 
 def test_reservation_help_examples_parse(capsys, run, argv, index, reservation, revision, reason, request_id):
     text = help_of(capsys, *argv)
     printed = [line for line in examples(text) if line.startswith("wirk write edit ") and "reservation=" in line]
-    assert printed == ["wirk " + line.strip() for line in RESERVATION_EXAMPLES.splitlines()]
+    assert printed == examples(RESERVATION_EXAMPLES)
     code, out, err, fake = run(shlex.split(printed[index])[1:])
     assert code == 0, (out, err)
     assert fake.requests[0].url.path == "/v2/write"
