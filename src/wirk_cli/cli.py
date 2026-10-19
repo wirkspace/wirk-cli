@@ -406,17 +406,23 @@ def approve(asks: list, listener, rerun: str) -> int:
     an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
     deadline = time.monotonic() + (600 if sys.stdout.isatty() else 100)
     while True:
-        waiting = []
+        waiting, finished = [], False
         for service, request, answer in asks:
             if not answer["ok"]:
                 return emit(answer, {})
             if answer["data"]["state"] == "logged_in":
                 print(login_text(service, request), flush=True)  # the service's words end with what to run next
+                finished = True
             else:
-                waiting.append((service, request))
+                waiting.append((service, request, answer))
                 interval = answer["data"]["interval"]
         if not waiting:
             return 0
+        if finished:
+            for _, request, answer in waiting:
+                who = "your own sign-in" if request["for"] == "person" else "your agents"
+                data = answer["data"]
+                print(f"Still waiting for {who}: {data['url']}\nCode {data['code']}", flush=True)
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
         try:
@@ -427,7 +433,7 @@ def approve(asks: list, listener, rerun: str) -> int:
             return 130
         asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
                                                                **({"complete": value} if value else {})}))
-                for service, request in waiting]
+                for service, request, _ in waiting]
 
 
 def login_text(service: Service, request: dict) -> str:
