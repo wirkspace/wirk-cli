@@ -175,6 +175,10 @@ def request_body(options: dict, words: list[str], build) -> dict:
     if "--request" not in options:
         return {**build(), "format": fmt(options)}
     if words or set(options) - {"--request", "--json", "--person"}:
+        place = next((word.split("=", 1)[1] for word in words if word.startswith("workspace_id=")), None)
+        if place is not None:
+            raise UsageError(f'--request sends the file as it is: put "workspace_id": {json.dumps(place)} at the top level '
+                             "of the JSON; nothing was sent")
         raise UsageError("--request sends the file's body as it is: give no other words or options with it")
     body = request_file(options["--request"])
     return {**body, "format": "json"} if options.get("--json") and "format" not in body else body
@@ -193,8 +197,11 @@ def shortcut(words: list[str], options: dict) -> dict:
     if action == "seen":
         return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
-    if action in ("archive", "restore"):
-        raise UsageError(f"{action} needs a reason: use wirk write --request with item.{action} (see wirk write --help)")
+    if action in ("archive", "restore"):  # the body the service's basis hint describes, in the same words
+        reason = ', "reason": a reason in your words' if action == "archive" else ""
+        raise UsageError(f'write has no {action} shortcut: run wirk write --request FILE, the file holding {{"request_id": a new '
+                         f'request_id, "operations": [{{"op": "item.{action}", "id": the item\'s ID}}], "expect": {{the item\'s '
+                         f"ID: the revision you read}}{reason}}}; nothing was sent")
     if action == "message":
         return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
