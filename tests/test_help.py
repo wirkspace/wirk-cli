@@ -143,7 +143,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.20"
+    assert project == __version__ == "0.4.21"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -409,13 +409,14 @@ LOGIN_HELP = """usage: wirk login [--person] [--url URL] [--new]
 Connect this machine. It makes this machine's token, keeps it in ~/.config/wirk (or $WIRK_CONFIG_DIR),
 readable only by you, and opens your browser on WIRK's approval: one click approves it.
 With no browser here (SSH, a container) it prints a link to open in a browser on any computer;
-your own sign-in (--person) then asks for the code it shows. A login lasts until you revoke the
-machine on your account page or it goes 90 days unused; then run login --new.
+--person then asks for the code it shows and signs in only you. To connect your agents for status,
+query and write, run wirk login separately. A login lasts until you revoke the machine on your
+account page or it goes 90 days unused; then run login --new.
 Where a service has no web sign-in, it prints the token's digest instead (safe to share; the token stays
 here) for your WIRK administrator to register. The token is only ever sent to its address.
 
   login                                connect your agents on this machine
-  login --person                       also your own sign-in, at your own terminal, for review --person
+  login --person                       your own sign-in, at your own terminal, for review --person
   login --url https://wirk.example.org --new        another address needs a new token
 """  # wirk-core docs/plans/one-click-login.md §6, byte for byte
 

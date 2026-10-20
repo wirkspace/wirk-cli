@@ -174,6 +174,48 @@ def test_not_logged_in(run, home):
     assert code == 1 and fake.requests == [] and "Error not_configured" in err and "wirk login" in err
 
 
+@pytest.mark.parametrize("person_saved", [False, True], ids=["fresh", "person-only"])
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_missing_agent_sign_in_explains_what_status_needs_without_changing_credentials(run, home, person_saved, as_json):
+    (home / "agent-token").unlink()
+    if person_saved:
+        write_token(home / "person-token", PERSON_TOKEN)
+    else:
+        (home / "config.json").unlink()
+    before = {path.name: (path.read_bytes(), path.stat().st_mode) for path in home.iterdir()}
+
+    code, out, err, fake = run(["status", *(["--json"] if as_json else [])])
+
+    assert code == 1 and fake.requests == []
+    if as_json:
+        error = json.loads(out)["errors"][0]
+        assert error["code"] == "not_configured" and err == ""
+        message, hint = error["message"], error["hint"]
+    else:
+        assert out == "" and "Error not_configured" in err
+        message, hint = err.split("\n  ", 1)
+    assert "This command needs your agents' sign-in on this machine." in message
+    assert "Run: wirk login" in hint and "your own sign-in is separate" in hint
+    assert "https://api.wirk.life" not in hint and "not set up" not in message
+    assert PERSON_TOKEN not in out + err
+    assert {path.name: (path.read_bytes(), path.stat().st_mode) for path in home.iterdir()} == before
+
+
+@pytest.mark.parametrize("name, message, hint", [
+    ("person-token", "This command needs your own sign-in on this machine.",
+     "Run: wirk login --person   (at your own terminal)"),
+    ("import-token", "WIRK is not set up on this machine.",
+     "Run: wirk login   (connects to https://api.wirk.life)"),
+])
+def test_missing_person_sign_in_and_generic_import_token_guidance(home, name, message, hint):
+    from wirk_cli import client
+    with pytest.raises(client.Failure) as refused:
+        client.read_token(home / name)
+    assert refused.value.code == "not_configured" and refused.value.exit_code == 1
+    assert str(refused.value) == message and refused.value.hint == hint
+    assert not (home / name).exists()
+
+
 @pytest.mark.parametrize("name", ["agent-token", "person-token"])
 def test_unsafe_token_files_are_refused(run, home, tmp_path, name):
     path = home / name
