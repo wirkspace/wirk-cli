@@ -530,10 +530,10 @@ def test_partial_pair_names_the_remaining_grants_own_approval_page(
 @pytest.mark.parametrize("person_completes", [True, False], ids=["completion-and-change", "two-code-change"])
 def test_changed_pending_codes_show_current_singleton_recovery_links_once(
         capsys, clock, with_listener, person_completes):
-    def pending(wants, code):
+    def pending(wants, code, expires="14:05"):
         return {"ok": True, "data": {"state": "pending", "code": code,
                 "url": "https://app.wirk.life/device" + ("" if wants == "person" else f"?code={code}"),
-                "expires_at": "2026-10-02T14:10:00Z", "interval": 5}}
+                "expires_at": f"2026-10-02T{expires}:00Z", "interval": 5}}
 
     def done(wants):
         return {"ok": True, "data": {"state": "logged_in", "principal": "alice" if wants == "person" else "alice-agents"}}
@@ -559,7 +559,7 @@ def test_changed_pending_codes_show_current_singleton_recovery_links_once(
             return None
 
     person_old, agent_old = pending("person", "CDFG-MNPQ"), pending("agent", "BDFG-HJKL")
-    person_new, agent_new = pending("person", "CDFG-MNPR"), pending("agent", "BDFG-HJKM")
+    person_new, agent_new = pending("person", "CDFG-MNPR", "14:10"), pending("agent", "BDFG-HJKM", "14:10")
     person = Service("person", [person_old, done("person") if person_completes else person_new,
                                 *([] if person_completes else [done("person")])])
     agent = Service("agent", [agent_old, agent_new, done("agent")])
@@ -579,8 +579,9 @@ def test_changed_pending_codes_show_current_singleton_recovery_links_once(
         person_url = f"https://app.wirk.life/device?code=CDFG-MNPR{port}" if with_listener else \
             "https://app.wirk.life/device"
         assert out.count(f"Still waiting for your own sign-in: {person_url}") == 1
-        assert "Code CDFG-MNPR" in out
-    assert "Code BDFG-HJKM" in out and "CDFG-MNPQ" not in out and "BDFG-HJKL" not in out
+        assert "Code CDFG-MNPR · expires 14:10 UTC" in out
+    assert "Code BDFG-HJKM · expires 14:10 UTC" in out
+    assert "14:05 UTC" not in out and "CDFG-MNPQ" not in out and "BDFG-HJKL" not in out
     assert out.count(PERSON_IN) == 1 and out.count(LOGGED_IN) == 1
     assert (listener.calls if listener else clock["slept"]) == [5, 5, 5]
 

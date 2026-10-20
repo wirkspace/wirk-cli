@@ -430,7 +430,7 @@ def approve(asks: list, listener, rerun: str) -> int:
                 who = "your own sign-in" if request["for"] == "person" else "your agents"
                 data = answer["data"]
                 url = bound_link([(service, request, answer)], listener.port) if listener else data["url"]
-                print(f"Still waiting for {who}: {url}\nCode {data['code']}", flush=True)
+                print(f"Still waiting for {who}: {url}\nCode {data['code']} · expires {data['expires_at'][11:16]} UTC", flush=True)
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
         try:
