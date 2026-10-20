@@ -526,6 +526,65 @@ def test_partial_pair_names_the_remaining_grants_own_approval_page(
     assert all("complete" not in json.loads(request.content) for request in requests)
 
 
+@pytest.mark.parametrize("with_listener", [True, False], ids=["bound", "unbound"])
+@pytest.mark.parametrize("person_completes", [True, False], ids=["completion-and-change", "two-code-change"])
+def test_changed_pending_codes_show_current_singleton_recovery_links_once(
+        capsys, clock, with_listener, person_completes):
+    def pending(wants, code):
+        return {"ok": True, "data": {"state": "pending", "code": code,
+                "url": "https://app.wirk.life/device" + ("" if wants == "person" else f"?code={code}"),
+                "expires_at": "2026-10-02T14:10:00Z", "interval": 5}}
+
+    def done(wants):
+        return {"ok": True, "data": {"state": "logged_in", "principal": "alice" if wants == "person" else "alice-agents"}}
+
+    class Service:
+        def __init__(self, wants, replies):
+            self.wants, self.replies = wants, replies
+
+        def post(self, route, body):
+            assert route == "/v2/login" and body["for"] == self.wants
+            if body["format"] == "text":
+                return {"text": PERSON_IN if self.wants == "person" else LOGGED_IN}
+            assert "complete" not in body
+            return self.replies.pop(0)
+
+    class Listener:
+        port = 54321
+        calls = []
+
+        def get(self, seconds):
+            self.calls.append(seconds)
+            clock["t"] += seconds
+            return None
+
+    person_old, agent_old = pending("person", "CDFG-MNPQ"), pending("agent", "BDFG-HJKL")
+    person_new, agent_new = pending("person", "CDFG-MNPR"), pending("agent", "BDFG-HJKM")
+    person = Service("person", [person_old, done("person") if person_completes else person_new,
+                                *([] if person_completes else [done("person")])])
+    agent = Service("agent", [agent_old, agent_new, done("agent")])
+    listener = Listener() if with_listener else None
+    result = cli.approve([(person, {"for": "person", "label": "device"}, person_old),
+                          (agent, {"for": "agent", "label": "device"}, agent_old)], listener,
+                         "wirk login --person")
+    out, err = capsys.readouterr()
+    port = "&port=54321" if with_listener else ""
+    agent_url = f"https://app.wirk.life/device?code=BDFG-HJKM{port}"
+    assert result == 0 and not err
+    assert out.count("The approval code changed. Use the current link and code below.") == 1
+    assert out.count(f"Still waiting for your agents: {agent_url}") == 1
+    if person_completes:
+        assert "Still waiting for your own sign-in" not in out
+    else:
+        person_url = f"https://app.wirk.life/device?code=CDFG-MNPR{port}" if with_listener else \
+            "https://app.wirk.life/device"
+        assert out.count(f"Still waiting for your own sign-in: {person_url}") == 1
+        assert "Code CDFG-MNPR" in out
+    assert "Code BDFG-HJKM" in out and "CDFG-MNPQ" not in out and "BDFG-HJKL" not in out
+    assert out.count(PERSON_IN) == 1 and out.count(LOGGED_IN) == 1
+    assert (listener.calls if listener else clock["slept"]) == [5, 5, 5]
+
+
 def test_person_login_leaves_a_connected_agent_token_alone(fresh, capsys, browser, at_terminal):
     fresh.mkdir(mode=0o700)
     (fresh / "agent-token").write_text("wirk_" + "c" * 43)
