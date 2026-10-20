@@ -220,3 +220,23 @@ def test_message_usage_errors_send_nothing(run, argv, words):
     code, out, err, fake = run(argv)
     assert code == 2 and fake.requests == []
     assert words in err
+
+
+# The friction plan (2ee4895f): refusals say what to send instead.
+
+@pytest.mark.parametrize("command", ["write", "query", "review"])
+def test_request_with_workspace_word_names_the_json_key(run, tmp_path, monkeypatch, command):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "body.json").write_text(json.dumps({"request_id": "w-1", "operations": []}))
+    code, out, err, fake = run([command, "--request", "body.json", "workspace_id=c0af212e"])
+    assert code == 2 and fake.requests == []
+    assert '--request sends the file as it is: put "workspace_id": "c0af212e" at the top level of the JSON; nothing was sent' in err
+
+
+@pytest.mark.parametrize("action, reason", [("archive", ', "reason": a reason in your words'), ("restore", "")])
+def test_write_archive_and_restore_refusals_describe_the_body(run, action, reason):
+    code, out, err, fake = run(["write", action, "5c1e7a90@1"])
+    assert code == 2 and fake.requests == []
+    assert (f'write has no {action} shortcut: run wirk write --request FILE, the file holding {{"request_id": a new request_id, '
+            f'"operations": [{{"op": "item.{action}", "id": the item\'s ID}}], "expect": {{the item\'s ID: the revision you '
+            f'read}}{reason}}}; nothing was sent') in err
