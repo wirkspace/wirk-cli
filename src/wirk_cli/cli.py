@@ -409,6 +409,7 @@ def approve(asks: list, listener, rerun: str) -> int:
     """Until the person approves: the value their click brings to the listener finishes each login, and polling sees
     an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
     deadline = time.monotonic() + (600 if sys.stdout.isatty() else 100)
+    changed = False
     while True:
         waiting, finished = [], False
         for service, request, answer in asks:
@@ -422,12 +423,14 @@ def approve(asks: list, listener, rerun: str) -> int:
                 interval = answer["data"]["interval"]
         if not waiting:
             return 0
-        if finished:
+        if finished or changed:
+            if changed:
+                print("The approval code changed. Use the current link and code below.", flush=True)
             for service, request, answer in waiting:
                 who = "your own sign-in" if request["for"] == "person" else "your agents"
                 data = answer["data"]
                 url = bound_link([(service, request, answer)], listener.port) if listener else data["url"]
-                print(f"Still waiting for {who}: {url}\nCode {data['code']}", flush=True)
+                print(f"Still waiting for {who}: {url}\nCode {data['code']} · expires {data['expires_at'][11:16]} UTC", flush=True)
         if time.monotonic() + interval > deadline:
             raise Failure("login_pending", "This machine is still waiting for approval.", f"after approving, run: {rerun}")
         try:
@@ -436,9 +439,13 @@ def approve(asks: list, listener, rerun: str) -> int:
             print("Stopped waiting. The approval link and this machine's token stay valid until the code expires; "
                   f"after approving, run: {rerun}", file=sys.stderr)
             return 130
-        asks = [(service, request, service.post("/v2/login", {**request, "format": "json",
-                                                               **({"complete": value} if value else {})}))
-                for service, request, _ in waiting]
+        latest = [(service, request, service.post("/v2/login", {**request, "format": "json",
+                                                                 **({"complete": value} if value else {})}))
+                  for service, request, _ in waiting]
+        changed = any(new[2]["ok"] and new[2]["data"]["state"] == "pending" and
+                      old[2]["data"]["code"] != new[2]["data"]["code"]
+                      for old, new in zip(waiting, latest))
+        asks = latest
 
 
 def login_text(service: Service, request: dict) -> str:
