@@ -198,13 +198,14 @@ Save a stored file, checked against its SHA-256. FILE is the file ID on the item
 Connect this machine. It makes this machine's token, keeps it in ~/.config/wirk (or $WIRK_CONFIG_DIR),
 readable only by you, and opens your browser on WIRK's approval: one click approves it.
 With no browser here (SSH, a container) it prints a link to open in a browser on any computer;
-your own sign-in (--person) then asks for the code it shows. A login lasts until you revoke the
-machine on your account page or it goes 90 days unused; then run login --new.
+--person then asks for the code it shows and signs in only you. To connect your agents for status,
+query and write, run wirk login separately. A login lasts until you revoke the machine on your
+account page or it goes 90 days unused; then run login --new.
 Where a service has no web sign-in, it prints the token's digest instead (safe to share; the token stays
 here) for your WIRK administrator to register. The token is only ever sent to its address.
 
   login                                connect your agents on this machine
-  login --person                       also your own sign-in, at your own terminal, for review --person
+  login --person                       your own sign-in, at your own terminal, for review --person
   login --url https://wirk.example.org --new        another address needs a new token""",
         "admin": """usage: wirk admin show wirkspace|account [workspace_id=ID]
        wirk admin --request FILE

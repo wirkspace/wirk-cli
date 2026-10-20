@@ -73,6 +73,12 @@ def read_token(path: Path) -> str:
     try:
         info = os.lstat(path)
     except FileNotFoundError:
+        if path.name == AGENT:
+            raise Failure("not_configured", "This command needs your agents' sign-in on this machine.",
+                          "Run: wirk login   (your own sign-in is separate)") from None
+        if path.name == PERSON:
+            raise Failure("not_configured", "This command needs your own sign-in on this machine.",
+                          "Run: wirk login --person   (at your own terminal)") from None
         raise Failure("not_configured", "WIRK is not set up on this machine.",
                       f"Run: wirk login   (connects to {DEFAULT_URL})") from None
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
