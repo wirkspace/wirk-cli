@@ -26,6 +26,11 @@ def links(fake):
     return sorted((kind, *sorted(ends)) if kind == "related_to" else (kind, *ends) for kind, *ends in found)
 
 
+def successful_writes(fake):
+    """Refused write attempts are receipted but do not apply operations."""
+    return [body for body in fake.writes() if fake.receipts[body["request_id"]][1].get("results")]
+
+
 def item_of(fake, n):
     return next(i for i, item in fake.mine().items() if f" {3000000000 + n}," in item["revisions"][-1]["body"].split("\n")[0])
 
@@ -149,7 +154,7 @@ def test_a_requires_a_person_replaced_by_completing_the_work_is_kept_as_related_
     fake.as_whom = None
     make(fake).run(records)
     assert links(fake) == [("related_to", 1, 2)]
-    before = len(fake.writes())
+    before = len(successful_writes(fake))
     make(fake).run(records)
     make(fake).run(records)
-    assert len(fake.writes()) == before and links(fake) == [("related_to", 1, 2)]
+    assert len(successful_writes(fake)) == before and links(fake) == [("related_to", 1, 2)]

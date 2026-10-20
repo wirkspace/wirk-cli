@@ -314,18 +314,19 @@ class Importer:
             return []
         view = self.wirk.item(source.item, "full")
         have = self.existing(view, earlier=True)  # recognize an existing link to a prior imported issue
-        missing = [(link, target) for link, target in targets
-                   if link not in have and not (link[0] == "requires" and normal("related_to", *link[1:]) in have)]
+        missing = [(link, target) for link, target in targets if link not in have]
         return [outcome for start in range(0, len(missing), 31)
                 for outcome in self.write_links(ident, source.item, view["r"], missing[start:start + 31])]
 
     def write_links(self, ident, item, revision, chunk) -> list:
-        operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}} for link, target in chunk]
-        expect = {item: revision, **{target.item: target.r for link, target in chunk if link[0] == "contributes_to"}}
+        active = list(chunk)
+        operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}}
+                      for link, target in active]
+        expect = {item: revision, **{target.item: target.r for link, target in active if link[0] == "contributes_to"}}
         body = {"request_id": self.rid(ident), "operations": operations, "expect": expect,
                 "reason": f"Imported from {self.ctx.source}: the relations of {self.keys[ident]}"}
         notes = []
-        for _ in range(len(operations) + 1):
+        for _ in range(len(chunk) + 1):
             answer = self.wirk.write(body)
             if answer["ok"]:
                 self.counts["linked"] += len(operations)
@@ -335,9 +336,22 @@ class Importer:
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}",
                                 hint=problem.get("hint"))]
-            operations[index]["data"]["type"] = "related_to"  # WIRK sees a cycle or a completed end the plan could not
-            body = {**body, "request_id": self.rid(ident)}
+            fallback = normal("related_to", *active[index][0][1:])
+            queued = any(other != index and operation["data"]["type"] == "related_to"
+                         and normal("related_to", *active[other][0][1:]) == fallback
+                         for other, operation in enumerate(operations))
             notes.append(f"kept as related: WIRK refused it ({problem['code']})")
+            # An earlier chunk can have written the fallback after links_of took its snapshot.
+            if queued or fallback in self.existing(self.wirk.item(item, "full"), earlier=True):
+                del active[index]
+                del operations[index]
+                if not operations:
+                    return [Outcome(self.keys[ident], "links", "skipped", "; ".join(notes))]
+            else:
+                operations[index]["data"]["type"] = "related_to"
+            expect = {item: revision, **{target.item: target.r for (_, target), operation in zip(active, operations)
+                                         if operation["data"]["type"] == "contributes_to"}}
+            body = {**body, "request_id": self.rid(ident), "operations": operations, "expect": expect}
         return [Outcome(self.keys[ident], "links", "error", "refused repeatedly")]
 
     # ---------------------------------------------------------------- planning one issue

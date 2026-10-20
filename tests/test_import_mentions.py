@@ -6,7 +6,7 @@ import json
 import pytest
 
 from import_fakes import FakeWirk
-from test_import_links import item_of, links
+from test_import_links import item_of, links, successful_writes
 from test_import_github import node, page, repo
 from test_import_wirk import CTX, issue, make
 from wirk_cli.importers import github
@@ -161,3 +161,94 @@ def test_a_different_wirkspace_cannot_supply_the_prior_target(fake):
     other_space = FakeWirk(fields=fake.definitions)
     importer(other_space).run([record(77, REPOS[0], relations=[("mentioned", ref(80, REPOS[3]))])])
     assert links(other_space) == []
+
+@pytest.mark.parametrize("dependent,blocker", [(9, 1), (1, 9)])
+def test_a_mention_does_not_replace_a_distinct_blocker_in_either_id_order(fake, dependent, blocker):
+    records = [record(blocker, REPOS[0]), record(dependent, REPOS[0], relations=[
+        ("blocked_by", ref(blocker, REPOS[0])), ("mentioned", ref(blocker, REPOS[0]))])]
+    importer(fake).run(records)
+    assert set(links(fake)) == {("related_to", 1, 9), ("requires", dependent, blocker)}
+    before = len(fake.writes())
+    importer(fake).run(records)
+    assert len(fake.writes()) == before
+
+
+@pytest.mark.parametrize("dependent,blocker", [(9, 1), (1, 9)])
+def test_an_earlier_mention_then_only_a_blocker_still_makes_the_gate(fake, dependent, blocker):
+    first = [record(blocker, REPOS[0]), record(dependent, REPOS[0], relations=[
+        ("mentioned", ref(blocker, REPOS[0]))])]
+    importer(fake).run(first)
+    assert links(fake) == [("related_to", 1, 9)]
+    later = [record(blocker, REPOS[0]), record(dependent, REPOS[0], relations=[
+        ("blocked_by", ref(blocker, REPOS[0]))])]
+    importer(fake).run(later)
+    assert ("requires", dependent, blocker) in links(fake)
+
+
+def test_a_preexisting_person_related_link_cannot_stand_in_for_a_blocker(fake):
+    importer(fake).run([record(1, REPOS[0]), record(9, REPOS[0])])
+    one, nine = item_of(fake, 1), item_of(fake, 9)
+    fake.as_whom = "bob"
+    fake.write({"request_id": "person-related", "operations": [
+        {"op": "link.create", "data": {"type": "related_to", "from": one, "to": nine}}]})
+    fake.as_whom = None
+    records = [record(1, REPOS[0]), record(9, REPOS[0], relations=[("blocked_by", ref(1, REPOS[0]))])]
+    importer(fake).run(records)
+    assert set(links(fake)) == {("related_to", 1, 9), ("requires", 9, 1)}
+
+
+def test_a_refused_gate_reuses_the_mention_and_keeps_another_gate_in_the_batch(fake):
+    importer(fake).run([record(n, REPOS[0]) for n in (1, 2, 9)])
+    one, nine = item_of(fake, 1), item_of(fake, 9)
+    fake.as_whom = "bob"
+    fake.write({"request_id": "person-reverse-gate", "expect": {one: 1}, "operations": [
+        {"op": "link.create", "data": {"type": "requires", "from": one, "to": nine}}]})
+    fake.as_whom = None
+    records = [record(1, REPOS[0]), record(2, REPOS[0]), record(9, REPOS[0], relations=[
+        ("blocked_by", ref(1, REPOS[0])), ("blocked_by", ref(2, REPOS[0])),
+        ("mentioned", ref(1, REPOS[0]))])]
+    importer(fake).run(records)
+    assert set(links(fake)) == {("related_to", 1, 9), ("requires", 1, 9), ("requires", 9, 2)}
+    before = len(successful_writes(fake))
+    importer(fake).run(records)
+    assert len(successful_writes(fake)) == before
+    assert len([link for link in fake.links.values() if not link["removed"] and link["type"] == "related_to"]) == 1
+
+
+def test_a_refused_gate_reuses_mention_after_a_person_completed_work(fake):
+    records = [record(1, REPOS[0]), record(9, REPOS[0], relations=[
+        ("blocked_by", ref(1, REPOS[0])), ("mentioned", ref(1, REPOS[0]))])]
+    importer(fake).run(records)
+    nine = item_of(fake, 9)
+    gate = next(key for key, link in fake.links.items() if link["type"] == "requires")
+    fake.as_whom = "bob"
+    fake.write({"request_id": "person-removed-gate", "operations": [{"op": "link.remove", "id": gate}]})
+    fake.write({"request_id": "person-completed", "reason": "Done", "expect": {nine: 1}, "operations": [
+        {"op": "item.edit", "id": nine, "patch": {"fields": {"status": "completed"}}}]})
+    fake.as_whom = None
+    importer(fake).run(records)
+    assert links(fake) == [("related_to", 1, 9)]
+    before = len(successful_writes(fake))
+    importer(fake).run(records)
+    assert len(successful_writes(fake)) == before
+
+
+def test_refused_gate_reuses_related_edge_written_in_an_earlier_chunk(fake):
+    numbers = [1, 9, 40, *range(10, 40)]
+    importer(fake).run([record(n, REPOS[0]) for n in numbers])
+    one, nine = item_of(fake, 1), item_of(fake, 9)
+    fake.as_whom = "bob"
+    fake.write({"request_id": "person-cycle-boundary", "expect": {nine: 1}, "operations": [
+        {"op": "link.create", "data": {"type": "requires", "from": nine, "to": one}}]})
+    fake.as_whom = None
+    related = [("related", ref(n, REPOS[0])) for n in range(10, 40)]
+    source = record(1, REPOS[0], relations=[("mentioned", ref(9, REPOS[0])),
+            ("blocked_by", ref(9, REPOS[0])), ("blocked_by", ref(40, REPOS[0])), *related])
+    records = [source, *[record(n, REPOS[0]) for n in numbers if n != 1]]
+    importer(fake).run(records)
+    found = links(fake)
+    assert ("requires", 1, 40) in found and ("requires", 1, 9) not in found
+    assert sum(link[0] == "related_to" for link in found) == 31
+    before = len(successful_writes(fake))
+    importer(fake).run(records)
+    assert len(successful_writes(fake)) == before
