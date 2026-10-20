@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-VERSION = "0.4.21"
+VERSION = "0.4.22"
 INSTALLER_DEFAULT = "0.4.15"
 
 
