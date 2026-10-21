@@ -10,7 +10,7 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server at the version the installer names (set `WIRK_VERSION` to choose another published version), after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the latest `wirk` command and `wirk-mcp` server from PyPI, always a matching pair (set `WIRK_VERSION` to choose another published version). It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe: it upgrades both in place and replaces an earlier `wirk` MCP server and WIRK skill with the latest. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. The machine is named by the computer's own name (macOS's Computer Name, else its hostname), on the approval page and on your account page. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
@@ -85,7 +85,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- The installer always installs the latest `wirk` and `wirk-mcp` from PyPI, and running it again upgrades them in place; `WIRK_VERSION=X` installs X instead. It no longer pins a version or keeps wheels.
 
 ### 0.4.27
 
