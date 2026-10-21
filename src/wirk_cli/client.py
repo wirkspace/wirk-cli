@@ -149,6 +149,20 @@ def signed_in(person: bool = False, actor_id: str | None = None) -> tuple[str, s
     return url, token
 
 
+def choice_path(url: str, binding: str) -> Path:
+    """The wirkspace a chat chose with wirk wirkspace NAME: its ID alone, beside the chat's own token."""
+    return actor_path(url, binding).with_suffix(".wirkspace")
+
+
+def chosen(url: str, binding: str | None) -> str | None:
+    if binding:
+        try:
+            return read_private(choice_path(url, binding)) or None
+        except FileNotFoundError:
+            pass
+    return None
+
+
 def file_digest(stream) -> tuple[int, str]:
     """The size and SHA-256 of an open file, read in blocks; the file is left at its start."""
     check, size = hashlib.sha256(), 0
@@ -166,8 +180,9 @@ def digest(token: str) -> str:
 class Service:
     """One HTTP client for one address; follows no redirect and resends identical bytes once when no answer came."""
 
-    def __init__(self, url: str, token: str, transport=None):
-        self.url, self._token, self._transport, self._http = url, token, transport, None
+    def __init__(self, url: str, token: str, transport=None, wirkspace: str | None = None):
+        """`wirkspace` is the chat's choice: sent with every body that names none (a show revoke takes the link alone)."""
+        self.url, self._token, self._transport, self.wirkspace, self._http = url, token, transport, wirkspace, None
 
     @property
     def http(self):
@@ -178,11 +193,13 @@ class Service:
         return self._http
 
     def same(self, other: "Service") -> bool:
-        return (self.url, self._token) == (other.url, other._token)
+        return (self.url, self._token, self.wirkspace) == (other.url, other._token, other.wirkspace)
 
     def post(self, route: str, body: dict, *, uncertain: str | None = None, resend: bool = True,
              headers: dict | None = None) -> dict:
         import httpx
+        if self.wirkspace and "workspace_id" not in body and "revoke" not in body:
+            body = {**body, "workspace_id": self.wirkspace}
         for attempt in range(2 if resend else 1):
             try:
                 answer = self.http.post(self.url + route, json=body, timeout=httpx.Timeout(60 + body.get("wait", 0), connect=10),
