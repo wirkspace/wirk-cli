@@ -184,6 +184,8 @@ def request_body(options: dict, words: list[str], build) -> dict:
             raise UsageError(f"{options['--request']} already names its wirkspace: give workspace_id in the file or on "
                              "the line, not both; nothing was sent")
         body["workspace_id"] = pairs["workspace_id"]
+    if body.get("format") == "json":
+        options["--json"] = True  # a file that asks for JSON is printed as --json prints
     return {**body, "format": "json"} if options.get("--json") and "format" not in body else body
 
 
