@@ -1,11 +1,15 @@
 """wirk keeps itself current: the hourly check after a command, and the detached upgrade it starts."""
 
+import http.server
+import importlib.util
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 import httpx
@@ -14,6 +18,10 @@ import pytest
 from wirk_cli import update
 
 LATEST = {"wirk": "0.4.27", "wirk-mcp": "0.4.26"}
+UV = "tool install --no-config --default-index https://pypi.org/simple"
+PIP = "-I -m pip install --isolated --quiet --disable-pip-version-check --index-url https://pypi.org/simple"
+INDEX_ENVIRONMENT = ("UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS",
+                     "UV_CONFIG_FILE", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS")
 
 
 @pytest.fixture
@@ -58,7 +66,7 @@ def offline():
     return httpx.MockTransport(answer)
 
 
-def install(prefix, versions, *, uv_tool=False, bin_dir=None, editable=()):
+def install(prefix, versions, *, uv_tool=False, bin_dir=None, editable=(), python=None):
     """A fake environment at PREFIX holding these package versions."""
     site = prefix / "lib" / "python3.12" / "site-packages"
     for name, version in versions.items():
@@ -74,6 +82,7 @@ def install(prefix, versions, *, uv_tool=False, bin_dir=None, editable=()):
         (prefix / "uv-receipt.toml").write_text(textwrap.dedent(f"""\
             [tool]
             requirements = [{{ name = "{name}" }}]
+            {f'python = "{python}"' if python else ""}
             entrypoints = [{{ name = "{name}", install-path = "{bin_dir}/{name}", from = "{name}" }}]
             """))
     return prefix
@@ -84,6 +93,7 @@ def recorder(path, log, exit_code=0):
     path.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         printf '%s|%s|%s|%s\\n' "$*" "$PWD" "${{UV_TOOL_DIR:-}}" "${{UV_TOOL_BIN_DIR:-}}" >> {log}
+        env | grep -E '^(UV|PIP)_' >> {log}.environment
         exit {exit_code}
         """))
     path.chmod(0o755)
@@ -118,8 +128,8 @@ def test_a_uv_tool_install_upgrades_itself_and_its_sibling_mcp_tool(on, tmp_path
     install(tools / "wirk-mcp", {"wirk-mcp": "0.4.21", "wirk": "0.4.21"}, uv_tool=True, bin_dir=bin_dir)
     update.main(prefix, pypi())
     assert calls(fake_uv) == [
-        ["tool install wirk==0.4.27", str(on), str(tools), str(bin_dir)],
-        ["tool install wirk-mcp==0.4.26", str(on), str(tools), str(bin_dir)]]
+        [f"{UV} wirk==0.4.27", str(on), str(tools), str(bin_dir)],
+        [f"{UV} wirk-mcp==0.4.26", str(on), str(tools), str(bin_dir)]]
     assert state(on).get("notice") is None
 
 
@@ -128,7 +138,34 @@ def test_the_sibling_mcp_tool_catches_up_when_wirk_is_current(on, tmp_path, fake
     prefix = install(tools / "wirk", {"wirk": "0.4.27"}, uv_tool=True, bin_dir=tmp_path / "bin")
     install(tools / "wirk-mcp", {"wirk-mcp": "0.4.24", "wirk": "0.4.24"}, uv_tool=True, bin_dir=tmp_path / "bin")
     update.main(prefix, pypi())
-    assert [call[0] for call in calls(fake_uv)] == ["tool install wirk-mcp==0.4.26"]
+    assert [call[0] for call in calls(fake_uv)] == [f"{UV} wirk-mcp==0.4.26"]
+
+
+def test_an_editable_sibling_mcp_tool_is_never_replaced(on, tmp_path, fake_uv):
+    tools = tmp_path / "tools"
+    prefix = install(tools / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
+    install(tools / "wirk-mcp", {"wirk-mcp": "0.4.21", "wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin",
+            editable=["wirk-mcp"])
+    update.main(prefix, pypi())
+    assert [call[0] for call in calls(fake_uv)] == [f"{UV} wirk==0.4.27"]
+
+
+def test_the_receipts_python_is_kept(on, tmp_path, fake_uv):
+    prefix = install(tmp_path / "tools" / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin",
+                     python="3.13")
+    update.main(prefix, pypi())
+    assert [call[0] for call in calls(fake_uv)] == [f"{UV} --python 3.13 wirk==0.4.27"]
+
+
+def test_no_index_named_by_the_environment_reaches_the_upgrade(on, tmp_path, fake_uv, monkeypatch):
+    for name in INDEX_ENVIRONMENT:
+        monkeypatch.setenv(name, "http://127.0.0.1:9/elsewhere")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cache"))
+    prefix = install(tmp_path / "tools" / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
+    update.main(prefix, pypi())
+    environment = (tmp_path / "uv.log.environment").read_text().splitlines()
+    assert [line for line in environment if line.startswith("UV_") and "elsewhere" in line] == []
+    assert f"UV_CACHE_DIR={tmp_path / 'cache'}" in environment  # the rest of uv's settings stay
 
 
 def test_uv_is_found_where_the_installer_puts_it(on, tmp_path, monkeypatch):
@@ -141,7 +178,7 @@ def test_uv_is_found_where_the_installer_puts_it(on, tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     prefix = install(tmp_path / "tools" / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
     update.main(prefix, pypi())
-    assert [call[0] for call in calls(log)] == ["tool install wirk==0.4.27"]
+    assert [call[0] for call in calls(log)] == [f"{UV} wirk==0.4.27"]
 
 
 def test_a_uv_tool_install_without_uv_records_the_notice(on, tmp_path, monkeypatch):
@@ -150,7 +187,7 @@ def test_a_uv_tool_install_without_uv_records_the_notice(on, tmp_path, monkeypat
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     prefix = install(tmp_path / "tools" / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
     update.main(prefix, pypi())
-    assert state(on)["notice"] == "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk"
+    assert state(on)["notice"] == "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27"
 
 
 def test_a_venv_with_wirk_mcp_upgrades_wirk_mcp_never_wirk_alone(on, tmp_path):
@@ -158,7 +195,7 @@ def test_a_venv_with_wirk_mcp_upgrades_wirk_mcp_never_wirk_alone(on, tmp_path):
     log = tmp_path / "pip.log"
     recorder(prefix / "bin" / "python", log)
     update.main(prefix, pypi())
-    assert calls(log) == [["-I -m pip install --quiet wirk-mcp==0.4.26", str(on), "", ""]]
+    assert calls(log) == [[f"{PIP} wirk-mcp==0.4.26", str(on), "", ""]]
 
 
 def test_a_venv_without_wirk_mcp_upgrades_wirk(on, tmp_path):
@@ -166,15 +203,14 @@ def test_a_venv_without_wirk_mcp_upgrades_wirk(on, tmp_path):
     log = tmp_path / "pip.log"
     recorder(prefix / "bin" / "python", log)
     update.main(prefix, pypi())
-    assert [call[0] for call in calls(log)] == ["-I -m pip install --quiet wirk==0.4.27"]
+    assert [call[0] for call in calls(log)] == [f"{PIP} wirk==0.4.27"]
 
 
-def test_a_failed_upgrade_records_the_command_to_run(on, tmp_path):
+def test_a_failed_upgrade_records_a_command_that_works_anywhere(on, tmp_path):
     prefix = install(tmp_path / "venv", {"wirk": "0.4.21"})
     recorder(prefix / "bin" / "python", tmp_path / "pip.log", exit_code=1)
     update.main(prefix, pypi())
-    assert state(on)["notice"] == (f"wirk 0.4.27 is out; this is 0.4.21. To update: "
-                                   f"{prefix}/bin/python -I -m pip install --quiet wirk==0.4.27")
+    assert state(on)["notice"] == "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27"
 
 
 def test_a_later_success_clears_the_notice(on, tmp_path):
@@ -192,7 +228,7 @@ def test_outside_a_virtual_environment_it_only_records_the_notice(on, tmp_path):
     recorder(prefix / "bin" / "python", tmp_path / "pip.log")
     update.main(prefix, pypi())
     assert not (tmp_path / "pip.log").exists()
-    assert state(on)["notice"].endswith("To update: uv tool install wirk")
+    assert state(on)["notice"].endswith("To update: uv tool install wirk==0.4.27")
 
 
 @pytest.mark.parametrize("transport", [offline(), pypi(status=500), pypi(body=b"<html>"), pypi({"wirk": "0.5.0rc1"}),
@@ -223,7 +259,7 @@ def test_an_editable_install_is_never_replaced(on, tmp_path, editable):
     assert not (tmp_path / "pip.log").exists() and transport.asked == []
 
 
-def test_nothing_runs_while_another_update_holds_the_lock(on, tmp_path):
+def test_an_update_waits_for_whoever_holds_the_lock_then_runs(on, tmp_path):
     import fcntl
     on.mkdir()
     holder = os.open(on / "update.lock", os.O_WRONLY | os.O_CREAT)
@@ -231,9 +267,13 @@ def test_nothing_runs_while_another_update_holds_the_lock(on, tmp_path):
     prefix = install(tmp_path / "venv", {"wirk": "0.4.21"})
     recorder(prefix / "bin" / "python", tmp_path / "pip.log")
     transport = pypi()
-    update.main(prefix, transport)
+    waiting = threading.Thread(target=update.main, args=(prefix, transport))
+    waiting.start()
+    time.sleep(0.3)
+    assert transport.asked == []  # two upgrades of one environment never run together
     os.close(holder)
-    assert not (tmp_path / "pip.log").exists() and transport.asked == []
+    waiting.join(timeout=5)
+    assert [call[0] for call in calls(tmp_path / "pip.log")] == [f"{PIP} wirk==0.4.27"]
 
 
 # The hourly check, in the command's process
@@ -277,7 +317,7 @@ def test_wirk_no_update_turns_it_all_off(on, run, started, monkeypatch):
 
 def test_the_notice_is_printed_once_a_day_on_stderr_only(on, run, started):
     on.mkdir(exist_ok=True)
-    notice = "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk"
+    notice = "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27"
     (on / "update.json").write_text(json.dumps({"notice": notice}))
     plain, quiet = run(["status", "--json"]), run(["status", "--json"])
     assert plain[0] == quiet[0] == 0 and plain[1] == quiet[1]
@@ -304,3 +344,66 @@ def test_a_caller_capturing_output_does_not_wait_for_the_detached_process(on, tm
             break
         time.sleep(0.05)
     os.kill(int(pid_file.read_text()), signal.SIGTERM)
+
+
+# The real uv and pip, offline: the release comes from the index the update names, never one the environment names
+
+
+class Index:
+    """A local package index that counts what it is asked and has nothing."""
+
+    def __init__(self):
+        hits = self.hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_error(404)
+
+            def log_message(self, *args):
+                pass
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}/simple"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def indexes(monkeypatch, tmp_path):
+    """(the update's index, an index every index setting of the environment names, a uv.toml naming it too)"""
+    right, wrong = Index(), Index()
+    monkeypatch.setattr(update, "INDEX", right.url)
+    config = tmp_path / "uv.toml"
+    config.write_text(f'[[index]]\nurl = "{wrong.url}"\ndefault = true\n')
+    for name in INDEX_ENVIRONMENT:
+        monkeypatch.setenv(name, str(config) if name == "UV_CONFIG_FILE" else wrong.url)
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
+    yield right, wrong
+    right.close()
+    wrong.close()
+
+
+@pytest.mark.skipif(not shutil.which("uv"), reason="needs uv")
+def test_the_real_uv_asks_only_the_updates_index(on, tmp_path, indexes):
+    right, wrong = indexes
+    prefix = install(tmp_path / "tools" / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
+    [(_, _, command, env)] = update.targets(prefix)
+    shutil.rmtree(prefix)  # the fake environment has no Python for uv to check; a fresh install resolves the same way
+    on.mkdir()
+    assert not update.upgraded([part.format("9.9.9") for part in command], env, on)  # nothing to install offline
+    assert right.hits and wrong.hits == []
+
+
+@pytest.mark.skipif(not importlib.util.find_spec("pip"), reason="needs pip in the test environment")
+def test_the_real_pip_asks_only_the_updates_index(on, tmp_path, indexes):
+    right, wrong = indexes
+    prefix = install(tmp_path / "venv", {"wirk": "0.4.21"})
+    [(_, _, command, env)] = update.targets(prefix)
+    on.mkdir()
+    real = [sys.executable] + [part.format("9.9.9") for part in command[1:]] + ["--dry-run"]
+    assert not update.upgraded(real, env, on)
+    assert right.hits and wrong.hits == []

@@ -16,6 +16,7 @@ from .client import config_dir
 
 CHILD = [sys.executable, "-I", "-m", "wirk_cli.update"]
 HOUR, DAY = 3600, 86400
+INDEX = "https://pypi.org/simple"  # the release always comes from here, whatever index a repository's settings name
 RELEASE = re.compile(r"\d+\.\d+\.\d+")
 
 
@@ -46,21 +47,13 @@ def after(command: str) -> None:
 def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
     """In the detached process: upgrade each install that PyPI has a newer release of; record what could not be."""
     directory = config_dir()
-    with locked(directory) as held:
-        if not held:
-            return
+    with locked(directory, wait=True):  # after any update still running, so two never change one environment at once
         wanted = [(name, have, command, env, latest(name, transport)) for name, have, command, env in targets(prefix)]
         if any(want is None for *_, want in wanted):  # PyPI did not answer plainly: try again next hour
             return
-        import shlex
-        notices = []
-        for name, have, command, env, want in wanted:
-            if not newer(want, have):
-                continue
-            command = command and [part.format(want) for part in command]
-            if not command or not upgraded(command, env, directory):
-                notices.append(f"{name} {want} is out; this is {have}. To update: "
-                               + (shlex.join(command) if command else f"uv tool install {name}"))
+        notices = [f"{name} {want} is out; this is {have}. To update: uv tool install {name}=={want}"
+                   for name, have, command, env, want in wanted if newer(want, have)
+                   and not (command and upgraded([part.format(want) for part in command], env, directory))]
         data = load(directory)
         data["notice"] = "; ".join(notices) or None
         save(directory, data)
@@ -73,11 +66,12 @@ def targets(prefix: Path) -> list:
         return []
     name = "wirk-mcp" if "wirk-mcp" in found else "wirk"  # wirk-mcp pins its wirk: upgrading it brings the pair
     if (prefix / "uv-receipt.toml").exists():
-        places = {name: prefix}
-        if name == "wirk" and (prefix.parent / "wirk-mcp" / "uv-receipt.toml").exists():  # the installer's layout
-            places["wirk-mcp"] = prefix.parent / "wirk-mcp"
-        return [uv_tool(tool, place) for tool, place in places.items()]
-    command = [str(prefix / "bin" / "python"), "-I", "-m", "pip", "install", "--quiet", name + "=={}"]
+        tools = [uv_tool(name, prefix, found[name][0])]
+        sibling = prefix.parent / "wirk-mcp"  # the installer's layout: wirk-mcp in a tool of its own
+        mcp = installed(sibling).get("wirk-mcp") if name == "wirk" and (sibling / "uv-receipt.toml").exists() else None
+        return tools + ([uv_tool("wirk-mcp", sibling, mcp[0])] if mcp and not mcp[1] else [])
+    command = [str(prefix / "bin" / "python"), "-I", "-m", "pip", "install", "--isolated", "--quiet",
+               "--disable-pip-version-check", "--index-url", INDEX, name + "=={}"]
     return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, None)]
 
 
@@ -93,16 +87,19 @@ def installed(prefix: Path) -> dict:
     return found
 
 
-def uv_tool(name: str, prefix: Path):
-    """The uv tool at PREFIX upgrades in place: its own tool folder, and its commands where they are now."""
+def uv_tool(name: str, prefix: Path, version: str):
+    """The uv tool at PREFIX upgrades in place: its tool folder, its commands' folder and its Python stay; its
+    --with packages do not (the installer's wirk-mcp tool has the old wirk there, which the new one's pin replaces)."""
     import shutil
     import tomllib
     tool = tomllib.loads((prefix / "uv-receipt.toml").read_text())["tool"]
-    folders = (os.environ.get("PATH"), os.environ.get("XDG_BIN_HOME"), str(Path.home() / ".local" / "bin"))
-    uv = shutil.which("uv", path=os.pathsep.join(folder for folder in folders if folder))  # where the installer looks
-    env = {**os.environ, "UV_TOOL_DIR": str(prefix.parent),
-           "UV_TOOL_BIN_DIR": str(Path(tool["entrypoints"][0]["install-path"]).parent)}
-    return name, installed(prefix)[name][0], uv and [uv, "tool", "install", name + "=={}"], env
+    uv = shutil.which("uv", path=f"{os.environ.get('PATH', '')}{os.pathsep}{Path.home() / '.local' / 'bin'}")
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("UV_INDEX", "UV_DEFAULT_INDEX",
+           "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_CONFIG_FILE"))}
+    env.update(UV_TOOL_DIR=str(prefix.parent), UV_TOOL_BIN_DIR=str(Path(tool["entrypoints"][0]["install-path"]).parent))
+    python = ["--python", tool["python"]] if "python" in tool else []
+    return name, version, uv and [uv, "tool", "install", "--no-config", "--default-index", INDEX, *python,
+                                  name + "=={}"], env
 
 
 def latest(name: str, transport=None):
@@ -129,13 +126,13 @@ def upgraded(command: list, env, directory: Path) -> bool:
 
 
 @contextmanager
-def locked(directory: Path):
-    """Holds update.lock and gives True, or gives False at once when another process holds it."""
+def locked(directory: Path, wait: bool = False):
+    """Holds update.lock and gives True; without wait, gives False at once when another process holds it."""
     import fcntl  # POSIX only: the module itself still loads anywhere
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(directory / "update.lock", "a") as file:
         try:
-            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(file, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             yield False
             return
