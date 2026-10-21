@@ -148,11 +148,20 @@ def test_a_usage_error_is_the_client_envelope_and_exits_2(run, argv, message, hi
     assert (code, out, err, fake.requests) == (2, "", f"Error invalid_input: {problem['message']}\n  {hint}\n", [])
 
 
-@pytest.mark.parametrize("status, location", [(301, "https://elsewhere.test/v2/status"), (302, "https://x.test/"),
-                                              (307, "https://x.test/"), (308, "https://x.test/")])
-def test_redirects_are_never_followed(run, status, location):
-    code, out, err, fake = run(["status"], lambda r: httpx.Response(status, headers={"location": location}))
-    assert code == 1 and len(fake.requests) == 1 and location in err and "unexpected_redirect" in err
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_redirects_do_not_reveal_bearers_in_diagnostics(run, status):
+    child = "wirk_" + "c" * 43
+    location = f"https://elsewhere.test/v2/status?parent={TOKEN}&child={child}"
+    answer = lambda r: httpx.Response(status, headers={"location": location})
+    code, out, err, fake = run(["status"], answer)
+    assert code == 1 and len(fake.requests) == 1 and not out
+    assert "unexpected_redirect" in err and str(status) in err and "POST /v2/status" in err
+    assert location not in err and TOKEN not in err and child not in err
+    code, out, err, fake = run(["status", "--json"], answer)
+    assert code == 1 and len(fake.requests) == 1 and not err
+    problem = json.loads(out)["errors"][0]
+    assert problem["code"] == "unexpected_redirect" and str(status) in problem["message"]
+    assert location not in out and TOKEN not in out and child not in out
 
 
 def test_a_missing_route_is_named(run):
