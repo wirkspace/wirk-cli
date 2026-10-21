@@ -1,19 +1,16 @@
-"""wirk keeps itself current: after a command, at most once an hour, a detached process installs PyPI's latest."""
+"""wirk keeps itself current: after a command, at most once an hour, a detached process installs PyPI's latest.
+
+Only after() runs in every command, so what the detached process alone needs is imported inside its functions.
+"""
 
 import json
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import sys
 import time
-import tomllib
 from contextlib import contextmanager
-from importlib.metadata import distributions
 from pathlib import Path
-
-import httpx
 
 from .client import config_dir
 
@@ -55,6 +52,7 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
         wanted = [(name, have, command, env, latest(name, transport)) for name, have, command, env in targets(prefix)]
         if any(want is None for *_, want in wanted):  # PyPI did not answer plainly: try again next hour
             return
+        import shlex
         notices = []
         for name, have, command, env, want in wanted:
             if not newer(want, have):
@@ -85,6 +83,7 @@ def targets(prefix: Path) -> list:
 
 def installed(prefix: Path) -> dict:
     """{name: (version, editable)} for wirk and wirk-mcp in the environment at PREFIX."""
+    from importlib.metadata import distributions
     found = {}
     for dist in distributions(path=[str(path) for path in prefix.glob("lib/python*/site-packages")]):
         name = dist.metadata["Name"]
@@ -96,6 +95,8 @@ def installed(prefix: Path) -> dict:
 
 def uv_tool(name: str, prefix: Path):
     """The uv tool at PREFIX upgrades in place: its own tool folder, and its commands where they are now."""
+    import shutil
+    import tomllib
     tool = tomllib.loads((prefix / "uv-receipt.toml").read_text())["tool"]
     folders = (os.environ.get("PATH"), os.environ.get("XDG_BIN_HOME"), str(Path.home() / ".local" / "bin"))
     uv = shutil.which("uv", path=os.pathsep.join(folder for folder in folders if folder))  # where the installer looks
@@ -106,6 +107,7 @@ def uv_tool(name: str, prefix: Path):
 
 def latest(name: str, transport=None):
     """PyPI's latest release of NAME as N.N.N, or None when PyPI does not answer plainly."""
+    import httpx
     try:
         with httpx.Client(transport=transport, timeout=10) as client:
             version = client.get(f"https://pypi.org/pypi/{name}/json").raise_for_status().json()["info"]["version"]
@@ -129,7 +131,7 @@ def upgraded(command: list, env, directory: Path) -> bool:
 @contextmanager
 def locked(directory: Path):
     """Holds update.lock and gives True, or gives False at once when another process holds it."""
-    import fcntl  # POSIX only, so imported here: the CLI itself still loads anywhere
+    import fcntl  # POSIX only: the module itself still loads anywhere
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(directory / "update.lock", "a") as file:
         try:
