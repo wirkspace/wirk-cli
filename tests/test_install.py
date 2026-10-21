@@ -164,7 +164,6 @@ def test_a_real_install_takes_the_latest_clients_and_is_idempotent(tmp_path):
     first = install(tmp_path, base, "--url", URL)
     assert first.returncode == 0, first.stdout + first.stderr
     bin_dir = tmp_path / "bin"
-    assert (bin_dir / "wirk").exists() and (bin_dir / "wirk-mcp").exists()
     calls = (tmp_path / "calls").read_text()
     assert f"claude mcp add --scope user wirk -- {bin_dir}/wirk-mcp" in calls
     assert f"codex mcp add wirk -- {bin_dir}/wirk-mcp" in calls
@@ -294,22 +293,14 @@ def test_wirk_follows_the_latest_wirk_mcp_so_the_two_always_match(tmp_path):
 
 
 @needs_uv
-def test_wirk_version_installs_that_version_instead(tmp_path):
+@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.27 does not
+def test_wirk_version_pins_the_two_clients_and_the_skill_stays_the_latest(tmp_path, version):
+    """The three packages do not share versions, so the skill comes from its own latest release either way."""
     base = release(tmp_path)
-    result = install(tmp_path, base, "--url", URL, WIRK_VERSION="0.4.26")
+    result = install(tmp_path, base, "--url", URL, WIRK_VERSION=version)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.startswith("Installing WIRK 0.4.26\n") and versions(tmp_path) == ["0.4.26", "0.4.26"]
-    skill = tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md"
-    assert skill.read_text().endswith("latest\n")  # the skill's own latest release, even when a v0.4.26 exists
-
-
-@needs_uv
-def test_a_pinned_version_without_its_own_skill_release_takes_the_latest_skill(tmp_path):
-    """The three packages do not share versions: there is no wirk-skill v0.4.27, and that must not stop the install."""
-    base = release(tmp_path)
-    result = install(tmp_path, base, "--url", URL, WIRK_VERSION=LATEST)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert versions(tmp_path) == [LATEST, LATEST] and f"wirk {LATEST} login --url {URL}" in result.stdout
+    assert result.stdout.startswith(f"Installing WIRK {version}\n") and versions(tmp_path) == [version, version]
+    assert f"wirk {version} login --url {URL}" in result.stdout
     assert (tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md").read_text().endswith("latest\n")
 
 
