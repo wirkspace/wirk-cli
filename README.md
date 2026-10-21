@@ -16,6 +16,8 @@ It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), t
 
 Each agent chat on an approved machine is its own WIRK agent. A new chat's first call answers `actor_setup_required`; the chat runs `wirk login` itself, which signs it in under the machine's approval with no browser and no person, and retries. Resuming the chat keeps its identity; a new chat, a fork or a worker started from a chat gets its own. The chat is recognised by `CODEX_THREAD_ID` (Codex CLI, or the thread ID MCP's request carries) and `CLAUDE_CODE_SESSION_ID` (Claude Code, in the terminal and the desktop app), combined when both are present. Claude Code's Agent-tool helpers share their chat's identity. When the machine's token is renewed, `wirk login` in each chat signs it in again as the same agent; a chat whose own token went 90 days unused signs in as a new agent. Outside any chat, `wirk` uses the machine's shared agent identity as before. On your account page, a machine's chats are a count on its row.
 
+If you reach several wirkspaces, `wirk wirkspace Sales` chooses one for the agent chat you run it in: from then on that chat's `status`, `query`, `write`, `review`, `show`, `upload` and `download` (and `wirk-mcp` in the same chat) go to Sales without `workspace_id=`. `wirk wirkspace` alone says which one the chat works in. Only this command changes the choice; a `workspace_id=ID` on a command or in a `--request` file wins for that call. The choice is kept beside the chat's own token, so another chat, a fork or a worker chooses its own. Known limit: Claude Code's Agent-tool helpers share their chat's identity, so a helper's `wirk wirkspace` moves its launcher's choice too. Outside any chat, add `workspace_id=ID` to each command.
+
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
 ## Use
@@ -86,6 +88,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 - `wirk login` opens your browser, at a terminal or not, and one click connects this machine; `wirk login --person` connects you and your agents in the same click, with no typed phrase. With no browser here it prints a link to open on any computer.
 - Connected GitHub sources can be previewed and imported through the existing `wirk import github` command with an ordinary agent login and an explicit source delegation.
 - `workspace_id=ID` works on every command line: beside `--request FILE` for `write`, `review` and `query` (when the file names no wirkspace; a file that names one is refused with the word) and on `wirk review`.
+- `wirk wirkspace NAME` chooses the wirkspace an agent chat works in; its later commands need no `workspace_id=`. `wirk wirkspace` alone shows the choice.
 - `wirk write archive ID@N --reason TEXT` and `wirk write restore ID@N` send the archive and restore operations at the revision you read, so neither needs a request file.
 
 ### 0.4.10
