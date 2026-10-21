@@ -419,8 +419,8 @@ def enrol(machine: Service, path: Path, started_by: Path | None) -> int:
             print("This chat's old WIRK token was refused, so it signs in as a new agent.", flush=True)
         answer = send(new_token(path))
     if started_by and not answer["ok"] and answer["errors"][0]["code"] == "unauthenticated":
-        print("The chat that started this one was refused, so this one does not sign in. Run wirk login in that chat, "
-              "then here again.", flush=True)
+        answer["errors"][0]["hint"] = ("The chat that started this one was refused, so this one does not sign in. "
+                                       "Run wirk login in that chat, then here again.")
     return emit(answer, {})
 
 
