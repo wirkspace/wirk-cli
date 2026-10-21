@@ -75,7 +75,7 @@ changed or interrupted.
 7. Known limits: a machine whose agents use only the MCP server never runs `wirk`, so it never checks; a pip upgrade
    killed halfway (a sandbox tearing down its processes) can leave a pip environment broken, as a manual one would;
    installs that share one configuration directory share the stamp and the notice.
-8. Out of scope: the Mac mini's runtime layout, uv virtual environments without pip (they get the notice), Windows,
+8. Out of scope: hand-made layouts outside these three, uv virtual environments without pip (they get the notice), Windows,
    and the skill.
 
 ## Change
