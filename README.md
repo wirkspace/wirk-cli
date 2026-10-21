@@ -55,7 +55,7 @@ Anyone whose role may review decides proposals, a person or an agent working for
 }
 ```
 
-Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `workspace_id` if you have one wirkspace; with several, put it in this file. `wirk show status` has no `workspace_id=...` argument. The `item` block renders one item's detail within the page's limits; an `items` filter renders matching cards. Blocks also support `facts`, and `items` can list chosen refs.
+Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `workspace_id` if you have one wirkspace; with several, put it in this file, or `wirk wirkspace NAME` chooses it in an agent chat. `wirk show status` has no `workspace_id=...` argument. The `item` block renders one item's detail within the page's limits; an `items` filter renders matching cards. Blocks also support `facts`, and `items` can list chosen refs.
 
 Run `wirk show --file view.json --no-open` for a link without opening a browser, or `wirk show --file view.json` to open it. Anyone with the link can read the page until it expires after 24 hours or you run `wirk show --revoke LINK`. A service without views configured returns `views_unavailable`.
 

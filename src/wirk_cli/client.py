@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .grammar import command, shell_word
+from .grammar import command
 
 DEFAULT_URL = "https://api.wirk.life"
 TOKEN = re.compile(r"[!-~]{1,256}")  # printable ASCII without spaces, as the service takes a bearer token
@@ -198,22 +198,24 @@ class Service:
     def post(self, route: str, body: dict, *, uncertain: str | None = None, resend: bool = True,
              headers: dict | None = None) -> dict:
         import httpx
-        if self.wirkspace and "workspace_id" not in body and "revoke" not in body:
-            body = {**body, "workspace_id": self.wirkspace}
+        added = bool(self.wirkspace) and "workspace_id" not in body and "revoke" not in body
+        body = {**body, "workspace_id": self.wirkspace} if added else body
+        def lost(reason: str) -> Failure:  # an uncertain write's outcome, with retries that go where this went
+            return unknown(self.url, reason, uncertain, body.get("workspace_id"), added)
         for attempt in range(2 if resend else 1):
             try:
                 answer = self.http.post(self.url + route, json=body, timeout=httpx.Timeout(60 + body.get("wait", 0), connect=10),
                                         headers={"Authorization": f"Bearer {self._token}", **(headers or {})})
-                return self.envelope(answer, route, uncertain)
+                return self.envelope(answer, route, lost if uncertain else None)
             except httpx.TransportError as error:
                 failure = error
         sent = not isinstance(failure, (httpx.ConnectError, httpx.ConnectTimeout))
         if uncertain and sent:
-            raise unknown(self.url, type(failure).__name__, uncertain)  # the type only: a message can quote a header
+            raise lost(type(failure).__name__)  # the type only: a message can quote a header
         raise Failure("service_unavailable", f"could not reach {self.url} ({type(failure).__name__}).",
                       f"Check your network, then: curl {self.url}/health")
 
-    def envelope(self, answer, route: str, uncertain: str | None) -> dict:
+    def envelope(self, answer, route: str, lost) -> dict:
         try:
             data = answer.json()
         except ValueError:
@@ -225,8 +227,8 @@ class Service:
             raise Failure("unexpected_redirect", f"{self.url} answered {status} for POST {route}; "
                           "WIRK clients never follow redirects, so nothing was sent there.",
                           "Ask your WIRK administrator for the service's address.")
-        if uncertain and status >= 500:
-            raise unknown(self.url, f"HTTP {status} with a page that is not from WIRK", uncertain)
+        if lost and status >= 500:
+            raise lost(f"HTTP {status} with a page that is not from WIRK")
         if status == 404:
             raise Failure("missing_route", f"{self.url} answered 404 for POST {route}; this service does not have that "
                           "route yet.", "This client needs a newer service; tell your WIRK administrator.")
@@ -270,7 +272,12 @@ class Service:
                           f"Run the same command again: {retry}") from None
 
 
-def unknown(url: str, reason: str, request_id: str) -> Failure:
+def unknown(url: str, reason: str, request_id: str, sent: str | None = None, added: bool = False) -> Failure:
+    """Both commands go where the first attempt went: the receipt names the wirkspace sent, and the retry names it
+    when the chat's choice supplied it rather than the command."""
+    place = [f"workspace_id={sent}"] if sent else []
+    again = command("--request-id", request_id, *(place if added else []))
+    receipt = command("wirk", "query", f"receipt={request_id}", *place)
     return Failure("outcome_unknown", f"{url} did not answer ({reason}); request {request_id} may or may not have been "
-                   "applied.", f"Run the same command again with --request-id {shell_word(request_id)}: it applies once or "
-                   f"returns the stored receipt. Or: {command('wirk', 'query', f'receipt={request_id}')}")
+                   "applied.", f"Run the same command again with {again}: it applies once or returns the stored receipt. "
+                   f"Or: {receipt}")

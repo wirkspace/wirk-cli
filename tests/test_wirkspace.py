@@ -72,7 +72,7 @@ def test_choosing_saves_it_and_wirkspace_alone_prints_it(run, chat):
     code, out, err, fake = run(["wirkspace", "sales"], service())
     assert code == 0 and out.strip() == "Now working in Sales (5a1e5000), none before"
     code, out, err, fake = run(["wirkspace"], service())
-    assert code == 0 and out.strip() == "Wirkspace: Sales (5a1e5000) · chosen in this chat" and sent(fake) == [SALES]
+    assert code == 0 and out.strip() == "Wirkspace: Sales (5a1e5000) · chosen in this chat" and sent(fake) == [None]
     code, out, err, fake = run(["wirkspace", "50990000"], service())
     assert code == 0 and out.strip() == "Now working in Support (50990000), previously Sales (5a1e5000)"
     assert run(["wirkspace", SALES], service())[1].strip() == "Now working in Sales (5a1e5000), previously Support (50990000)"
@@ -139,11 +139,39 @@ def test_both_retry_hints_carry_the_wirkspace_sent(run, chat, tmp_path):
     assert sent(fake) == [SALES]
 
 
-def test_a_retry_hint_adds_no_wirkspace_when_the_line_named_one(run, chat):
+def test_the_receipt_hint_names_the_wirkspace_sent_and_the_retry_adds_none_the_line_gave(run, chat, tmp_path):
     run(["wirkspace", "Sales"], service())
+    timeout = {"/v2/write": no_answer}
     code, out, err, fake = run(["write", "new", "Title", f"workspace_id={SUPPORT}", "--request-id", "w-1"],
-                               service(refuse={"/v2/write": no_answer}))
-    assert code == 1 and "--request-id w-1:" in err and "workspace_id" not in err
+                               service(refuse=timeout))
+    assert code == 1 and "--request-id w-1:" in err and f"wirk query receipt=w-1 workspace_id={SUPPORT}" in err
+    assert SALES not in err
+    (tmp_path / "named.json").write_text(json.dumps({"request_id": "w-2", "operations": [], "workspace_id": SUPPORT}))
+    code, out, err, fake = run(["write", "--request", "named.json"], service(refuse=timeout))
+    assert "wirk write --request named.json:" in err and f"wirk query receipt=w-2 workspace_id={SUPPORT}" in err
+    assert SALES not in err
+
+
+def test_an_uncertain_upload_prints_a_retry_upload_takes(run, chat, tmp_path):
+    """upload takes no workspace_id=, so its retry stays as it was; the receipt still names where it went."""
+    run(["wirkspace", "Sales"], service())
+    (tmp_path / "note.txt").write_text("hello")
+    def files(request):
+        if "confirm" in json.loads(request.content):
+            return no_answer(request)
+        return envelope(data={"present": True})
+    code, out, err, fake = run(["upload", "note.txt", "--request-id", "u-1"], service(refuse={"/v2/files": files}))
+    assert code == 1 and "--request-id u-1:" in err and f"wirk query receipt=u-1 workspace_id={SALES}" in err
+
+
+def test_a_choice_no_longer_reachable_says_so_and_how_to_choose(run, chat):
+    run(["wirkspace", "Sales"], service())
+    code, out, err, fake = run(["wirkspace"], service({SUPPORT: "Support"}))
+    assert code == 1 and "5a1e5000 is no longer reachable" in err and "Choose: wirk wirkspace NAME" in err
+    assert "Support (50990000)" in err
+    assert sent(fake) == [None]
+    code, out, err, fake = run(["wirkspace", "Support"], service({SUPPORT: "Support"}))
+    assert code == 0 and out.strip() == "Now working in Support (50990000), previously 5a1e5000"
 
 
 def test_a_helper_sharing_the_chat_moves_its_launchers_next_write(run, chat):

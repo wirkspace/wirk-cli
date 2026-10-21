@@ -232,13 +232,12 @@ def send(service: Service, route: str, body: dict, options: dict, uncertain: str
     try:
         return emit(service.post(route, body, uncertain=uncertain), options)
     except Failure as failure:
-        place = [f"workspace_id={service.wirkspace}"] if service.wirkspace and "workspace_id" not in body else []
-        if failure.code == "outcome_unknown" and ("--request" in options or place):  # the retry goes where this went
-            again = (": " + command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"], *words, *place,
-                                    *present(options, "--person", "--json")) if "--request" in options
-                     else " with " + command("--request-id", uncertain, *place))
-            failure.hint = (f"Run the same command again{again}: it applies once or returns the stored receipt."
-                            + (f" Or: {command('wirk', 'query', f'receipt={uncertain}', *place)}" if receipt else ""))
+        if failure.code == "outcome_unknown" and "--request" in options:  # the retry goes where this went
+            added = [f"workspace_id={service.wirkspace}"] if service.wirkspace and "workspace_id" not in body else []
+            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"], *words, *added,
+                            *present(options, "--person", "--json"))
+            failure.hint = (f"Run the same command again: {again}: it applies once or returns the stored receipt."
+                            + (failure.hint[failure.hint.index(" Or: "):] if receipt else ""))
         raise
 
 
@@ -276,8 +275,10 @@ def upload(words, options, transport):
     request_id, description = options.get("--request-id") or new_id("u"), options.get("--description")
     retry = command("wirk", "upload", words[0], "--request-id", request_id,  # the path as given, the same ID and description
                     *(["--description", description] if description is not None else []), *present(options, "--json"))
+    service = connect(transport)  # the wirkspace named here, so an uncertain confirm's retry adds no word upload refuses
     with readable(words[0]) as source:
-        return emit(store(source, words[0], request_id, retry, connect(transport), description, form=fmt(options)), options)
+        answer = store(source, words[0], request_id, retry, service, description, service.wirkspace, fmt(options))
+    return emit(answer, options)
 
 
 def store(source, path: str, request_id: str, retry: str, service: Service, description: str | None = None,
@@ -487,7 +488,7 @@ def digest_login(service: Service, url: str, token: str) -> int:
     if answer["ok"]:
         you = answer["data"]["you"]
         space = you["wirkspace"]
-        print(f"Logged in to {url} as {you['principal']} · wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}). "
+        print(f"Logged in to {url} as {you['principal']} · wirkspace {space['name']} ({short(space['id'])}). "
               "Next: wirk status")
     elif problem.get("code") == "unauthenticated":
         print("This machine's token is not registered yet. Send this digest to your WIRK administrator "
@@ -520,12 +521,10 @@ def wirkspace(words, options, transport):
     if len(words) > 1:
         raise UsageError("wirkspace takes one NAME or ID; quote a name with spaces")
     service, binding = connect(transport), actor_binding()
-    previous = service.wirkspace
-    if words:
-        if not binding:
-            raise UsageError("the choice belongs to one agent chat, and this is not one; "
-                             "add workspace_id=ID to each command")
-        service.wirkspace = None  # ask with no default, so the service lists every wirkspace you reach
+    previous, service.wirkspace = service.wirkspace, None  # ask with no default: the service lists what you reach
+    if words and not binding:
+        raise UsageError("the choice belongs to one agent chat, and this is not one; "
+                         "add workspace_id=ID to each command")
     answer = service.post("/v2/status", {"format": "json", "max_bytes": 1024})
     if answer["ok"]:
         reach = [answer["data"]["you"]["wirkspace"]]
@@ -534,10 +533,14 @@ def wirkspace(words, options, transport):
     else:
         return emit(answer, options)
     listed = ", ".join(map(named, reach))
+    mine = [space for space in reach if space["id"] == previous]
     if not words:
-        if len(reach) == 1:
-            how = "chosen in this chat" if previous else "your only one"
-            return said(f"Wirkspace: {named(reach[0])} · {how}", {"wirkspace": reach[0]}, options)
+        if previous and not mine:
+            raise Failure("not_available", f"this chat's chosen wirkspace {short(previous)} is no longer reachable",
+                          f"You reach {listed}. Choose: wirk wirkspace NAME")
+        if mine or len(reach) == 1:
+            space, how = (mine[0], "chosen in this chat") if mine else (reach[0], "your only one")
+            return said(f"Wirkspace: {named(space)} · {how}", {"wirkspace": space}, options)
         text = (f"No wirkspace chosen in this chat. You reach {listed}.\nChoose: wirk wirkspace NAME" if binding
                 else f"You reach {listed}.\nAdd workspace_id=ID to each command.")
         return said(text, {"wirkspace": None, "reach": reach}, options)
@@ -548,7 +551,7 @@ def wirkspace(words, options, transport):
         raise Failure("invalid_input", f"{problem} called {words[0]}; nothing changed",
                       f"You reach {listed}. Choose one by name or ID: wirk wirkspace NAME", 2)
     write_private(choice_path(service.url, binding), matches[0]["id"])
-    before = next((named(space) for space in reach if space["id"] == previous), previous and short(previous))
+    before = named(mine[0]) if mine else previous and short(previous)
     return said(f"Now working in {named(matches[0])}, " + (f"previously {before}" if before else "none before"),
                 {"wirkspace": matches[0], "previous": previous}, options)
 
