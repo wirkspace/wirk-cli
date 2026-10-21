@@ -12,8 +12,8 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from . import __version__, context, grammar
-from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, check_url, config_dir, digest, file_digest, new_token, \
-    read_token, save_url, saved_url
+from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, config_dir, \
+    digest, file_digest, new_token, read_token, save_url, saved_url, signed_in
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
 
@@ -125,12 +125,8 @@ def confirm(phrase: str, purpose: str) -> None:
         raise UsageError("not confirmed; nothing was sent")
 
 
-def connect(transport, person: bool = False) -> Service:
-    directory = config_dir()
-    token, url = read_token(directory / (PERSON if person else AGENT)), saved_url(directory)
-    if url is None:
-        raise Failure("not_configured", "WIRK is not set up on this machine.", f"Run: wirk login   (connects to {DEFAULT_URL})")
-    return Service(url, token, transport)
+def connect(transport, person: bool = False, actor_id: str | None = None) -> Service:
+    return Service(*signed_in(person, actor_id), transport)
 
 
 def fmt(options: dict) -> str:
@@ -347,6 +343,7 @@ def login(words, options, transport):
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
     service = Service(url, token, transport)
+    binding = None if person else actor_binding()
     request = {"for": "person" if person else "agent", "label": f"wirk-cli on {platform.system() or 'unknown'}"}
     try:
         answer = service.post("/v2/login", {**request, "format": "json"})
@@ -374,10 +371,26 @@ def login(words, options, transport):
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
-        return approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+        result = approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+        return enrol(service, actor_path(url, binding)) if result == 0 and binding else result
     finally:
         if listener:
             listener.close()
+
+
+def enrol(machine: Service, path: Path) -> int:
+    """A chat signs in as itself under this machine's approved token: no browser, no person. A kept token the service
+    refuses (revoked, or 90 days unused) is replaced by a new one, which is a new agent, and says so."""
+    def send(child: str) -> dict:
+        return machine.post("/v2/login", {"for": "actor", "label": "wirk actor"},
+                            headers={"Wirk-Actor-Authorization": f"Bearer {child}"})
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    answer = send(read_token(path)) if path.exists() else None
+    if answer is None or not answer["ok"] and answer["errors"][0]["code"] == "not_authorized":
+        if answer is not None:
+            print("This chat's old WIRK token was refused, so it signs in as a new agent.", flush=True)
+        answer = send(new_token(path))
+    return emit(answer, {})
 
 
 def browser_here() -> bool:

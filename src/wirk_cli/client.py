@@ -109,6 +109,37 @@ def new_token(path: Path) -> str:
     return token
 
 
+
+def actor_binding(thread_id: str | None = None) -> str | None:
+    """The agent chat this process serves, so it signs in as itself: Codex's thread (as MCP's request names it, else
+    the environment's) and Claude Code's session, each a UUID, joined. A worker one chat starts carries an ID its
+    launcher lacks, so it never acts as its launcher. None outside any chat: the machine's shared identity."""
+    def valid(value: str | None) -> str | None:
+        return value.lower() if value and re.fullmatch(r"[0-9a-fA-F-]{36}", value) else None
+    ids = (valid(thread_id) or valid(os.environ.get("CODEX_THREAD_ID")), valid(os.environ.get("CLAUDE_CODE_SESSION_ID")))
+    return ",".join(i for i in ids if i) or None
+
+
+def actor_path(url: str, binding: str) -> Path:
+    """A chat's own token, private like the machine's: one file per service and chat in the private actors folder."""
+    return config_dir() / "actors" / hashlib.sha256(json.dumps([url, binding]).encode()).hexdigest()
+
+
+def signed_in(person: bool = False, actor_id: str | None = None) -> tuple[str, str]:
+    """The service address and the token every command sends: in an agent chat the chat's own, never the machine's;
+    otherwise this machine's agents' token, or the person's own."""
+    directory = config_dir()
+    token, url = read_token(directory / (PERSON if person else AGENT)), saved_url(directory)
+    if url is None:
+        raise Failure("not_configured", "WIRK is not set up on this machine.", f"Run: wirk login   (connects to {DEFAULT_URL})")
+    if binding := None if person else actor_binding(actor_id):
+        if not (path := actor_path(url, binding)).exists():
+            raise Failure("actor_setup_required", "This chat has no WIRK token of its own yet.",
+                          "Run: wirk login   (in this chat; no browser once the machine is approved), then retry")
+        token = read_token(path)
+    return url, token
+
+
 def file_digest(stream) -> tuple[int, str]:
     """The size and SHA-256 of an open file, read in blocks; the file is left at its start."""
     check, size = hashlib.sha256(), 0
