@@ -223,6 +223,18 @@ def write_seen(words: list[str], options: dict) -> dict:
     return write_body([{"op": "message.acknowledge", "messages": messages}], {}, options, workspace)
 
 
+def write_archive(action: str, words: list[str], options: dict) -> dict:
+    """item.archive or item.restore of one ID@N; the service asks an archive for its reason."""
+    positionals, pairs = split(words)
+    workspace = pairs.pop("workspace_id", None)
+    other = [*sorted(set(options) - {"--reason", "--propose", "--request-id", "--json"}), *pairs]
+    if len(positionals) != 1 or other:
+        raise UsageError(f"write {action} takes ID@N, --reason, --propose, --request-id and workspace_id="
+                         + (f", not {other[0]}" if other else ""))
+    item, read = revision(positionals[0], f"write {action}")
+    return write_body([{"op": f"item.{action}", "id": item}], {item: read}, options, workspace)
+
+
 def review_body(words: list[str], options: dict) -> dict:
     positionals, pairs = split(words)
     workspace = pairs.pop("workspace_id", None)

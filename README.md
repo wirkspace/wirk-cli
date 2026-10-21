@@ -86,6 +86,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 - `wirk login` opens your browser, at a terminal or not, and one click connects this machine; `wirk login --person` connects you and your agents in the same click, with no typed phrase. With no browser here it prints a link to open on any computer.
 - Connected GitHub sources can be previewed and imported through the existing `wirk import github` command with an ordinary agent login and an explicit source delegation.
 - `workspace_id=ID` works on every command line: beside `--request FILE` for `write`, `review` and `query` (when the file names no wirkspace; a file that names one is refused with the word) and on `wirk review`.
+- `wirk write archive ID@N --reason TEXT` and `wirk write restore ID@N` send the archive and restore operations at the revision you read, so neither needs a request file.
 
 ### 0.4.10
 

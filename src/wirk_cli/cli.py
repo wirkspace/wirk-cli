@@ -189,6 +189,8 @@ def query(words, options, transport):
 
 def shortcut(words: list[str], options: dict) -> dict:
     action, rest = (words[0], words[1:]) if words else ("", [])
+    if action in ("archive", "restore"):
+        return grammar.write_archive(action, rest, options)
     if "--body" in options and "--body-file" in options:
         raise UsageError("give --body or --body-file, not both")
     if action != "message" and MESSAGE_ONLY & set(options):
@@ -196,15 +198,11 @@ def shortcut(words: list[str], options: dict) -> dict:
     if action == "seen":
         return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
-    if action in ("archive", "restore"):  # the body the service's basis hint describes, in the same words
-        reason = ', "reason": a reason in your words' if action == "archive" else ""
-        raise UsageError(f'write has no {action} shortcut: run wirk write --request FILE, the file holding {{"request_id": a new '
-                         f'request_id, "operations": [{{"op": "item.{action}", "id": the item\'s ID}}], "expect": {{the item\'s '
-                         f"ID: the revision you read}}{reason}}}; nothing was sent")
     if action == "message":
         return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
-        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, or --request FILE")
+        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, archive ID@N, "
+                         "restore ID@N, or --request FILE")
     if action == "link":
         return grammar.write_link(rest, options)
     return (grammar.write_new if action == "new" else grammar.write_edit)(rest[0], rest[1:], options, text)

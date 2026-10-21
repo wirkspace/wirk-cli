@@ -65,7 +65,7 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
        wirk write link FROM@N TYPE TO[@N]
        wirk write message [--to ID,…] [--on ITEM,…] [--reply-to ID] [--title TEXT] --body TEXT | --body-file PATH
-       wirk write seen ID…
+       wirk write seen ID… · archive ID@N --reason TEXT · restore ID@N
        wirk write --request FILE [workspace_id=ID]   (- reads standard input)
   Shortcuts take --request-id ID and --json; --propose needs --reason and cannot send or acknowledge messages.
 

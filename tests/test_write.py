@@ -124,8 +124,6 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "new", "T", "kind=folder"], "--request"),
     (["write", "new", "T", "kind=memo"], "kind is work, record or context here"),
     (["write", "new", "T", "level=initiative"], "kind=context"),
-    (["write", "archive", "5c1e7a90@1"], "--request"),
-    (["write", "restore", "5c1e7a90@1"], "--request"),
 ])
 def test_write_usage_errors_send_nothing(run, argv, words):
     code, out, err, fake = run(argv)
@@ -247,10 +245,52 @@ def test_request_takes_no_other_word(run, tmp_path, words):
     assert code == 2 and fake.requests == [] and "except workspace_id=ID" in err
 
 
-@pytest.mark.parametrize("action, reason", [("archive", ', "reason": a reason in your words'), ("restore", "")])
-def test_write_archive_and_restore_refusals_describe_the_body(run, action, reason):
-    code, out, err, fake = run(["write", action, "5c1e7a90@1"])
+# The archive and restore shortcuts (decided 21 October 2026).
+
+def test_write_archive_sends_one_archive_at_the_revision_read(run):
+    code, out, err, fake = run(["write", "archive", "5c1e7a90@3", "--reason", "Done elsewhere"])
+    assert code == 0
+    body = fake.bodies()[0]
+    assert __import__("re").fullmatch(r"w-[0-9a-f]{10}", body.pop("request_id"))
+    assert body == {"operations": [{"op": "item.archive", "id": "5c1e7a90"}], "expect": {"5c1e7a90": 3},
+                    "reason": "Done elsewhere", "format": "text"}
+
+
+@pytest.mark.parametrize("extra, reason", [([], {}), (["--reason", "Back in scope"], {"reason": "Back in scope"})])
+def test_write_restore_sends_a_restore_with_or_without_a_reason(run, extra, reason):
+    body = sent(run, ["write", "restore", "5c1e7a90@4", "workspace_id=4d5e6f70", "--request-id", "mine-2", *extra])
+    assert body == {"operations": [{"op": "item.restore", "id": "5c1e7a90"}], "expect": {"5c1e7a90": 4}, **reason,
+                    "workspace_id": "4d5e6f70"}
+
+
+def test_write_archive_can_be_proposed(run):
+    body = sent(run, ["write", "archive", "5c1e7a90@3", "--reason", "Superseded", "--propose"])
+    assert body["mode"] == "propose" and body["operations"] == [{"op": "item.archive", "id": "5c1e7a90"}]
+
+
+@pytest.mark.parametrize("action", ["archive", "restore"])
+@pytest.mark.parametrize("option", [["--body-file", "missing.md"], ["--body", "x"], ["--evidence", "x"], ["--title", "T"],
+                                    ["--link", "related_to:6a0d2e83"], ["--to", "bob"], ["--on", "6a0d2e83"]])
+def test_archive_and_restore_refuse_other_options_before_reading_any_file(run, action, option):
+    code, out, err, fake = run(["write", action, "5c1e7a90@1", "--reason", "Gone", *option])
     assert code == 2 and fake.requests == []
-    assert (f'write has no {action} shortcut: run wirk write --request FILE, the file holding {{"request_id": a new request_id, '
-            f'"operations": [{{"op": "item.{action}", "id": the item\'s ID}}], "expect": {{the item\'s ID: the revision you '
-            f'read}}{reason}}}; nothing was sent') in err
+    assert f"write {action} takes ID@N" in err and option[0] in err and "cannot be read" not in err
+
+
+@pytest.mark.parametrize("words", [["5c1e7a90@1", "status=open"], ["5c1e7a90@1", "6a0d2e83@2"], []])
+def test_archive_takes_one_item_and_no_fields(run, words):
+    code, out, err, fake = run(["write", "archive", *words, "--reason", "Gone"])
+    assert code == 2 and fake.requests == [] and "write archive takes ID@N" in err
+
+
+def test_write_archive_without_a_revision_says_fetch_it_first(run):
+    code, out, err, fake = run(["write", "archive", "5c1e7a90", "--reason", "Gone"])
+    assert code == 2 and fake.requests == []
+    assert "write archive needs the revision you read, 5c1e7a90@N" in err and "wirk query 5c1e7a90" in err
+
+
+def test_an_archive_without_a_reason_reaches_the_service(run):
+    words = "Archiving needs a reason"
+    code, out, err, fake = run(["write", "archive", "5c1e7a90@1"],
+                               lambda request: refusal("reason_required", words, text=f"Not applied w-1 · reason_required: {words}"))
+    assert code == 1 and len(fake.requests) == 1 and "reason" not in fake.bodies()[0]
