@@ -69,9 +69,33 @@ def save_url(directory: Path, url: str) -> None:
     (directory / "config.json").write_text(json.dumps({"service_url": url}) + "\n")
 
 
+def read_private(path: Path) -> str:
+    """One of WIRK's own files: a regular file of yours that only you can read; a link or another user's is refused."""
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise Failure("insecure_token_file", f"{path} must be a regular file of yours that only you can read.",
+                      f"Fix: {command('chmod', '600', str(path))}  (a link or another user's file is refused)")
+    return path.read_text().strip()
+
+
+def write_private(path: Path, text: str) -> None:
+    """Written to a file only its owner can read; a planted file or link is refused, not followed."""
+    temporary = path.with_name(path.name + ".new")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        raise Failure("token_file_exists", f"{temporary} already exists; WIRK will not write through it.",
+                      "Check what it is, remove it, then run the same command again.") from None
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(text)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
 def read_token(path: Path) -> str:
     try:
-        info = os.lstat(path)
+        token = read_private(path)
     except FileNotFoundError:
         if path.name == AGENT:
             raise Failure("not_configured", "This command needs your agents' sign-in on this machine.",
@@ -81,11 +105,6 @@ def read_token(path: Path) -> str:
                           "Run: wirk login --person   (at your own terminal)") from None
         raise Failure("not_configured", "WIRK is not set up on this machine.",
                       f"Run: wirk login   (connects to {DEFAULT_URL})") from None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise Failure("insecure_token_file", f"{path} must be a regular file of yours that only you can read.",
-                      f"Fix: {command('chmod', '600', str(path))}  (a link or another user's file is refused)")
-    try:
-        token = path.read_text().strip()
     except UnicodeDecodeError:
         token = ""
     if not TOKEN.fullmatch(token):  # anything else could reach a header, or an error that quotes one
@@ -94,20 +113,10 @@ def read_token(path: Path) -> str:
 
 
 def new_token(path: Path) -> str:
-    """32 random bytes, written to a file only its owner can read; a planted file or link is refused, not followed."""
-    token, temporary = "wirk_" + secrets.token_urlsafe(32), path.with_name(path.name + ".new")
-    try:
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    except FileExistsError:
-        raise Failure("token_file_exists", f"{temporary} already exists; WIRK will not write through it.",
-                      f"Check what it is, remove it, then run wirk login again.") from None
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(token)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
+    """32 random bytes, written to a file only its owner can read."""
+    token = "wirk_" + secrets.token_urlsafe(32)
+    write_private(path, token)
     return token
-
 
 
 def actor_binding(thread_id: str | None = None) -> str | None:
