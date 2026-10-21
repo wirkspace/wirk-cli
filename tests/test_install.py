@@ -299,9 +299,18 @@ def test_wirk_version_installs_that_version_instead(tmp_path):
     result = install(tmp_path, base, "--url", URL, WIRK_VERSION="0.4.26")
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("Installing WIRK 0.4.26\n") and versions(tmp_path) == ["0.4.26", "0.4.26"]
-    assert (tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md").read_text().endswith("0.4.26\n")
-    without_skill = install(tmp_path, base, "--url", URL, WIRK_VERSION=LATEST)  # no wirk-skill v0.4.27 release
-    assert without_skill.returncode != 0 and f"v{LATEST}/SHA256SUMS" in without_skill.stderr
+    skill = tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md"
+    assert skill.read_text().endswith("latest\n")  # the skill's own latest release, even when a v0.4.26 exists
+
+
+@needs_uv
+def test_a_pinned_version_without_its_own_skill_release_takes_the_latest_skill(tmp_path):
+    """The three packages do not share versions: there is no wirk-skill v0.4.27, and that must not stop the install."""
+    base = release(tmp_path)
+    result = install(tmp_path, base, "--url", URL, WIRK_VERSION=LATEST)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert versions(tmp_path) == [LATEST, LATEST] and f"wirk {LATEST} login --url {URL}" in result.stdout
+    assert (tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md").read_text().endswith("latest\n")
 
 
 @needs_uv

@@ -7,13 +7,12 @@
 #   sh install.sh --url URL        connect to another WIRK service
 #
 # It installs uv if it is missing (after asking), installs or upgrades the wirk command and the wirk-mcp server to
-# their latest release on PyPI, sets up Claude Code and Codex with the latest skill when they are present (after
-# asking), and runs wirk login; WIRK_VERSION=X takes release X of all three instead. It never uses sudo. Running it
-# again is safe: it upgrades both clients in place and replaces an earlier wirk MCP server and skill.
+# their latest release on PyPI (WIRK_VERSION=X installs X of both instead), sets up Claude Code and Codex with the
+# latest skill when they are present (after asking), and runs wirk login. It never uses sudo. Running it again is
+# safe: it upgrades both clients in place and replaces an earlier wirk MCP server and skill.
 set -eu
 
 VERSION="${WIRK_VERSION:-}"  # empty: the latest release
-RELEASE="${VERSION:+download/v$VERSION}"  # the skill's release: that same version, else the latest
 BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the skill's releases live; a test may change it
 DRY=0
 YES=0
@@ -53,9 +52,9 @@ sha256() {
   if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-fetch() {  # fetch REPO FILE: one file of the release, checked against that release's SHA256SUMS
-  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/${RELEASE:-latest/download}/SHA256SUMS"
-  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/${RELEASE:-latest/download}/$2"
+fetch() {  # fetch REPO FILE: one file of the latest release, checked against that release's SHA256SUMS
+  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/latest/download/SHA256SUMS"
+  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/latest/download/$2"
   if [ "$DRY" -eq 1 ]; then return 0; fi
   want=$(awk -v name="$2" '$2 == name { print $1 }' "$TMP/$1.sums")
   if [ -z "$want" ] || [ "$want" != "$(sha256 "$TMP/$2")" ]; then
