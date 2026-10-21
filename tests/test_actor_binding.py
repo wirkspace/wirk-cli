@@ -3,6 +3,8 @@
 import json
 import uuid
 
+import pytest
+
 from conftest import TOKEN, URL, envelope, refusal, write_token
 from wirk_cli import client
 
@@ -148,3 +150,51 @@ def test_chat_tokens_are_private_files_in_a_private_folder(run, home, monkeypatc
     path = client.actor_path(URL, CLAUDE.lower())
     assert path.parent == home / "actors" and path.parent.stat().st_mode & 0o777 == 0o700
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def bearers(fake) -> list[str]:
+    """The bearer of each chat enrolment sent."""
+    return [r.headers["authorization"][7:] for r in fake.requests if json.loads(r.content)["for"] == "actor"]
+
+
+def test_a_worker_logs_in_with_its_launchers_token(run, monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    code, out, err, fake = run(["login"], service())
+    assert code == 0 and bearers(fake) == [TOKEN]  # the launcher itself enrols under the machine
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)  # a worker the first chat started on another host
+    code, out, err, fake = run(["login"], service())
+    assert code == 0 and bearers(fake) == [chat_token(CODEX_A)]
+    assert fake.requests[-1].headers["wirk-actor-authorization"] == f"Bearer {chat_token(CODEX_A, CLAUDE)}"
+
+
+def test_no_or_two_launcher_tokens_fall_back_to_the_machine(run, monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
+    code, out, err, fake = run(["login"], service())  # neither part has a token: no launcher is known
+    assert code == 0 and bearers(fake) == [TOKEN]
+    monkeypatch.delenv("CODEX_THREAD_ID")
+    run(["login"], service())
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    run(["login"], service())
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
+    code, out, err, fake = run(["login"], service())  # both parts have one: which started it is unknown
+    assert code == 0 and bearers(fake) == [TOKEN]
+
+
+@pytest.mark.parametrize("reason", ["This chat's WIRK token was revoked; see your account page",
+                                    "This chat's WIRK token went 90 days unused"])
+def test_a_refused_launcher_says_why_and_signs_in_nowhere(run, monkeypatch, reason):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    run(["login"], service())
+    launcher = chat_token(CODEX_A)
+    def refusing(request):
+        if request.headers["authorization"] == f"Bearer {launcher}":
+            return refusal("unauthenticated", reason, status=401,
+                           hint="Run: wirk login   (in this chat; it signs in as a new agent)")
+        return service()(request)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
+    code, out, err, fake = run(["login"], refusing)
+    assert code == 1 and reason in out and "started this one" in out
+    assert bearers(fake) == [launcher]  # never enrolled under the machine instead
+    assert chat_token(CODEX_A) == launcher

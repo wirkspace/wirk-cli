@@ -134,6 +134,13 @@ def actor_path(url: str, binding: str) -> Path:
     return config_dir() / "actors" / hashlib.sha256(json.dumps([url, binding]).encode()).hexdigest()
 
 
+def launcher(url: str, binding: str) -> Path | None:
+    """The token of the chat that started this one: a worker's binding holds its launcher's ID and its own, so the one
+    part of it with a token kept here is the launcher. None when no part, or more than one, has one."""
+    found = [path for one in binding.split(",") if one != binding and (path := actor_path(url, one)).exists()]
+    return found[0] if len(found) == 1 else None
+
+
 def signed_in(person: bool = False, actor_id: str | None = None) -> tuple[str, str]:
     """The service address and the token every command sends: in an agent chat the chat's own, never the machine's;
     otherwise this machine's agents' token, or the person's own."""
