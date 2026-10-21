@@ -294,3 +294,14 @@ def test_an_archive_without_a_reason_reaches_the_service(run):
     code, out, err, fake = run(["write", "archive", "5c1e7a90@1"],
                                lambda request: refusal("reason_required", words, text=f"Not applied w-1 · reason_required: {words}"))
     assert code == 1 and len(fake.requests) == 1 and "reason" not in fake.bodies()[0]
+
+
+@pytest.mark.parametrize("verb, body", [("write", {"request_id": "w-1", "operations": []}), ("query", {"fetch": ["5c1e7a90"]}),
+                                        ("review", {"request_id": "r-1", "decisions": []})])
+@pytest.mark.parametrize("ok", [True, False])
+def test_a_request_file_asking_for_json_prints_the_json_answer(run, tmp_path, verb, body, ok):
+    (tmp_path / "body.json").write_text(json.dumps({**body, "format": "json"}))
+    answer = envelope(data={"results": []}) if ok else refusal("basis_changed", "5c1e7a90 is at r3; you read r2", status=409)
+    code, out, err, fake = run([verb, "--request", "body.json"], lambda request: answer)
+    assert (code, json.loads(out)["ok"]) == ((0, True) if ok else (1, False))
+    assert fake.bodies()[-1]["format"] == "json"
