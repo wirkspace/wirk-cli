@@ -8,8 +8,12 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
+from contextlib import contextmanager
 from importlib.metadata import distributions
 from pathlib import Path
+
+import httpx
 
 from .client import config_dir
 
@@ -24,10 +28,9 @@ def after(command: str) -> None:
         return
     try:
         directory = config_dir()
-        held = lock(directory)
-        if held is None:  # an update is running now
-            return
-        with os.fdopen(held, "w"):
+        with locked(directory) as held:
+            if not held:  # an update is running now
+                return
             data, now = load(directory), time.time()
             if data.get("notice") and abs(now - data.get("shown", 0)) >= DAY:
                 print(data["notice"], file=sys.stderr)
@@ -46,10 +49,9 @@ def after(command: str) -> None:
 def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
     """In the detached process: upgrade each install that PyPI has a newer release of; record what could not be."""
     directory = config_dir()
-    held = lock(directory)
-    if held is None:
-        return
-    with os.fdopen(held, "w"):
+    with locked(directory) as held:
+        if not held:
+            return
         wanted = [(name, have, command, env, latest(name, transport)) for name, have, command, env in targets(prefix)]
         if any(want is None for *_, want in wanted):  # PyPI did not answer plainly: try again next hour
             return
@@ -73,10 +75,10 @@ def targets(prefix: Path) -> list:
         return []
     name = "wirk-mcp" if "wirk-mcp" in found else "wirk"  # wirk-mcp pins its wirk: upgrading it brings the pair
     if (prefix / "uv-receipt.toml").exists():
-        sibling = prefix.parent / "wirk-mcp"
-        tools = [(name, prefix)] + ([("wirk-mcp", sibling)] if name == "wirk" and (sibling / "uv-receipt.toml").exists()
-                                    else [])
-        return [uv_tool(tool, place) for tool, place in tools]
+        places = {name: prefix}
+        if name == "wirk" and (prefix.parent / "wirk-mcp" / "uv-receipt.toml").exists():  # the installer's layout
+            places["wirk-mcp"] = prefix.parent / "wirk-mcp"
+        return [uv_tool(tool, place) for tool, place in places.items()]
     command = [str(prefix / "bin" / "python"), "-I", "-m", "pip", "install", "--quiet", name + "=={}"]
     return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, None)]
 
@@ -94,10 +96,9 @@ def installed(prefix: Path) -> dict:
 
 def uv_tool(name: str, prefix: Path):
     """The uv tool at PREFIX upgrades in place: its own tool folder, and its commands where they are now."""
-    import tomllib
     tool = tomllib.loads((prefix / "uv-receipt.toml").read_text())["tool"]
-    uv = shutil.which("uv") or next((str(path) for path in (Path(os.environ.get("XDG_BIN_HOME") or "/nonexistent") / "uv",
-                                                            Path.home() / ".local" / "bin" / "uv") if path.is_file()), None)
+    folders = (os.environ.get("PATH"), os.environ.get("XDG_BIN_HOME"), str(Path.home() / ".local" / "bin"))
+    uv = shutil.which("uv", path=os.pathsep.join(folder for folder in folders if folder))  # where the installer looks
     env = {**os.environ, "UV_TOOL_DIR": str(prefix.parent),
            "UV_TOOL_BIN_DIR": str(Path(tool["entrypoints"][0]["install-path"]).parent)}
     return name, installed(prefix)[name][0], uv and [uv, "tool", "install", name + "=={}"], env
@@ -105,7 +106,6 @@ def uv_tool(name: str, prefix: Path):
 
 def latest(name: str, transport=None):
     """PyPI's latest release of NAME as N.N.N, or None when PyPI does not answer plainly."""
-    import httpx
     try:
         with httpx.Client(transport=transport, timeout=10) as client:
             version = client.get(f"https://pypi.org/pypi/{name}/json").raise_for_status().json()["info"]["version"]
@@ -126,17 +126,18 @@ def upgraded(command: list, env, directory: Path) -> bool:
         return False
 
 
-def lock(directory: Path):
-    """A descriptor holding update.lock, or None when another process holds it."""
-    import fcntl
+@contextmanager
+def locked(directory: Path):
+    """Holds update.lock and gives True, or gives False at once when another process holds it."""
+    import fcntl  # POSIX only, so imported here: the CLI itself still loads anywhere
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(directory / "update.lock", os.O_WRONLY | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return descriptor
-    except OSError:
-        os.close(descriptor)
-        return None
+    with open(directory / "update.lock", "a") as file:
+        try:
+            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        yield True
 
 
 def load(directory: Path) -> dict:
