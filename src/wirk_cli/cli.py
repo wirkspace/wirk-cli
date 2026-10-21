@@ -15,7 +15,8 @@ from urllib.parse import urlencode
 
 from . import __version__, context, grammar
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
-    chosen, config_dir, digest, file_digest, new_token, read_token, save_url, saved_url, signed_in, write_private
+    chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
+    write_private
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
 
@@ -383,7 +384,7 @@ def login(words, options, transport):
         if pending:
             listener = show_link(asks, listener)
         result = approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
-        return enrol(service, actor_path(url, binding)) if result == 0 and binding else result
+        return enrol(service, actor_path(url, binding), launcher(url, binding)) if result == 0 and binding else result
     finally:
         if listener:
             listener.close()
@@ -404,18 +405,25 @@ def machine_name() -> str:
     return name if name.lower() not in ("", "localhost") else f"wirk-cli on {platform.system() or 'unknown'}"
 
 
-def enrol(machine: Service, path: Path) -> int:
-    """A chat signs in as itself under this machine's approved token: no browser, no person. A kept token the service
-    refuses (revoked, or 90 days unused) is replaced by a new one, which is a new agent, and says so."""
+def enrol(machine: Service, path: Path, started_by: Path | None) -> int:
+    """A chat signs in as itself under this machine's approved token: no browser, no person. A worker sends the token
+    of the chat that started it instead, so it is filed under that chat; when the service refuses that token, the
+    worker says why and signs in nowhere. A kept token the service refuses (revoked, or 90 days unused) is replaced by
+    a new one, which is a new agent, and says so."""
+    bearer = {"Authorization": f"Bearer {read_token(started_by)}"} if started_by else {}
     def send(child: str) -> dict:
         return machine.post("/v2/login", {"for": "actor", "label": "wirk actor"},
-                            headers={"Wirk-Actor-Authorization": f"Bearer {child}"})
+                            headers={**bearer, "Wirk-Actor-Authorization": f"Bearer {child}"})
     path.parent.mkdir(mode=0o700, exist_ok=True)
     answer = send(read_token(path)) if path.exists() else None
     if answer is None or not answer["ok"] and answer["errors"][0]["code"] == "not_authorized":
         if answer is not None:
             print("This chat's old WIRK token was refused, so it signs in as a new agent.", flush=True)
         answer = send(new_token(path))
+    if started_by and not answer["ok"] and answer["errors"][0]["code"] == "unauthenticated":
+        answer["errors"][0].pop("hint", None)  # the service's hint is for the launcher's chat, not this one
+        print("The chat that started this one was refused, so this one does not sign in. Run wirk login in that chat, "
+              "then here again.", flush=True)
     return emit(answer, {})
 
 
