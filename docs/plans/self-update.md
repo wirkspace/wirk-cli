@@ -1,6 +1,6 @@
 # Plan: wirk keeps itself current
 
-Status: plan, revision 3 (after adversarial review and a recheck; matches the build). Branch `self-update` in wirk-cli only.
+Status: plan, revision 4 (after adversarial review, a recheck and the code review's fix round; matches the build). Branch `self-update` in wirk-cli only.
 
 ## Outcome
 
@@ -19,23 +19,28 @@ changed or interrupted.
   session, working directory the configuration directory, no inherited stdin, stdout or stderr) and exits. The
   command itself never touches the network for this: its cost is one small file read and write and one process
   start. Nothing happens on Windows (`os.name != "posix"`).
-- The detached process takes a non-blocking lock on `update.lock` in the configuration directory and exits if
-  another holds it, so two upgrades of one environment never run together. For each target below it asks
+- The detached process takes the lock on `update.lock` in the configuration directory, waiting for an update that
+  is still running, so two upgrades of one environment never run together and no hour's check is lost. For each target below it asks
   `https://pypi.org/pypi/NAME/json` for `info.version`, compares it with that target's installed version as integer
   tuples, and when PyPI's is newer runs the target's upgrade to exactly that version:
 
   | How this wirk was installed (from `sys.prefix`) | Target and upgrade |
   | --- | --- |
-  | `uv tool` (`sys.prefix/uv-receipt.toml` exists) | `uv tool install NAME==X`, with `UV_TOOL_DIR` the parent of `sys.prefix` and `UV_TOOL_BIN_DIR` the folder of the receipt's first entry point (without it uv moves the command to its default folder; observed) |
-  | the same, with a sibling `wirk-mcp` tool in that tool directory (the installer's layout) | a second, independent target: `uv tool install wirk-mcp==M` with that tool's own receipt |
-  | any other virtual environment (`pyvenv.cfg` in `sys.prefix`), `pipx`'s included | `python -I -m pip install --quiet NAME==X` with its interpreter; an unwritable one, or one without pip, fails and gets the notice |
+  | `uv tool` (`sys.prefix/uv-receipt.toml` exists) | `uv tool install --no-config --default-index https://pypi.org/simple [--python P] NAME==X`, `P` the receipt's Python when it names one, with `UV_TOOL_DIR` the parent of `sys.prefix` and `UV_TOOL_BIN_DIR` the folder of the receipt's first entry point (without it uv moves the command to its default folder; observed) |
+  | the same, with a sibling `wirk-mcp` tool in that tool directory (the installer's layout) | a second, independent target: the same for `wirk-mcp==M` with that tool's own receipt, unless it is editable |
+  | any other virtual environment (`pyvenv.cfg` in `sys.prefix`), `pipx`'s included | `python -I -m pip install --isolated --quiet --disable-pip-version-check --index-url https://pypi.org/simple NAME==X` with its interpreter; an unwritable one, or one without pip, fails and gets the notice |
   | anything else: no virtual environment, no `uv` for a uv tool | none; see the notice |
 
   `NAME` is `wirk-mcp` whenever wirk-mcp is installed in this environment, otherwise `wirk`. wirk-mcp pins `wirk==`
   its own version, so upgrading it to PyPI's latest wirk-mcp brings its matching wirk and never breaks the pair; its
   version is compared with PyPI's wirk-mcp, which can lag wirk's. Each target is checked and upgraded on its own, so
-  a sibling wirk-mcp catches up even when wirk is current. `uv` is found as the installer finds it: on `PATH`, then
-  `$XDG_BIN_HOME/uv`, then `~/.local/bin/uv`.
+  a sibling wirk-mcp catches up even when wirk is current. `uv` is found on `PATH`, then in `~/.local/bin`, where uv's
+  own installer puts it.
+- The release always comes from pypi.org: an unattended upgrade inherits whatever a repository's direnv or `.env`
+  exported, so uv runs without configuration files and without the `UV_INDEX*`, `UV_DEFAULT_INDEX`,
+  `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS` and `UV_CONFIG_FILE` settings, and pip runs `--isolated`. The rest of
+  uv's settings (its cache, its Python folder) stay. A uv tool's `--with` packages are not carried over: in the
+  installer's layout that is the old wirk wheel, which the new wirk-mcp's pin replaces.
 - The command's process takes the same lock briefly around its own read and write of `update.json` (and skips
   everything while an update holds it), so the stamp and the notice never overwrite each other.
 - When an upgrade exits non-zero or times out (600 s), or a newer release exists and no upgrade can run here, the process records one
@@ -43,8 +48,8 @@ changed or interrupted.
   success, clears it. A brief network failure during an upgrade can therefore cause one notice, cleared by the next
   hourly success; accepted, because a lasting failure must not stay silent.
 - A recorded notice is printed on standard error at most once in 24 hours, after a command's answer:
-  `wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27`, naming the package and the command
-  this install would run, or `uv tool install wirk` when none can run here. Standard output, and so `--json`, is
+  `wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27`, naming the package: the
+  documented install, which works wherever uv does, including where pip cannot. Standard output, and so `--json`, is
   never touched.
 - Silent, with nothing recorded: PyPI unreachable, slow (10 s timeout) or answering something unexpected; a version
   that is not plain `N.N.N`; an installed version equal to or newer than PyPI's; an editable install of wirk or
