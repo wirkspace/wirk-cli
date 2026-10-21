@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from .. import grammar
-from ..client import Failure, Service, config_dir, digest, new_token, read_token, saved_url
+from ..client import Failure, Service, config_dir, digest, new_token, read_token, signed_in
 from ..grammar import UsageError, command
 from ..help import HELP
 from . import connected, github, jira, linear, render, wirk
@@ -126,11 +126,8 @@ class Run:
 
     def connect(self) -> tuple[wirk.Wirk, bool]:
         """The importer's own token once a person registered it; until then the dry run reads with the agent's."""
-        directory = config_dir()
-        url = saved_url(directory)
-        if url is None:
-            raise Stop("WIRK is not set up on this machine", "wirk login")
-        agent = wirk.Wirk(Service(url, read_token(directory / "agent-token"), self.transport), self.pairs.get("workspace_id"))
+        url, token = signed_in()  # in a chat, the chat's own token, as for every command
+        agent = wirk.Wirk(Service(url, token, self.transport), self.pairs.get("workspace_id"))
         status = getattr(self, "preflight_status", None) or agent.post("/v2/status", {})
         if not status["ok"]:
             raise Stop(status["errors"][0]["message"], status["errors"][0].get("hint", ""))

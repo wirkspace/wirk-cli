@@ -111,3 +111,40 @@ def test_a_lost_chat_token_asks_for_login_rather_than_falling_back_to_the_machin
     client.actor_path(URL, CLAUDE.lower()).unlink()
     code, out, err, fake = run(["status"], service())
     assert code == 1 and "actor_setup_required" in err and fake.requests == []
+
+
+def test_login_help_says_chats_sign_in_as_themselves_and_new_is_for_a_machine(run):
+    code, out, err, fake = run(["login", "--help"])
+    text = " ".join(out.split())
+    assert code == 0 and "chat" in text and "signs in as itself" in text and "--new" in text
+    assert "a new machine token" in text
+
+
+def test_an_import_in_a_chat_uses_the_chats_token_never_the_machines(run, monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    code, out, err, fake = run(["import", "github", "acme/repo", "--dry-run"], service())
+    assert code != 0 and "actor_setup_required" in out + err and fake.requests == []
+    run(["login"], service())
+    code, out, err, fake = run(["import", "github", "acme/repo", "--dry-run"],
+                               lambda request: refusal("not_available", "stop here", status=404))
+    assert fake.requests and {r.headers["authorization"] for r in fake.requests} == {f"Bearer {chat_token(CODEX_A)}"}
+
+
+def test_a_replaced_chat_token_is_said_to_be_a_new_agent(run, monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    run(["login"], service())
+    code, out, err, fake = run(["login"], service(refuse={chat_token(CODEX_A)}))
+    assert code == 0 and "new agent" in out
+
+
+def test_a_malformed_mcp_thread_never_hides_the_codex_thread(monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    assert client.actor_binding("not-a-thread") == client.actor_binding() == CODEX_A
+
+
+def test_chat_tokens_are_private_files_in_a_private_folder(run, home, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
+    run(["login"], service())
+    path = client.actor_path(URL, CLAUDE.lower())
+    assert path.parent == home / "actors" and path.parent.stat().st_mode & 0o777 == 0o700
+    assert path.stat().st_mode & 0o777 == 0o600

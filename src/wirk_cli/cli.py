@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 from . import __version__, context, grammar
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, config_dir, \
-    digest, file_digest, new_token, read_token, save_url, saved_url
+    digest, file_digest, new_token, read_token, save_url, saved_url, signed_in
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
 
@@ -126,16 +126,7 @@ def confirm(phrase: str, purpose: str) -> None:
 
 
 def connect(transport, person: bool = False, actor_id: str | None = None) -> Service:
-    directory = config_dir()
-    token, url = read_token(directory / (PERSON if person else AGENT)), saved_url(directory)
-    if url is None:
-        raise Failure("not_configured", "WIRK is not set up on this machine.", f"Run: wirk login   (connects to {DEFAULT_URL})")
-    if binding := None if person else actor_binding(actor_id):  # an agent chat acts as itself, never as the machine
-        if not (path := actor_path(url, binding)).exists():
-            raise Failure("actor_setup_required", "This chat has no WIRK token of its own yet.",
-                          "Run: wirk login   (in this chat; no browser once the machine is approved), then retry")
-        token = read_token(path)
-    return Service(url, token, transport)
+    return Service(*signed_in(person, actor_id), transport)
 
 
 def fmt(options: dict) -> str:
@@ -389,15 +380,16 @@ def login(words, options, transport):
 
 def enrol(machine: Service, path: Path) -> int:
     """A chat signs in as itself under this machine's approved token: no browser, no person. A kept token the service
-    refuses (revoked, or 90 days unused) is replaced by a new one, which is a new identity."""
-    for fresh in (False, True) if path.exists() else (True,):
-        if fresh:
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        child = new_token(path) if fresh else read_token(path)
-        answer = machine.post("/v2/login", {"for": "actor", "label": "wirk actor"},
-                              headers={"Wirk-Actor-Authorization": f"Bearer {child}"})
-        if answer["ok"] or answer["errors"][0]["code"] != "not_authorized":
-            break
+    refuses (revoked, or 90 days unused) is replaced by a new one, which is a new agent, and says so."""
+    def send(child: str) -> dict:
+        return machine.post("/v2/login", {"for": "actor", "label": "wirk actor"},
+                            headers={"Wirk-Actor-Authorization": f"Bearer {child}"})
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    answer = send(read_token(path)) if path.exists() else None
+    if answer is None or not answer["ok"] and answer["errors"][0]["code"] == "not_authorized":
+        if answer is not None:
+            print("This chat's old WIRK token was refused, so it signs in as a new agent.", flush=True)
+        answer = send(new_token(path))
     return emit(answer, {})
 
 
