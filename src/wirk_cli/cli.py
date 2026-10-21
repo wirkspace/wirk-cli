@@ -384,8 +384,8 @@ def machine_name() -> str:
     """This computer's name for its row on the account page: macOS's Computer Name, else the hostname without its
     domain, as one line of at most 40 characters without quotes; or the CLI's own label when neither gives one."""
     try:
-        name = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True,
-                              timeout=2).stdout.strip() if sys.platform == "darwin" else ""
+        name = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, encoding="utf-8",
+                              errors="replace", timeout=2).stdout.strip() if sys.platform == "darwin" else ""
     except (OSError, subprocess.SubprocessError):
         name = ""
     name = "".join(c if c.isprintable() and c != '"' else " " for c in name or socket.gethostname().split(".")[0])
