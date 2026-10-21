@@ -222,15 +222,29 @@ def test_message_usage_errors_send_nothing(run, argv, words):
     assert words in err
 
 
-# The friction plan (2ee4895f): refusals say what to send instead.
+# workspace_id= beside --request FILE (decided 21 October 2026).
 
-@pytest.mark.parametrize("command", ["write", "query", "review"])
-def test_request_with_workspace_word_names_the_json_key(run, tmp_path, monkeypatch, command):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "body.json").write_text(json.dumps({"request_id": "w-1", "operations": []}))
-    code, out, err, fake = run([command, "--request", "body.json", "workspace_id=c0af212e"])
+@pytest.mark.parametrize("command, key", [("write", "operations"), ("review", "decisions"), ("query", "fetch")])
+def test_request_with_workspace_word_sends_it_in_the_body(run, tmp_path, command, key):
+    body = {"request_id": "x-1", key: [{"id": "5c1e7a90"}] if key != "fetch" else ["5c1e7a90"]}
+    (tmp_path / "body.json").write_text(json.dumps(body))
+    code, out, err, fake = run([command, "--request", "body.json", "workspace_id=4d5e6f70"])
+    assert code == 0 and fake.bodies() == [{**body, "workspace_id": "4d5e6f70"}]
+
+
+@pytest.mark.parametrize("named", ["4d5e6f70", "a1b2c3d4"])
+def test_request_workspace_word_with_a_file_that_names_one_is_refused(run, tmp_path, named):
+    (tmp_path / "body.json").write_text(json.dumps({"request_id": "w-1", "operations": [], "workspace_id": named}))
+    code, out, err, fake = run(["write", "--request", "body.json", "workspace_id=4d5e6f70"])
     assert code == 2 and fake.requests == []
-    assert '--request sends the file as it is: put "workspace_id": "c0af212e" at the top level of the JSON; nothing was sent' in err
+    assert "body.json already names its wirkspace: give workspace_id in the file or on the line, not both" in err
+
+
+@pytest.mark.parametrize("words", [["extra"], ["status=open"], ["workspace_id=4d5e6f70", "extra"]])
+def test_request_takes_no_other_word(run, tmp_path, words):
+    (tmp_path / "body.json").write_text(json.dumps({"request_id": "w-1", "operations": []}))
+    code, out, err, fake = run(["write", "--request", "body.json", *words])
+    assert code == 2 and fake.requests == [] and "except workspace_id=ID" in err
 
 
 @pytest.mark.parametrize("action, reason", [("archive", ', "reason": a reason in your words'), ("restore", "")])
