@@ -10,7 +10,7 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server from this release's wheels after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the `wirk` command and the `wirk-mcp` server at the version the installer names (set `WIRK_VERSION` to choose another published version), after checking their SHA-256 sums. It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe, and replaces an earlier `wirk` MCP server and WIRK skill with this release's. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. The machine is named by the computer's own name (macOS's Computer Name, else its hostname), on the approval page and on your account page. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
@@ -85,11 +85,62 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- `wirk login` opens your browser, at a terminal or not, and one click connects this machine; `wirk login --person` connects you and your agents in the same click, with no typed phrase. With no browser here it prints a link to open on any computer.
-- Connected GitHub sources can be previewed and imported through the existing `wirk import github` command with an ordinary agent login and an explicit source delegation.
-- `workspace_id=ID` works on every command line: beside `--request FILE` for `write`, `review` and `query` (when the file names no wirkspace; a file that names one is refused with the word) and on `wirk review`.
+- Nothing yet.
+
+### 0.4.27
+
+- Version only, so that `wirk-mcp` 0.4.27 can publish in step with it. There is no 0.4.26.
+
+### 0.4.25
+
+- A worker that an agent chat starts, on this host or another, signs in under that chat with the chat's token; revoking the chat revokes the worker too.
+- A `--request` file that asks for `"format": "json"` prints the JSON answer, refusals included; it used to print nothing.
+
+### 0.4.24
+
 - `wirk wirkspace NAME` chooses the wirkspace an agent chat works in; its later commands need no `workspace_id=`. `wirk wirkspace` alone shows the choice.
+- `workspace_id=ID` works beside `--request FILE` for `write`, `review` and `query` (when the file names no wirkspace; a file that names one is refused with the word) and on `wirk review`.
 - `wirk write archive ID@N --reason TEXT` and `wirk write restore ID@N` send the archive and restore operations at the revision you read, so neither needs a request file.
+- `wirk login` sends the computer's name, which names the machine on the approval page and on your account page.
+
+### 0.4.23
+
+- Each agent chat signs in as itself under its machine's approval: a new chat's first call answers `actor_setup_required`, and the chat runs `wirk login`.
+- A redirect answer is reported without printing its target.
+- The hints for `write archive` and `write restore` describe the body to send.
+
+### 0.4.22
+
+- Imported GitHub issue mentions become `related_to` links between imported items, including items imported in an earlier run.
+
+### 0.4.21
+
+- When only one of the two sign-ins exists, a command names the sign-in it needs and the login command that makes it.
+
+### 0.4.19 and 0.4.20
+
+- `wirk login --person` prints the remaining approval's own code and link when only one of its two approvals has arrived, and prints the new code when a pending code is renewed.
+- The help says completing work releases its reservation.
+
+### 0.4.18
+
+- `wirk write edit ID@N reservation=…` starts (`occupied`), guards (`occupied:G`), releases (`vacant:G`) and takes over (`replace:G`) an execution reservation; `write new` refuses the key.
+- The GitHub reader keeps label and milestone IDs in the raw source archive.
+
+### 0.4.17
+
+- Ctrl+C while `wirk login` waits prints one line instead of a traceback; the main help says a link is printed where there is no browser.
+- `wirk show --help` includes a complete view file.
+
+### 0.4.16
+
+- `wirk login` opens your browser, and one click connects this machine; with no browser it prints a link to open on any computer.
+- Connected GitHub sources can be previewed and imported with `wirk import github OWNER/REPO` and an ordinary agent login.
+
+### 0.4.11 to 0.4.15
+
+- Help wording: a file's partial text, messages and `write seen`, request-file format precedence, the record default and `works_at`.
+- Importer previews use the service's own status budget instead of 1,024 bytes (0.4.15).
 
 ### 0.4.10
 
@@ -157,11 +208,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ## Releasing
 
-Select the exact reviewed commits for a client release set, then push their matching `vMAJOR.MINOR.PATCH` tags. Tag selection is the approval step; publication never selects a new main revision. Each repository tests and builds its tagged source. The shared publication workflow first checks the remote tag's commit, retains identical existing assets, uploads missing ones, and refuses to overwrite different bytes. New GitHub releases remain prereleases until their anonymous public downloads match the build and an isolated installation passes. MCP waits up to ten minutes for its matching CLI wheel on GitHub and PyPI before testing.
+A release is a version bump merged to main with `Release: publish wirk <version>` in its squash body. After the release check passes on that exact commit, the tag `v<version>` is created there; pushing main publishes nothing, and a tag is never moved. The tag's Release workflow tests and builds the tagged source, attaches the wheel, the sdist and `SHA256SUMS` to a GitHub Release, and publishes to PyPI through trusted publishing; no publishing token is stored. A tag alone is not publication: check the workflow and PyPI.
 
-PyPI follows GitHub qualification through trusted publishing. This step stays off until the `wirk` project on PyPI has this repository's `release.yml` and its `pypi` environment as a trusted publisher and `PYPI_PUBLISH` is `true`. Retries skip existing distributions only after verifying their actual bytes. Failures remain visible in Actions; rerun failed jobs to reuse successful build artifacts. A rebuilt artifact with different bytes fails safely and needs investigation. No stored publishing token is needed.
+The shared publication workflow checks the tag's commit, keeps identical existing assets, uploads missing ones and refuses to overwrite different bytes. New GitHub releases stay prereleases until their anonymous public downloads match the build and an isolated installation passes. Rerun failed jobs to reuse successful build artifacts. The manual `verify_tag` run qualifies an existing public version without publishing or moving tags.
 
-The Release workflow's manual `verify_tag` run qualifies an existing public version without publishing or moving tags. Publication does not update clients already installed on someone's machine; rerun the installer to update them.
+`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Publication does not update clients already installed on someone's machine.
 
 ## License
 
