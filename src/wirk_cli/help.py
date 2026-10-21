@@ -147,7 +147,7 @@ across sessions, but keeps the messages and does not change their work. Do not c
   write seen MSG1 MSG2
 
 After an uncertain result, retry the same IDs and --request-id; --json gives structured output.""",
-        "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
+        "review": """usage: wirk review ID@N… ACTION --reason TEXT [workspace_id=ID] [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
 Anyone whose role may review decides: a person, or an agent working for one. Other roles are refused

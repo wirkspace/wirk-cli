@@ -479,3 +479,8 @@ def test_reservation_help_keeps_status_examples_and_a_compact_block(capsys, argv
         assert '{"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}' in text
     completed = "  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'"
     assert status + "\n" + completed + "\n" + RESERVATION_EXAMPLES + "\n" + RESERVATION_GUIDANCE + "\n" in text
+
+
+def test_review_help_names_workspace_id(capsys):
+    assert help_of(capsys, "review").startswith(
+        "usage: wirk review ID@N… ACTION --reason TEXT [workspace_id=ID] [--person] [--request-id ID] [--json]\n")

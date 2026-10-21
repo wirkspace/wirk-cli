@@ -224,9 +224,13 @@ def write_seen(words: list[str], options: dict) -> dict:
 
 
 def review_body(words: list[str], options: dict) -> dict:
-    if len(words) < 2 or words[-1] not in ACTIONS:
+    positionals, pairs = split(words)
+    workspace = pairs.pop("workspace_id", None)
+    if pairs:
+        raise UsageError("review takes IDs, ACTION, --reason and workspace_id=")
+    if len(positionals) < 2 or positionals[-1] not in ACTIONS:
         raise UsageError("Replace ACTION with accept, reject or defer, and REASON with why: wirk review ID@N ACTION --reason WHY")
     reason = own_words(options.get("--reason", ""), "--reason")
-    decisions = [{"id": item, "revision": read, "action": words[-1], "reason": reason}
-                 for item, read in (revision(word, "review") for word in words[:-1])]
-    return {"decisions": decisions}
+    decisions = [{"id": item, "revision": read, "action": positionals[-1], "reason": reason}
+                 for item, read in (revision(word, "review") for word in positionals[:-1])]
+    return {"decisions": decisions, **({"workspace_id": workspace} if workspace else {})}
