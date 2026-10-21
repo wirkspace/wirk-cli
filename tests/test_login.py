@@ -4,10 +4,12 @@ import hashlib
 import http.client
 import json
 import os
+import platform
 import re
 import socket
 import stat
 import struct
+import subprocess
 import time
 import webbrowser
 
@@ -705,3 +707,41 @@ def test_only_a_service_without_web_sign_in_falls_back_to_the_digest(fresh, caps
                                                                  text=f"Error invalid_input: {words}"), capsys)
     assert code == 1 and [r.url.path for r in requests] == ["/v2/login"] and words in out + err
     assert "digest" not in out + err
+
+
+# ------------------------------------------------------------ the machine's name
+
+def sent_label(monkeypatch, capsys, hostname, computer_name=None):
+    """The label wirk login sends from a computer with this hostname and, given one, this macOS Computer Name."""
+    monkeypatch.setattr("socket.gethostname", lambda: hostname)
+    monkeypatch.setattr("sys.platform", "linux" if computer_name is None else "darwin")
+
+    def scutil(argv, **kwargs):
+        assert argv == ["scutil", "--get", "ComputerName"]
+        if isinstance(computer_name, Exception):
+            raise computer_name
+        return subprocess.CompletedProcess(argv, 0, computer_name, "")
+    monkeypatch.setattr("subprocess.run", scutil)
+    code, out, err, requests = login([], device([]), capsys)
+    first = json.loads(requests[0].content)
+    assert code == 0 and set(first) == {"for", "label", "format"} and first["for"] == "agent"  # nothing else changes
+    return first["label"]
+
+
+def test_login_sends_the_computers_own_name_where_the_os_has_one(fresh, capsys, clock, monkeypatch):
+    assert sent_label(monkeypatch, capsys, "Adas-MacBook-Pro.local", "Ada\u2019s MacBook Pro\n") == "Ada\u2019s MacBook Pro"
+
+
+@pytest.mark.parametrize("computer_name", [None, "", FileNotFoundError("scutil"), subprocess.TimeoutExpired("scutil", 2)])
+def test_elsewhere_login_sends_the_hostname_without_its_domain(fresh, capsys, clock, monkeypatch, computer_name):
+    assert sent_label(monkeypatch, capsys, "build-07.corp.example", computer_name) == "build-07"
+
+
+def test_a_name_is_one_line_of_at_most_40_characters(fresh, capsys, clock, monkeypatch):
+    label = sent_label(monkeypatch, capsys, "x", '  Ada\'s\t"Mac"\u200b\n' + "studio " * 9)
+    assert label == "Ada's Mac studio studio studio studio st"  # no quote or control character, 40 at most
+
+
+@pytest.mark.parametrize("hostname", ["", "localhost", "LocalHost.localdomain", "...", " \t"])
+def test_no_usable_name_falls_back_to_the_clis_own_label(fresh, capsys, clock, monkeypatch, hostname):
+    assert sent_label(monkeypatch, capsys, hostname) == f"wirk-cli on {platform.system() or 'unknown'}"

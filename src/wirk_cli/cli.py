@@ -4,7 +4,9 @@ import json
 import os
 import platform
 import secrets
+import socket
 import stat
+import subprocess
 import sys
 import time
 import webbrowser
@@ -344,7 +346,7 @@ def login(words, options, transport):
     save_url(directory, url)
     service = Service(url, token, transport)
     binding = None if person else actor_binding()
-    request = {"for": "person" if person else "agent", "label": f"wirk-cli on {platform.system() or 'unknown'}"}
+    request = {"for": "person" if person else "agent", "label": machine_name()}
     try:
         answer = service.post("/v2/login", {**request, "format": "json"})
     except Failure as failure:
@@ -376,6 +378,19 @@ def login(words, options, transport):
     finally:
         if listener:
             listener.close()
+
+
+def machine_name() -> str:
+    """This computer's name for its row on the account page: macOS's Computer Name, else the hostname without its
+    domain, as one line of at most 40 characters without quotes; or the CLI's own label when neither gives one."""
+    try:
+        name = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True,
+                              timeout=2).stdout.strip() if sys.platform == "darwin" else ""
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    name = "".join(c if c.isprintable() and c != '"' else " " for c in name or socket.gethostname().split(".")[0])
+    name = " ".join(name.split())[:40].rstrip()
+    return name if name.lower() not in ("", "localhost") else f"wirk-cli on {platform.system() or 'unknown'}"
 
 
 def enrol(machine: Service, path: Path) -> int:
