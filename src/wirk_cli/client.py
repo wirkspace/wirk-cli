@@ -109,6 +109,21 @@ def new_token(path: Path) -> str:
     return token
 
 
+
+def actor_binding(thread_id: str | None = None) -> str | None:
+    """The agent chat this process serves, so it signs in as itself: Codex's thread (as MCP's request names it, else
+    the environment's) and Claude Code's session, each a UUID, joined. A worker one chat starts carries an ID its
+    launcher lacks, so it never acts as its launcher. None outside any chat: the machine's shared identity."""
+    ids = [thread_id or os.environ.get("CODEX_THREAD_ID"), os.environ.get("CLAUDE_CODE_SESSION_ID")]
+    return ",".join(dict.fromkeys(i.lower() for i in ids if i and re.fullmatch(r"[0-9a-fA-F-]{36}", i))) or None
+
+
+def actor_path(url: str, binding: str) -> Path:
+    """Where a chat keeps its own token, private like the machine's: one file per service and chat."""
+    key = hashlib.sha256(json.dumps([url, binding]).encode()).hexdigest()
+    return config_dir() / "actors" / key / "actor-token"
+
+
 def file_digest(stream) -> tuple[int, str]:
     """The size and SHA-256 of an open file, read in blocks; the file is left at its start."""
     check, size = hashlib.sha256(), 0
