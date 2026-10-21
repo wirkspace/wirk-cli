@@ -1,6 +1,6 @@
 # Plan: wirk keeps itself current
 
-Status: plan, revision 2 (after adversarial review). Branch `self-update` in wirk-cli only.
+Status: plan, revision 3 (after adversarial review and a recheck; matches the build). Branch `self-update` in wirk-cli only.
 
 ## Outcome
 
@@ -28,15 +28,17 @@ changed or interrupted.
   | --- | --- |
   | `uv tool` (`sys.prefix/uv-receipt.toml` exists) | `uv tool install NAME==X`, with `UV_TOOL_DIR` the parent of `sys.prefix` and `UV_TOOL_BIN_DIR` the folder of the receipt's first entry point (without it uv moves the command to its default folder; observed) |
   | the same, with a sibling `wirk-mcp` tool in that tool directory (the installer's layout) | a second, independent target: `uv tool install wirk-mcp==M` with that tool's own receipt |
-  | any other writable virtual environment, `pipx`'s included | `python -I -m pip install NAME==X` with this interpreter |
-  | anything else: no virtual environment, an unwritable one, no pip, no `uv` for a uv tool | none; see the notice |
+  | any other virtual environment (`pyvenv.cfg` in `sys.prefix`), `pipx`'s included | `python -I -m pip install --quiet NAME==X` with its interpreter; an unwritable one, or one without pip, fails and gets the notice |
+  | anything else: no virtual environment, no `uv` for a uv tool | none; see the notice |
 
   `NAME` is `wirk-mcp` whenever wirk-mcp is installed in this environment, otherwise `wirk`. wirk-mcp pins `wirk==`
   its own version, so upgrading it to PyPI's latest wirk-mcp brings its matching wirk and never breaks the pair; its
   version is compared with PyPI's wirk-mcp, which can lag wirk's. Each target is checked and upgraded on its own, so
   a sibling wirk-mcp catches up even when wirk is current. `uv` is found as the installer finds it: on `PATH`, then
   `$XDG_BIN_HOME/uv`, then `~/.local/bin/uv`.
-- When an upgrade exits non-zero, or a newer release exists and no upgrade can run here, the process records one
+- The command's process takes the same lock briefly around its own read and write of `update.json` (and skips
+  everything while an update holds it), so the stamp and the notice never overwrite each other.
+- When an upgrade exits non-zero or times out (600 s), or a newer release exists and no upgrade can run here, the process records one
   notice line in `update.json` (written to a temporary file and renamed); finding every target current, or a later
   success, clears it. A brief network failure during an upgrade can therefore cause one notice, cleared by the next
   hourly success; accepted, because a lasting failure must not stay silent.
@@ -97,8 +99,9 @@ changed or interrupted.
    and bin directory, and the configuration directory as working directory; with a sibling `wirk-mcp` tool behind
    its PyPI latest, also `tool install wirk-mcp==LATEST_MCP`, even when wirk itself is current.
 2. Virtual environment with wirk-mcp in it: the upgrade installs `wirk-mcp==LATEST_MCP` with `-I -m pip` and never
-   `wirk==` anything; without wirk-mcp it installs `wirk==LATEST`; without pip it runs nothing and records the
-   notice. While another process holds the lock, nothing runs.
+   `wirk==` anything; without wirk-mcp it installs `wirk==LATEST`; a failing pip records the notice with its command.
+   While another process holds the lock, nothing runs. Every upgrade has a 600-second timeout, so a hung one cannot
+   hold the lock.
 3. Installed version equal to or newer than PyPI's, an editable install, a PyPI timeout, a 500, or malformed JSON:
    no upgrade runs and no notice is recorded.
 4. The upgrade fails, or none can run here: one notice is recorded; the next command prints it once on stderr; a
