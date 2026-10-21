@@ -64,3 +64,10 @@ def run(home, capsys):
         captured = capsys.readouterr()
         return code, captured.out, captured.err, fake
     return go
+
+
+@pytest.fixture(autouse=True)
+def outside_any_chat(monkeypatch):
+    """Tests run outside an agent chat unless they set one: the IDs of the chat running them never reach them."""
+    for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"):
+        monkeypatch.delenv(name, raising=False)

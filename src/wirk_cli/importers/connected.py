@@ -8,7 +8,7 @@ import stat
 import sys
 import time
 
-from ..client import Failure, Service, digest, read_token, saved_url
+from ..client import Failure, Service, digest, signed_in
 from ..grammar import command
 from .render import Stop
 from .wirk import WirkError
@@ -26,11 +26,7 @@ def dispatch(run):
     """Return None only when discovery expressly selects the old local importer."""
     if run.source != "github":
         return None
-    folder = run.folder
-    url = saved_url(folder.parent)
-    if url is None:
-        raise Stop("WIRK is not set up on this machine", "wirk login")
-    token = read_token(folder.parent / "agent-token")
+    url, token = signed_in()  # in a chat, the chat's own token, as for every command
     service = Service(url, token, run.transport)
     status_body = {"format": "json", **({"workspace_id": run.pairs["workspace_id"]}
                                           if "workspace_id" in run.pairs else {})}

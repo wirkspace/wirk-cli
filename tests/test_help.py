@@ -411,7 +411,9 @@ readable only by you, and opens your browser on WIRK's approval: one click appro
 With no browser here (SSH, a container) it prints a link to open in a browser on any computer;
 --person then asks for the code it shows and signs in only you. To connect your agents for status,
 query and write, run wirk login separately. A login lasts until you revoke the machine on your
-account page or it goes 90 days unused; then run login --new.
+account page or it goes 90 days unused; then run login --new for a new machine token.
+In an agent chat (Codex or Claude Code), the chat runs wirk login once and signs in as itself under
+this machine's approval, with no browser. --new is only ever for the machine.
 Where a service has no web sign-in, it prints the token's digest instead (safe to share; the token stays
 here) for your WIRK administrator to register. The token is only ever sent to its address.
 
