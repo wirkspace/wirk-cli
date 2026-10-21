@@ -51,9 +51,11 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
         wanted = [(name, have, command, env, latest(name, transport)) for name, have, command, env in targets(prefix)]
         if any(want is None for *_, want in wanted):  # PyPI did not answer plainly: try again next hour
             return
-        notices = [f"{name} {want} is out; this is {have}. To update: uv tool install {name}=={want}"
-                   for name, have, command, env, want in wanted if newer(want, have)
-                   and not (command and upgraded([part.format(want) for part in command], env, directory))]
+        notices = []
+        for name, have, command, env, want in wanted:
+            command = command and [part.format(want) for part in command]
+            if newer(want, have) and not (command and upgraded(command, env, directory)):
+                notices.append(f"{name} {want} is out; this is {have}. To update: uv tool install {name}=={want}")
         data = load(directory)
         data["notice"] = "; ".join(notices) or None
         save(directory, data)
