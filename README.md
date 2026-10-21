@@ -14,6 +14,8 @@ It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), t
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
+Each agent chat on an approved machine is its own WIRK agent. A new chat's first call answers `actor_setup_required`; the chat runs `wirk login` itself, which signs it in under the machine's approval with no browser and no person, and retries. Resuming the chat keeps its identity; a new chat, a fork or a worker started from a chat gets its own. The chat is recognised by `CODEX_THREAD_ID` (Codex CLI, or the thread ID MCP's request carries) and `CLAUDE_CODE_SESSION_ID` (Claude Code, in the terminal and the desktop app), combined when both are present. Claude Code's Agent-tool helpers share their chat's identity. When a chat's token stops (revoked, or 90 days unused), `wirk login` in that chat gives it a new one. Outside any chat, `wirk` uses the machine's shared agent identity as before. On your account page, a machine's chats are a count on its row.
+
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
 ## Use
