@@ -6,13 +6,14 @@
 #   sh install.sh --yes            answer yes to every question
 #   sh install.sh --url URL        connect to another WIRK service
 #
-# It installs uv if it is missing (after asking), installs the wirk command and the wirk-mcp server from the
-# release, checking their SHA-256 sums, sets up Claude Code and Codex when they are present (after asking), and
-# runs wirk login. It never uses sudo. Running it again is safe, and replaces an earlier wirk MCP server and skill.
+# It installs uv if it is missing (after asking), installs or upgrades the wirk command and the wirk-mcp server to
+# their latest release on PyPI (WIRK_VERSION=X installs X instead), sets up Claude Code and Codex with the latest
+# skill when they are present (after asking), and runs wirk login. It never uses sudo. Running it again is safe: it
+# upgrades both clients in place and replaces an earlier wirk MCP server and skill.
 set -eu
 
-VERSION="${WIRK_VERSION:-0.4.15}"
-BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the releases live; a mirror or a test may change it
+VERSION="${WIRK_VERSION:-}"  # empty: the latest release
+BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the skill's releases live; a test may change it
 DRY=0
 YES=0
 URL=""
@@ -51,17 +52,17 @@ sha256() {
   if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-fetch() {  # fetch REPO FILE: one release file, checked against that release's SHA256SUMS
-  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/download/v$VERSION/SHA256SUMS"
-  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/download/v$VERSION/$2"
+fetch() {  # fetch REPO FILE: one file of the latest release, checked against that release's SHA256SUMS
+  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/latest/download/SHA256SUMS"
+  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/latest/download/$2"
   if [ "$DRY" -eq 1 ]; then return 0; fi
   want=$(awk -v name="$2" '$2 == name { print $1 }' "$TMP/$1.sums")
   if [ -z "$want" ] || [ "$want" != "$(sha256 "$TMP/$2")" ]; then
-    fail "$2 does not match its SHA-256 sum in the $1 release; nothing was installed."
+    fail "$2 does not match its SHA-256 sum in the $1 release; it was not installed."
   fi
 }
 
-printf 'Installing WIRK %s\n' "$VERSION"
+printf 'Installing WIRK%s\n' "${VERSION:+ $VERSION}"
 if [ "$DRY" -eq 1 ]; then printf '(dry run: nothing will be changed)\n'; fi
 printf '\n'
 
@@ -80,23 +81,12 @@ else
   fail "WIRK needs uv. Install it (curl -LsSf https://astral.sh/uv/install.sh | sh, or brew install uv), then run this again."
 fi
 
-# the wirk command and the wirk-mcp server
-CLI="wirk-$VERSION-py3-none-any.whl"
-MCP="wirk_mcp-$VERSION-py3-none-any.whl"
-WHEELS="${XDG_DATA_HOME:-$HOME/.local/share}/wirk/wheels"  # uv upgrades from where a tool came from: keep them there
-installed() { [ "$DRY" -eq 0 ] && [ -f "$WHEELS/$2" ] && "$UV" tool list 2> /dev/null | grep -qx "$1 v$VERSION"; }
-if installed wirk "$CLI" && installed wirk-mcp "$MCP"; then
-  ok "wirk and wirk-mcp $VERSION are already installed"
-else
-  fetch wirk-cli "$CLI"
-  fetch wirk-mcp "$MCP"
-  ok "Downloaded wirk and wirk-mcp $VERSION; their SHA-256 sums match the release"
-  quietly mkdir -p "$WHEELS"
-  quietly cp "$TMP/$CLI" "$TMP/$MCP" "$WHEELS/"
-  quietly "$UV" tool install --force "$WHEELS/$CLI"
-  quietly "$UV" tool install --force "$WHEELS/$MCP" --with "$WHEELS/$CLI"
-  ok "Installed wirk and wirk-mcp"
-fi
+# the wirk-mcp server, then the wirk command at its version: wirk-mcp pins the wirk it was released with, and the CLI
+# is released first, so the two always match
+quietly "$UV" tool install --force --upgrade "wirk-mcp${VERSION:+==$VERSION}"
+if [ "$DRY" -eq 0 ]; then VERSION=$("$UV" tool list | sed -n 's/^wirk-mcp v\([^ ]*\).*/\1/p'); fi
+quietly "$UV" tool install --force --upgrade "wirk${VERSION:+==$VERSION}"
+ok "Installed wirk and wirk-mcp${VERSION:+ $VERSION}"
 BIN=$("$UV" tool dir --bin 2> /dev/null || printf '%s' "$HOME/.local/bin")
 
 put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier install left instead of writing through it
