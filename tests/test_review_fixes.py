@@ -37,7 +37,7 @@ def test_dev_fd_and_standard_input_holding_a_token_are_refused(run, home, monkey
 
 def test_every_file_opened_goes_through_the_check():
     """In cli.py a named file is opened only by `readable` (to read) and `download` (to create its target)."""
-    allowed = {cli: {"readable", "download"}, client: {"read_token", "new_token", "saved_url", "save_url"}}
+    allowed = {cli: {"readable", "download"}, client: {"read_private", "write_private", "saved_url", "save_url"}}
     for module, functions in allowed.items():
         tree = ast.parse(inspect.getsource(module))
         for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):

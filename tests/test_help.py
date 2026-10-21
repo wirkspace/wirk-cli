@@ -14,7 +14,7 @@ import pytest
 from wirk_cli import __version__, cli
 
 ROOT = Path(__file__).parent.parent
-COMMANDS = ["status", "query", "write", "review", "show", "upload", "download", "login", "admin"]
+COMMANDS = ["status", "query", "write", "review", "show", "upload", "download", "login", "wirkspace", "admin"]
 
 
 def help_of(capsys, *argv):
@@ -429,8 +429,8 @@ def test_login_help_is_the_plans_text(capsys):
 
 def test_help_that_sends_people_to_login_says_one_click(capsys):
     main = help_of(capsys)
-    assert ("\n  login                                connect this machine: one click in your browser, "
-            "or a link when there is none\n") in main
+    assert ("\n  login · wirkspace NAME               connect this machine: one click in your browser; "
+            "choose this chat's wirkspace\n") in main
     assert "wirk login --person (one click in your browser); it asks you to type the decision back." in help_of(capsys, "review")
     assert "(the token made with\nwirk login --person, one click in your browser)." in help_of(capsys, "admin")
 

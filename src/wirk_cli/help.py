@@ -20,7 +20,7 @@ Start with: wirk status
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
   upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
-  login                                connect this machine: one click in your browser, or a link when there is none
+  login · wirkspace NAME               connect this machine: one click in your browser; choose this chat's wirkspace
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
 Decide proposals when your role may review; a background agent only proposes and never decides.
@@ -168,8 +168,8 @@ A service without views configured answers views_unavailable.
   show --revoke LINK                   end a link now
 
 A file needs title and nonempty blocks. Blocks support note, facts, items and item.
-For multiple wirkspaces, workspace_id goes in the file (otherwise omit it);
-show status does not take workspace_id=.
+For multiple wirkspaces, workspace_id goes in the file, or wirk wirkspace NAME chooses it
+(otherwise omit it); show status does not take workspace_id=.
 Replace the sample IDs using wirk query.
 Example view.json:
     {
@@ -181,6 +181,17 @@ Example view.json:
       ]
     }
 Run: wirk show --file view.json --no-open""",
+        "wirkspace": """usage: wirk wirkspace [NAME] [--json]
+
+Alone, the wirkspace this chat works in, or the ones you reach. With a name or ID, this agent chat works there
+from now on: status, query, write, review, show, upload and download send it, so they need no workspace_id=.
+Only this command changes the choice. A workspace_id=ID on a command, or in a --request file, wins for that call.
+
+  wirkspace                            which wirkspace this chat works in
+  wirkspace Sales                      work in Sales from now on, in this chat only
+
+The choice belongs to one agent chat (Codex or Claude Code); outside one, add workspace_id=ID to each command.
+A Claude Code Agent-tool helper shares its chat's identity, so its wirk wirkspace moves its launcher's choice too.""",
         "upload": """usage: wirk upload PATH [--description TEXT] [--request-id ID] [--json]
 
 Store one file; the bytes go straight to storage, and the answer prints how to attach it.
