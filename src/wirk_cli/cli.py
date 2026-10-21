@@ -14,8 +14,8 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from . import __version__, context, grammar
-from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, config_dir, \
-    digest, file_digest, new_token, read_token, save_url, saved_url, signed_in
+from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
+    chosen, config_dir, digest, file_digest, new_token, read_token, save_url, saved_url, signed_in, write_private
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
 
@@ -29,7 +29,7 @@ FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "show": {"--file": VALUE, "--revoke": VALUE, "--no-open": SWITCH},
          "upload": {"--description": VALUE, "--request-id": VALUE}, "download": {"-o": VALUE},
          "login": {"--person": SWITCH, "--url": VALUE, "--new": SWITCH}, "admin": {"--request": VALUE},
-         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}}
+         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}, "wirkspace": {}}
 
 
 def parse(words: list[str], flags: dict) -> tuple[list[str], dict]:
@@ -128,7 +128,9 @@ def confirm(phrase: str, purpose: str) -> None:
 
 
 def connect(transport, person: bool = False, actor_id: str | None = None) -> Service:
-    return Service(*signed_in(person, actor_id), transport)
+    """The connection every command uses; in an agent chat it carries the wirkspace the chat chose."""
+    url, token = signed_in(person, actor_id)
+    return Service(url, token, transport, None if person else chosen(url, actor_binding(actor_id)))
 
 
 def fmt(options: dict) -> str:
@@ -232,11 +234,12 @@ def send(service: Service, route: str, body: dict, options: dict, uncertain: str
     try:
         return emit(service.post(route, body, uncertain=uncertain), options)
     except Failure as failure:
-        if failure.code == "outcome_unknown" and "--request" in options:
-            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"], *words,
+        if failure.code == "outcome_unknown" and "--request" in options:  # the retry goes where this went
+            added = [f"workspace_id={service.wirkspace}"] if service.wirkspace and "workspace_id" not in body else []
+            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"], *words, *added,
                             *present(options, "--person", "--json"))
             failure.hint = (f"Run the same command again: {again}: it applies once or returns the stored receipt."
-                            + (f" Or: {command('wirk', 'query', f'receipt={uncertain}')}" if receipt else ""))
+                            + (failure.hint[failure.hint.index(" Or: "):] if receipt else ""))
         raise
 
 
@@ -274,8 +277,10 @@ def upload(words, options, transport):
     request_id, description = options.get("--request-id") or new_id("u"), options.get("--description")
     retry = command("wirk", "upload", words[0], "--request-id", request_id,  # the path as given, the same ID and description
                     *(["--description", description] if description is not None else []), *present(options, "--json"))
+    service = connect(transport)  # the wirkspace named here, so an uncertain confirm's retry adds no word upload refuses
     with readable(words[0]) as source:
-        return emit(store(source, words[0], request_id, retry, connect(transport), description, form=fmt(options)), options)
+        answer = store(source, words[0], request_id, retry, service, description, service.wirkspace, fmt(options))
+    return emit(answer, options)
 
 
 def store(source, path: str, request_id: str, retry: str, service: Service, description: str | None = None,
@@ -500,7 +505,7 @@ def digest_login(service: Service, url: str, token: str) -> int:
     if answer["ok"]:
         you = answer["data"]["you"]
         space = you["wirkspace"]
-        print(f"Logged in to {url} as {you['principal']} · wirkspace {space['name']} ({space['id'].split('_')[-1][:8]}). "
+        print(f"Logged in to {url} as {you['principal']} · wirkspace {space['name']} ({short(space['id'])}). "
               "Next: wirk status")
     elif problem.get("code") == "unauthenticated":
         print("This machine's token is not registered yet. Send this digest to your WIRK administrator "
@@ -528,13 +533,65 @@ def admin(words, options, transport):
     return send(connect(transport, person=True), "/v2/admin", body, options, uncertain, receipt=False)
 
 
+def wirkspace(words, options, transport):
+    """Show this chat's wirkspace, or choose one by name or ID: the only way the choice changes."""
+    if len(words) > 1:
+        raise UsageError("wirkspace takes one NAME or ID; quote a name with spaces")
+    service, binding = connect(transport), actor_binding()
+    previous, service.wirkspace = service.wirkspace, None  # ask with no default: the service lists what you reach
+    if words and not binding:
+        raise UsageError("the choice belongs to one agent chat, and this is not one; "
+                         "add workspace_id=ID to each command")
+    answer = service.post("/v2/status", {"format": "json", "max_bytes": 1024})
+    if answer["ok"]:
+        reach = [answer["data"]["you"]["wirkspace"]]
+    elif answer["errors"][0]["code"] == "choose_wirkspace":
+        reach = [{"id": c["key"], "name": c["name"].split(" ", 1)[1]} for c in answer["errors"][0]["choices"]]
+    else:
+        return emit(answer, options)
+    listed = ", ".join(map(named, reach))
+    mine = [space for space in reach if space["id"] == previous]
+    if not words:
+        if previous and not mine:
+            raise Failure("not_available", f"this chat's chosen wirkspace {short(previous)} is no longer reachable",
+                          f"You reach {listed}. Choose: wirk wirkspace NAME")
+        if mine or len(reach) == 1:
+            space, how = (mine[0], "chosen in this chat") if mine else (reach[0], "your only one")
+            return said(f"Wirkspace: {named(space)} · {how}", {"wirkspace": space}, options)
+        text = (f"No wirkspace chosen in this chat. You reach {listed}.\nChoose: wirk wirkspace NAME" if binding
+                else f"You reach {listed}.\nAdd workspace_id=ID to each command.")
+        return said(text, {"wirkspace": None, "reach": reach}, options)
+    wanted = words[0].casefold()
+    matches = [space for space in reach if wanted in (space["name"].casefold(), space["id"], short(space["id"]))]
+    if len(matches) != 1:
+        problem = f"{len(matches)} wirkspaces you reach are" if matches else "no wirkspace you reach is"
+        raise Failure("invalid_input", f"{problem} called {words[0]}; nothing changed",
+                      f"You reach {listed}. Choose one by name or ID: wirk wirkspace NAME", 2)
+    write_private(choice_path(service.url, binding), matches[0]["id"])
+    before = named(mine[0]) if mine else previous and short(previous)
+    return said(f"Now working in {named(matches[0])}, " + (f"previously {before}" if before else "none before"),
+                {"wirkspace": matches[0], "previous": previous}, options)
+
+
+def short(identifier: str) -> str:
+    return identifier.split("_", 1)[-1][:8]
+
+
+def named(space: dict) -> str:
+    return f"{space['name']} ({short(space['id'])})"
+
+
+def said(text: str, data: dict, options: dict) -> int:
+    return emit({"ok": True, "errors": [], "data": data} if options.get("--json") else {"ok": True, "text": text}, options)
+
+
 def import_(words, options, transport):
     from . import importers  # loaded only for this command, so the rest of the CLI stays as fast as before
     return importers.main(words, options, transport)
 
 
 COMMANDS = {"status": status, "query": query, "write": write, "review": review, "show": show, "upload": upload,
-            "download": download, "login": login, "admin": admin, "import": import_}
+            "download": download, "login": login, "wirkspace": wirkspace, "admin": admin, "import": import_}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:
