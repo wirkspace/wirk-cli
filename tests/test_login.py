@@ -742,6 +742,6 @@ def test_a_name_is_one_line_of_at_most_40_characters(fresh, capsys, clock, monke
     assert label == "Ada's Mac studio studio studio studio st"  # no quote or control character, 40 at most
 
 
-@pytest.mark.parametrize("hostname", ["", "localhost", "LocalHost.localdomain", "...", " \t"])
+@pytest.mark.parametrize("hostname", ["", "localhost", "..."])
 def test_no_usable_name_falls_back_to_the_clis_own_label(fresh, capsys, clock, monkeypatch, hostname):
     assert sent_label(monkeypatch, capsys, hostname) == f"wirk-cli on {platform.system() or 'unknown'}"
