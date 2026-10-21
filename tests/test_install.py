@@ -28,6 +28,13 @@ def test_it_is_posix_sh_and_never_uses_sudo():
     assert text.startswith("#!/bin/sh") and "set -eu" in code and "sudo" not in code
 
 
+def test_help_prints_the_whole_header():
+    lines = SCRIPT.read_text().splitlines()[1:]
+    header = lines[:next(n for n, line in enumerate(lines) if not line.startswith("#"))]
+    result = subprocess.run(["sh", str(SCRIPT), "--help"], capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == header
+
+
 def basic_path(tmp_path):
     """A PATH with the system's tools but without uv, claude or codex."""
     bin_dir = tmp_path / "basic-bin"
@@ -82,15 +89,16 @@ def publish(tmp_path, version, *, mcp=True):
 
 
 def release(tmp_path, *, corrupt=False):
-    """The fake package index with the latest clients, and the latest skill release with its SHA256SUMS."""
+    """The fake package index with the latest clients, and skill releases (latest and v0.4.26) with SHA256SUMS."""
     publish(tmp_path, "0.4.26")
     publish(tmp_path, LATEST)
     base = tmp_path / "releases"
-    skill = base / "wirk-skill" / "releases" / "latest" / "download"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("---\nname: wirk\n---\n")
-    digest = "0" * 64 if corrupt else hashlib.sha256((skill / "SKILL.md").read_bytes()).hexdigest()
-    (skill / "SHA256SUMS").write_text(f"{digest}  SKILL.md\n")
+    for release_path, text in (("latest/download", "latest"), ("download/v0.4.26", "0.4.26")):
+        skill = base / "wirk-skill" / "releases" / release_path
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"---\nname: wirk\n---\n{text}\n")
+        digest = "0" * 64 if corrupt else hashlib.sha256((skill / "SKILL.md").read_bytes()).hexdigest()
+        (skill / "SHA256SUMS").write_text(f"{digest}  SKILL.md\n")
     return base
 
 
@@ -248,18 +256,31 @@ def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
 def test_a_rerun_upgrades_in_place_to_the_latest_release(tmp_path):
     """Run again after a release, the installer moves both clients to it, even from the wheels an earlier one kept."""
     base = release(tmp_path)
-    kept = wheel(tmp_path / "kept-wheels", "wirk", "0.4.15")  # what an earlier installer left
+    kept = wheel(tmp_path / "home" / ".local" / "share" / "wirk" / "wheels", "wirk", "0.4.15")  # an earlier installer's
     subprocess.run(["uv", "tool", "install", str(kept)], check=True, capture_output=True,
                    env=os.environ | {"UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"),
                                          "UV_OFFLINE": "1", "UV_PYTHON": sys.executable})
-    shutil.rmtree(tmp_path / "kept-wheels")
     assert install(tmp_path, base, "--url", URL).returncode == 0
+    assert not kept.parent.exists()  # nothing uses them any more
     assert versions(tmp_path) == [LATEST, LATEST]
     publish(tmp_path, "0.4.28")
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
     assert versions(tmp_path) == ["0.4.28", "0.4.28"]
-    assert "kept-wheels" not in (tmp_path / "tools" / "wirk" / "uv-receipt.toml").read_text()
+    assert "wirk/wheels" not in (tmp_path / "tools" / "wirk" / "uv-receipt.toml").read_text()
+
+
+@needs_uv
+@pytest.mark.parametrize("answer, status", [("", 0), ("wirk-mcp v0.4.27", 1)])
+def test_no_version_from_uv_stops_before_wirk_is_installed(tmp_path, answer, status):
+    """wirk is installed at wirk-mcp's version or not at all: never unpinned, never past a uv failure."""
+    base = release(tmp_path)
+    shim = Path(shims(tmp_path)) / "uv"
+    shim.write_text(f'#!/bin/sh\nif [ "$1 $2" = "tool list" ]; then echo "{answer}"; exit {status}; fi\n'
+                    f'exec {shutil.which("uv")} "$@"\n')
+    shim.chmod(0o755)
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode != 0 and not (tmp_path / "bin" / "wirk").exists(), result.stdout + result.stderr
 
 
 @needs_uv
@@ -278,6 +299,9 @@ def test_wirk_version_installs_that_version_instead(tmp_path):
     result = install(tmp_path, base, "--url", URL, WIRK_VERSION="0.4.26")
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("Installing WIRK 0.4.26\n") and versions(tmp_path) == ["0.4.26", "0.4.26"]
+    assert (tmp_path / "home" / ".claude" / "skills" / "wirk" / "SKILL.md").read_text().endswith("0.4.26\n")
+    without_skill = install(tmp_path, base, "--url", URL, WIRK_VERSION=LATEST)  # no wirk-skill v0.4.27 release
+    assert without_skill.returncode != 0 and f"v{LATEST}/SHA256SUMS" in without_skill.stderr
 
 
 @needs_uv

@@ -7,12 +7,13 @@
 #   sh install.sh --url URL        connect to another WIRK service
 #
 # It installs uv if it is missing (after asking), installs or upgrades the wirk command and the wirk-mcp server to
-# their latest release on PyPI (WIRK_VERSION=X installs X instead), sets up Claude Code and Codex with the latest
-# skill when they are present (after asking), and runs wirk login. It never uses sudo. Running it again is safe: it
-# upgrades both clients in place and replaces an earlier wirk MCP server and skill.
+# their latest release on PyPI, sets up Claude Code and Codex with the latest skill when they are present (after
+# asking), and runs wirk login; WIRK_VERSION=X takes release X of all three instead. It never uses sudo. Running it
+# again is safe: it upgrades both clients in place and replaces an earlier wirk MCP server and skill.
 set -eu
 
 VERSION="${WIRK_VERSION:-}"  # empty: the latest release
+RELEASE="${VERSION:+download/v$VERSION}"  # the skill's release: that same version, else the latest
 BASE="${WIRK_RELEASE_BASE:-https://github.com/wirkspace}"  # where the skill's releases live; a test may change it
 DRY=0
 YES=0
@@ -23,7 +24,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --yes | -y) YES=1 ;;
     --url) shift; URL="${1:?--url needs the service address}" ;;
-    -h | --help) sed -n '2,11p' "$0" 2> /dev/null || true; exit 0 ;;
+    -h | --help) sed -n -e 1d -e '/^#/!q' -e p "$0" 2> /dev/null || true; exit 0 ;;
     *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -52,9 +53,9 @@ sha256() {
   if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-fetch() {  # fetch REPO FILE: one file of the latest release, checked against that release's SHA256SUMS
-  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/latest/download/SHA256SUMS"
-  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/latest/download/$2"
+fetch() {  # fetch REPO FILE: one file of the release, checked against that release's SHA256SUMS
+  quietly curl -fsSL -o "$TMP/$1.sums" "$BASE/$1/releases/${RELEASE:-latest/download}/SHA256SUMS"
+  quietly curl -fsSL -o "$TMP/$2" "$BASE/$1/releases/${RELEASE:-latest/download}/$2"
   if [ "$DRY" -eq 1 ]; then return 0; fi
   want=$(awk -v name="$2" '$2 == name { print $1 }' "$TMP/$1.sums")
   if [ -z "$want" ] || [ "$want" != "$(sha256 "$TMP/$2")" ]; then
@@ -84,9 +85,15 @@ fi
 # the wirk-mcp server, then the wirk command at its version: wirk-mcp pins the wirk it was released with, and the CLI
 # is released first, so the two always match
 quietly "$UV" tool install --force --upgrade "wirk-mcp${VERSION:+==$VERSION}"
-if [ "$DRY" -eq 0 ]; then VERSION=$("$UV" tool list | sed -n 's/^wirk-mcp v\([^ ]*\).*/\1/p'); fi
+quietly "$UV" tool list
+if [ "$DRY" -eq 0 ]; then
+  VERSION=$(sed -n 's/^wirk-mcp v\([^ ]*\).*/\1/p' "$TMP/log")
+  if [ -z "$VERSION" ]; then fail "uv tool list does not show the wirk-mcp it installed; wirk was not installed."; fi
+fi
 quietly "$UV" tool install --force --upgrade "wirk${VERSION:+==$VERSION}"
 ok "Installed wirk and wirk-mcp${VERSION:+ $VERSION}"
+WHEELS="${XDG_DATA_HOME:-$HOME/.local/share}/wirk/wheels"  # earlier installers kept wheels here; nothing uses them now
+if [ -d "$WHEELS" ]; then quietly rm -rf "$WHEELS"; fi
 BIN=$("$UV" tool dir --bin 2> /dev/null || printf '%s' "$HOME/.local/bin")
 
 put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier install left instead of writing through it
