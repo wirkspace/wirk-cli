@@ -65,8 +65,8 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
        wirk write link FROM@N TYPE TO[@N]
        wirk write message [--to ID,…] [--on ITEM,…] [--reply-to ID] [--title TEXT] --body TEXT | --body-file PATH
-       wirk write seen ID…
-       wirk write --request FILE           (- reads standard input)
+       wirk write seen ID… · archive ID@N --reason TEXT · restore ID@N
+       wirk write --request FILE [workspace_id=ID]   (- reads standard input)
   Shortcuts take --request-id ID and --json; --propose needs --reason and cannot send or acknowledge messages.
 
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
@@ -147,7 +147,7 @@ across sessions, but keeps the messages and does not change their work. Do not c
   write seen MSG1 MSG2
 
 After an uncertain result, retry the same IDs and --request-id; --json gives structured output.""",
-        "review": """usage: wirk review ID@N… ACTION --reason TEXT [--person] [--request-id ID] [--json]
+        "review": """usage: wirk review ID@N… ACTION --reason TEXT [workspace_id=ID] [--person] [--request-id ID] [--json]
 
 Decide proposals at the revision you read; ACTION is accept, reject or defer, and the reason is yours.
 Anyone whose role may review decides: a person, or an agent working for one. Other roles are refused

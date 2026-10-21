@@ -170,13 +170,16 @@ def request_body(options: dict, words: list[str], build) -> dict:
     """The exact --request body (format added only for --json), or the body a shortcut builds; never a mix of both."""
     if "--request" not in options:
         return {**build(), "format": fmt(options)}
-    if words or set(options) - {"--request", "--json", "--person"}:
-        place = next((word.split("=", 1)[1] for word in words if word.startswith("workspace_id=")), None)
-        if place is not None:
-            raise UsageError(f'--request sends the file as it is: put "workspace_id": {json.dumps(place)} at the top level '
-                             "of the JSON; nothing was sent")
-        raise UsageError("--request sends the file's body as it is: give no other words or options with it")
+    positionals, pairs = grammar.split(words)
+    if positionals or set(pairs) - {"workspace_id"} or set(options) - {"--request", "--json", "--person"}:
+        raise UsageError("--request sends the file's body as it is: give no other words or options with it, "
+                         "except workspace_id=ID")
     body = request_file(options["--request"])
+    if pairs.get("workspace_id"):
+        if "workspace_id" in body:
+            raise UsageError(f"{options['--request']} already names its wirkspace: give workspace_id in the file or on "
+                             "the line, not both; nothing was sent")
+        body["workspace_id"] = pairs["workspace_id"]
     return {**body, "format": "json"} if options.get("--json") and "format" not in body else body
 
 
@@ -186,6 +189,8 @@ def query(words, options, transport):
 
 def shortcut(words: list[str], options: dict) -> dict:
     action, rest = (words[0], words[1:]) if words else ("", [])
+    if action in ("archive", "restore"):
+        return grammar.write_archive(action, rest, options)
     if "--body" in options and "--body-file" in options:
         raise UsageError("give --body or --body-file, not both")
     if action != "message" and MESSAGE_ONLY & set(options):
@@ -193,15 +198,11 @@ def shortcut(words: list[str], options: dict) -> dict:
     if action == "seen":
         return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
-    if action in ("archive", "restore"):  # the body the service's basis hint describes, in the same words
-        reason = ', "reason": a reason in your words' if action == "archive" else ""
-        raise UsageError(f'write has no {action} shortcut: run wirk write --request FILE, the file holding {{"request_id": a new '
-                         f'request_id, "operations": [{{"op": "item.{action}", "id": the item\'s ID}}], "expect": {{the item\'s '
-                         f"ID: the revision you read}}{reason}}}; nothing was sent")
     if action == "message":
         return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
-        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, or --request FILE")
+        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, archive ID@N, "
+                         "restore ID@N, or --request FILE")
     if action == "link":
         return grammar.write_link(rest, options)
     return (grammar.write_new if action == "new" else grammar.write_edit)(rest[0], rest[1:], options, text)
@@ -210,7 +211,7 @@ def shortcut(words: list[str], options: dict) -> dict:
 def write(words, options, transport):
     body = request_body(options, words, lambda: {"request_id": options.get("--request-id") or new_id("w"),
                                                  **shortcut(words, options)})
-    return send(connect(transport), "/v2/write", body, options, body.get("request_id", "?"))
+    return send(connect(transport), "/v2/write", body, options, body.get("request_id", "?"), words=words)
 
 
 def review(words, options, transport):
@@ -219,17 +220,18 @@ def review(words, options, transport):
     if options.get("--person"):
         confirm(decision_phrase(body), "decide it as yourself")
     service = connect(transport, person=bool(options.get("--person")))
-    return send(service, "/v2/review", body, options, body.get("request_id", "?"))
+    return send(service, "/v2/review", body, options, body.get("request_id", "?"), words=words)
 
 
-def send(service: Service, route: str, body: dict, options: dict, uncertain: str | None, receipt: bool = True) -> int:
+def send(service: Service, route: str, body: dict, options: dict, uncertain: str | None, receipt: bool = True,
+         words: list[str] = ()) -> int:
     """POST a body that may change something. A body from --request FILE carries its own request ID, so after an
     unknown outcome the retry is the same command again; writes and reviews can also be found by their receipt."""
     try:
         return emit(service.post(route, body, uncertain=uncertain), options)
     except Failure as failure:
         if failure.code == "outcome_unknown" and "--request" in options:
-            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"],
+            again = command("wirk", route.rsplit("/", 1)[1], "--request", options["--request"], *words,
                             *present(options, "--person", "--json"))
             failure.hint = (f"Run the same command again: {again}: it applies once or returns the stored receipt."
                             + (f" Or: {command('wirk', 'query', f'receipt={uncertain}')}" if receipt else ""))

@@ -226,3 +226,21 @@ def test_a_person_request_with_malformed_entries_is_refused_cleanly(run, tmp_pat
     (tmp_path / "decide.json").write_text(json.dumps({"request_id": "r-1", key: value}))
     code, out, err, fake = run([command, "--request", "decide.json", *(["--person"] if command == "review" else [])])
     assert code == 2 and fake.requests == [] and key in err
+
+
+# review takes workspace_id= on its line, like every other command (decided 21 October 2026).
+
+@pytest.mark.parametrize("words", [["c4a1e902@1", "reject", "workspace_id=4d5e6f70"],
+                                   ["workspace_id=4d5e6f70", "c4a1e902@1", "reject"]])
+def test_review_accepts_workspace_id_on_its_line(run, words):
+    code, out, err, fake = run(["review", *words, "--reason", "Not this way"])
+    assert code == 0
+    body = fake.bodies()[0]
+    assert body["decisions"] == [{"id": "c4a1e902", "revision": 1, "action": "reject", "reason": "Not this way"}]
+    assert body["workspace_id"] == "4d5e6f70"
+
+
+def test_review_refuses_other_keys(run):
+    code, out, err, fake = run(["review", "c4a1e902@1", "accept", "status=open", "--reason", "Fine"])
+    assert code == 2 and fake.requests == []
+    assert "review takes IDs, ACTION, --reason and workspace_id=" in err
