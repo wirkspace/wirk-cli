@@ -20,7 +20,7 @@ If you reach several wirkspaces, `wirk wirkspace Sales` chooses one for the agen
 
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
-`wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. A release that changes how agents sign in may then ask each chat for `wirk login` once.
+`wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
 
 ## Use
 
@@ -87,6 +87,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 ## Changes
 
 ### Next release
+
+- Nothing yet.
+
+### 0.4.28
 
 - `wirk` keeps itself current: at most once an hour, after a command, a background process installs PyPI's latest release in place, and the `wirk-mcp` beside it.
 - The installer always installs the latest `wirk` and `wirk-mcp` from PyPI, and running it again upgrades them in place; `WIRK_VERSION=X` installs X instead. It no longer pins a version or keeps wheels.
