@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-LATEST = "0.4.27"
+LATEST = "0.4.28"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -262,15 +262,15 @@ def test_a_rerun_upgrades_in_place_to_the_latest_release(tmp_path):
     assert install(tmp_path, base, "--url", URL).returncode == 0
     assert not kept.parent.exists()  # nothing uses them any more
     assert versions(tmp_path) == [LATEST, LATEST]
-    publish(tmp_path, "0.4.28")
+    publish(tmp_path, "0.4.29")
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
-    assert versions(tmp_path) == ["0.4.28", "0.4.28"]
+    assert versions(tmp_path) == ["0.4.29", "0.4.29"]
     assert "wirk/wheels" not in (tmp_path / "tools" / "wirk" / "uv-receipt.toml").read_text()
 
 
 @needs_uv
-@pytest.mark.parametrize("answer, status", [("", 0), ("wirk-mcp v0.4.27", 1)])
+@pytest.mark.parametrize("answer, status", [("", 0), ("wirk-mcp v0.4.28", 1)])
 def test_no_version_from_uv_stops_before_wirk_is_installed(tmp_path, answer, status):
     """wirk is installed at wirk-mcp's version or not at all: never unpinned, never past a uv failure."""
     base = release(tmp_path)
@@ -286,14 +286,14 @@ def test_no_version_from_uv_stops_before_wirk_is_installed(tmp_path, answer, sta
 def test_wirk_follows_the_latest_wirk_mcp_so_the_two_always_match(tmp_path):
     """Between the CLI's release and the MCP server's, the installer keeps the pair that was released together."""
     base = release(tmp_path)
-    publish(tmp_path, "0.4.28", mcp=False)
+    publish(tmp_path, "0.4.29", mcp=False)
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode == 0, result.stdout + result.stderr
     assert versions(tmp_path) == [LATEST, LATEST]
 
 
 @needs_uv
-@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.27 does not
+@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.28 does not
 def test_wirk_version_pins_the_two_clients_and_the_skill_stays_the_latest(tmp_path, version):
     """The three packages do not share versions, so the skill comes from its own latest release either way."""
     base = release(tmp_path)

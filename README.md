@@ -20,6 +20,8 @@ If you reach several wirkspaces, `wirk wirkspace Sales` chooses one for the agen
 
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
+`wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
+
 ## Use
 
 Start with `wirk status`. `wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
@@ -78,6 +80,7 @@ Agents never run them; an agent decides proposals with its own token, as itself.
 - The token, only as the bearer header to the address it was made for: never to another address, a redirect or a storage link, and never in output, logs or errors.
 - With `status`, the client's name and version, a session hash, the repository as `host/owner/name` (or a hash when it has no plain remote) and the branch name. WIRK shows these as reported, never as authority.
 - File bytes you upload, straight to storage through short-lived links.
+- At most once an hour, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
 
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
 
@@ -85,6 +88,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.28
+
+- `wirk` keeps itself current: at most once an hour, after a command, a background process installs PyPI's latest release in place, and the `wirk-mcp` beside it.
 - The installer always installs the latest `wirk` and `wirk-mcp` from PyPI, and running it again upgrades them in place; `WIRK_VERSION=X` installs X instead. It no longer pins a version or keeps wheels.
 
 ### 0.4.27
@@ -212,7 +220,7 @@ A release is a version bump merged to main with `Release: publish wirk <version>
 
 The shared publication workflow checks the tag's commit, keeps identical existing assets, uploads missing ones and refuses to overwrite different bytes. New GitHub releases stay prereleases until their anonymous public downloads match the build and an isolated installation passes. Rerun failed jobs to reuse successful build artifacts. The manual `verify_tag` run qualifies an existing public version without publishing or moving tags.
 
-`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Publication does not update clients already installed on someone's machine.
+`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Installed clients pick up a published release after their first command an hour or more after their last check. Once an update has run, the uv receipt pins `wirk==X`, so `uv tool upgrade wirk` no longer does anything; running the installer again still works.
 
 ## License
 

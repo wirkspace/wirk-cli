@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlencode
 
-from . import __version__, context, grammar
+from . import __version__, context, grammar, update
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
     chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
     write_private
@@ -606,6 +606,12 @@ COMMANDS = {"status": status, "query": query, "write": write, "review": review, 
 
 def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    code = run(argv, transport)
+    update.after(argv[0] if argv and not argv[0].startswith("-") else "")
+    return code
+
+
+def run(argv: list[str], transport) -> int:
     command, words = (argv[0], argv[1:]) if argv and not argv[0].startswith("-") else ("", argv)
     try:
         if command in RETIRED:
