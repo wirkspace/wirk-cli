@@ -361,7 +361,8 @@ def qualify(kind, tag, directory):
         home = Path(scratch)
         # Inherit no credentials, Python paths, pip indexes or installed tool state.
         environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": scratch,
-                       "LANG": "C.UTF-8", "PYTHONNOUSERSITE": "1", "PIP_CONFIG_FILE": os.devnull}
+                       "LANG": "C.UTF-8", "PYTHONNOUSERSITE": "1", "PIP_CONFIG_FILE": os.devnull,
+                       "WIRK_NO_UPDATE": "1"}  # a qualifying wirk --help starts no update
         run([sys.executable, "-m", "venv", str(home / "venv")], env=environment, cwd=home)
         binary = home / "venv" / "bin"
         run([str(binary / "python"), "-m", "pip", "--isolated", "install", "--disable-pip-version-check",
