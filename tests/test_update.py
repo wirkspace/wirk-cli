@@ -380,6 +380,10 @@ def indexes(monkeypatch, tmp_path):
     config.write_text(f'[[index]]\nurl = "{wrong.url}"\ndefault = true\n')
     for name in INDEX_ENVIRONMENT:
         monkeypatch.setenv(name, str(config) if name == "UV_CONFIG_FILE" else wrong.url)
+    user = tmp_path / "xdg" / "uv" / "uv.toml"  # a user's own uv settings, with an index that comes before the default
+    user.parent.mkdir(parents=True)
+    user.write_text(f'[[index]]\nurl = "{wrong.url}"\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
     monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
     yield right, wrong
@@ -398,12 +402,46 @@ def test_the_real_uv_asks_only_the_updates_index(on, tmp_path, indexes):
     assert right.hits and wrong.hits == []
 
 
-@pytest.mark.skipif(not importlib.util.find_spec("pip"), reason="needs pip in the test environment")
-def test_the_real_pip_asks_only_the_updates_index(on, tmp_path, indexes):
+@pytest.fixture(scope="module")
+def venv(tmp_path_factory):
+    """A real virtual environment with pip, holding a wirk to upgrade."""
+    prefix = tmp_path_factory.mktemp("real") / "venv"
+    if subprocess.run([sys.executable, "-m", "venv", str(prefix)], capture_output=True).returncode:
+        pytest.skip("needs venv with pip")
+    [site] = prefix.glob("lib/python*/site-packages")
+    info = site / "wirk-0.4.21.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.21\n")
+    return prefix
+
+
+@pytest.mark.parametrize("where", ["environment", "PIP_CONFIG_FILE", "the environment's pip.conf"])
+def test_the_real_pip_asks_only_the_updates_index(on, tmp_path, indexes, venv, monkeypatch, where):
     right, wrong = indexes
-    prefix = install(tmp_path / "venv", {"wirk": "0.4.21"})
-    [(_, _, command, env)] = update.targets(prefix)
+    config = tmp_path / "pip.conf" if where == "PIP_CONFIG_FILE" else venv / "pip.conf"
+    if where != "environment":
+        (tmp_path / "links").mkdir()
+        config.write_text(f"[global]\nextra-index-url = {wrong.url}\nfind-links = {wrong.url}/links\n")
+    if where == "PIP_CONFIG_FILE":
+        monkeypatch.setenv("PIP_CONFIG_FILE", str(config))
+    [(_, _, command, env)] = update.targets(venv)
     on.mkdir()
-    real = [sys.executable] + [part.format("9.9.9") for part in command[1:]] + ["--dry-run"]
-    assert not update.upgraded(real, env, on)
+    try:
+        assert not update.upgraded([part.format("9.9.9") for part in command], env, on)  # nothing to install offline
+    finally:
+        (venv / "pip.conf").unlink(missing_ok=True)
     assert right.hits and wrong.hits == []
+
+
+def test_an_update_that_cannot_take_the_lock_runs_nothing(on, tmp_path, monkeypatch):
+    import errno
+    import fcntl
+
+    def broken(*args):
+        raise OSError(errno.ENOLCK, "no locks available")
+    monkeypatch.setattr(fcntl, "flock", broken)
+    prefix = install(tmp_path / "venv", {"wirk": "0.4.21"})
+    recorder(prefix / "bin" / "python", tmp_path / "pip.log")
+    with pytest.raises(OSError):
+        update.main(prefix, pypi())
+    assert not (tmp_path / "pip.log").exists()

@@ -16,7 +16,7 @@ from .client import config_dir
 
 CHILD = [sys.executable, "-I", "-m", "wirk_cli.update"]
 HOUR, DAY = 3600, 86400
-INDEX = "https://pypi.org/simple"  # the release always comes from here, whatever index a repository's settings name
+INDEX = "https://pypi.org/simple"  # the only index an upgrade asks: uv and pip read no other index or config
 RELEASE = re.compile(r"\d+\.\d+\.\d+")
 
 
@@ -74,7 +74,8 @@ def targets(prefix: Path) -> list:
         return tools + ([uv_tool("wirk-mcp", sibling, mcp[0])] if mcp and not mcp[1] else [])
     command = [str(prefix / "bin" / "python"), "-I", "-m", "pip", "install", "--isolated", "--quiet",
                "--disable-pip-version-check", "--index-url", INDEX, name + "=={}"]
-    return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, None)]
+    env = {**os.environ, "PIP_CONFIG_FILE": os.devnull}  # devnull: pip reads no config file at all, the venv's included
+    return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, env)]
 
 
 def installed(prefix: Path) -> dict:
@@ -91,7 +92,8 @@ def installed(prefix: Path) -> dict:
 
 def uv_tool(name: str, prefix: Path, version: str):
     """The uv tool at PREFIX upgrades in place: its tool folder, its commands' folder and its Python stay; its
-    --with packages do not (the installer's wirk-mcp tool has the old wirk there, which the new one's pin replaces)."""
+    --with packages do not (the installer's wirk-mcp tool has the old wirk there, which the new one's pin replaces).
+    Only uv's index settings are dropped: others, such as UV_PYTHON, can make the upgrade fail but not redirect it."""
     import shutil
     import tomllib
     tool = tomllib.loads((prefix / "uv-receipt.toml").read_text())["tool"]
@@ -129,13 +131,14 @@ def upgraded(command: list, env, directory: Path) -> bool:
 
 @contextmanager
 def locked(directory: Path, wait: bool = False):
-    """Holds update.lock and gives True; without wait, gives False at once when another process holds it."""
+    """Holds update.lock and gives True; without wait, gives False at once when another process holds it. Any other
+    failure to lock raises: nothing runs without the lock."""
     import fcntl  # POSIX only: the module itself still loads anywhere
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(directory / "update.lock", "a") as file:
         try:
             fcntl.flock(file, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        except BlockingIOError:
             yield False
             return
         yield True
