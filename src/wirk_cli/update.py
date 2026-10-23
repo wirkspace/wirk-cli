@@ -1,4 +1,5 @@
-"""wirk keeps itself current: after a command, at most once an hour, a detached process installs PyPI's latest.
+"""wirk keeps itself current: after a command, at most once an hour, a detached process installs PyPI's latest
+and replaces each installed copy of the WIRK skill with its latest release.
 
 Only after() runs in every command, so what the detached process alone needs is imported inside its functions.
 """
@@ -18,6 +19,9 @@ CHILD = [sys.executable, "-I", "-m", "wirk_cli.update"]
 HOUR, DAY = 3600, 86400
 INDEX = "https://pypi.org/simple"  # the only index an upgrade asks: uv and pip read no other index or config
 RELEASE = re.compile(r"\d+\.\d+\.\d+")
+SKILL = "https://github.com/wirkspace/wirk-skill/releases"
+WIRK_SKILL = re.compile(r"---\n(?:(?!---).*\n)*?name: wirk\n")  # front matter naming the skill
+SKILL_VERSION = re.compile(r"\nWIRK skill (\d+\.\d+\.\d+)\.\n?\Z")  # the skill's last line
 
 
 def after(command: str) -> None:
@@ -56,6 +60,8 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
             command = command and [part.format(want) for part in command]
             if newer(want, have) and not (command and upgraded(command, env, directory)):
                 notices.append(f"{name} {want} is out; this is {have}. To update: uv tool install {name}=={want}")
+        if not notices:  # an old wirk keeps the skill it came with: the skill follows once every package is current
+            notices = refresh_skill(transport)
         data = load(directory)
         data["notice"] = "; ".join(notices) or None
         save(directory, data)
@@ -104,6 +110,70 @@ def uv_tool(name: str, prefix: Path, version: str):
     python = ["--python", tool["python"]] if "python" in tool else []
     return name, version, uv and [uv, "tool", "install", "--no-config", "--default-index", INDEX, *python,
                                   name + "=={}"], env
+
+
+def refresh_skill(transport=None) -> list:
+    """Replace each installed copy of the WIRK skill older than its latest release; a notice per copy that cannot be.
+    Only regular files in the installer's folders are replaced, never through a link and never in a new folder.
+    The latest tag comes first; the release's files are downloaded only when some copy is older."""
+    import hashlib
+    import httpx
+    home = Path.home()
+    folders = [home / ".claude", Path(os.environ.get("CODEX_HOME") or home / ".codex"), home / ".agents"]
+    copies = {}
+    for path in (folder / "skills" / "wirk" / "SKILL.md" for folder in folders):
+        try:
+            text = "" if path.parent.is_symlink() or path.is_symlink() else path.read_text(errors="replace")
+        except OSError:  # none there, or unreadable
+            continue
+        if WIRK_SKILL.match(text):
+            copies[path] = skill_version(text)
+    if not copies:
+        return []
+    try:
+        with httpx.Client(transport=transport, timeout=10) as client:
+            tag = client.get(f"{SKILL}/latest").headers.get("location", "").rpartition("/tag/v")[2]
+            if not RELEASE.fullmatch(tag) or not any(newer(tag, have) for have in copies.values()):
+                return []
+            skill, sums = (client.get(f"{SKILL}/download/v{tag}/{name}", follow_redirects=True).content
+                           for name in ("SKILL.md", "SHA256SUMS"))  # an error page cannot match the sum
+    except Exception:  # no plain answer: the next hour asks again
+        return []
+    if (f"{hashlib.sha256(skill).hexdigest()}  SKILL.md" not in sums.decode(errors="replace").splitlines()
+            or skill_version(skill.decode(errors="replace")) != tag):
+        return []
+    notices = []
+    for path, have in copies.items():
+        if newer(tag, have) and not replaced(path, skill):
+            notices.append(f"WIRK skill {tag} is out; {path} is older. To update: curl -fsSL https://wirk.life/install | sh")
+    return notices
+
+
+def skill_version(text: str) -> str:
+    """The version on a skill's last line, or 0.0.0 for a copy from before skills carried one."""
+    found = SKILL_VERSION.search(text)
+    return found[1] if found else "0.0.0"
+
+
+def replaced(path: Path, content: bytes) -> bool:
+    """Write CONTENT beside PATH in a file of this process's own, with PATH's mode, flush it, then rename it over PATH.
+    Checks from two configuration folders share a home but not a lock, so neither may open the other's file."""
+    import tempfile
+    try:
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".SKILL.md.")  # exclusive, never a link
+    except OSError:
+        return False
+    try:
+        with os.fdopen(descriptor, "wb") as file:
+            os.fchmod(file.fileno(), path.stat().st_mode & 0o777)
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+        return True
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)
+        return False
 
 
 def latest(name: str, transport=None):
