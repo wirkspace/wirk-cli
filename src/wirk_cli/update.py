@@ -60,7 +60,8 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
             command = command and [part.format(want) for part in command]
             if newer(want, have) and not (command and upgraded(command, env, directory)):
                 notices.append(f"{name} {want} is out; this is {have}. To update: uv tool install {name}=={want}")
-        notices += refresh_skill(transport)
+        if not notices:  # an old wirk keeps the skill it came with: the skill follows once every package is current
+            notices = refresh_skill(transport)
         data = load(directory)
         data["notice"] = "; ".join(notices) or None
         save(directory, data)

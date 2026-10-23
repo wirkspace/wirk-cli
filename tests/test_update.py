@@ -587,17 +587,14 @@ def test_an_unreachable_github_changes_nothing_and_the_next_check_retries(on, tm
     assert [path.read_text() for path in paths] == [skill("0.4.29")] * 2
 
 
-def test_the_skill_is_refreshed_beside_a_package_upgrade_and_both_notices_are_kept(on, tmp_path):
+def test_an_old_wirk_that_could_not_be_upgraded_keeps_its_own_skill(on, tmp_path):
     prefix = install(tmp_path / "system", {"wirk": "0.4.21"})
     (prefix / "pyvenv.cfg").unlink()  # cannot be upgraded: a notice
     [path] = copies(tmp_path / "home", skill("0.4.25"), FOLDERS[:1])
-    path.parent.chmod(0o500)
-    try:
-        update.main(prefix, github())
-    finally:
-        path.parent.chmod(0o700)
-    assert state(on)["notice"].startswith("wirk 0.4.27 is out; this is 0.4.21.")
-    assert "; WIRK skill 0.4.29 is out;" in state(on)["notice"]
+    transport = github()
+    update.main(prefix, transport)
+    assert path.read_text() == skill("0.4.25") and transport.github() == []
+    assert state(on)["notice"] == "wirk 0.4.27 is out; this is 0.4.21. To update: uv tool install wirk==0.4.27"
 
 
 def test_two_checks_under_one_home_each_write_their_own_temporary_file(on, tmp_path, monkeypatch):
