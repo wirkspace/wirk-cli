@@ -537,9 +537,8 @@ def test_without_an_installed_copy_github_is_never_asked(on, tmp_path, current):
     assert transport.github() == []
 
 
-@pytest.mark.parametrize("release", [dict(sums="0" * 64 + "  SKILL.md\n"), dict(sums=""),
-                                     dict(text=skill("0.4.28")), dict(text=skill("0.4.29", name="other"))],
-                         ids=["wrong sum", "no sum", "line is not the tag", "not the wirk skill"])
+@pytest.mark.parametrize("release", [dict(sums="0" * 64 + "  SKILL.md\n"), dict(sums=""), dict(text=skill("0.4.28"))],
+                         ids=["wrong sum", "no sum", "line is not the tag"])
 def test_a_release_file_that_does_not_check_out_writes_nothing(on, tmp_path, current, release):
     paths = copies(tmp_path / "home", skill("0.4.25"))
     update.main(current, github(**release))

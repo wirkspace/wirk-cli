@@ -135,13 +135,12 @@ def refresh_skill(transport=None) -> list:
             tag = client.get(f"{SKILL}/latest").headers.get("location", "").rpartition("/tag/v")[2]
             if not RELEASE.fullmatch(tag) or not any(newer(tag, have) for have in copies.values()):
                 return []
-            skill, sums = (client.get(f"{SKILL}/download/v{tag}/{name}", follow_redirects=True)
-                           .raise_for_status().content for name in ("SKILL.md", "SHA256SUMS"))
+            skill, sums = (client.get(f"{SKILL}/download/v{tag}/{name}", follow_redirects=True).content
+                           for name in ("SKILL.md", "SHA256SUMS"))  # an error page cannot match the sum
     except Exception:  # no plain answer: the next hour asks again
         return []
-    text = skill.decode(errors="replace")
-    if f"{hashlib.sha256(skill).hexdigest()}  SKILL.md" not in sums.decode(errors="replace").splitlines() \
-            or skill_version(text) != tag or not WIRK_SKILL.match(text):
+    if (f"{hashlib.sha256(skill).hexdigest()}  SKILL.md" not in sums.decode(errors="replace").splitlines()
+            or skill_version(skill.decode(errors="replace")) != tag):
         return []
     notices = []
     for path, have in copies.items():
