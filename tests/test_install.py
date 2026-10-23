@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-LATEST = "0.4.28"
+LATEST = "0.4.29"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -293,7 +293,7 @@ def test_wirk_follows_the_latest_wirk_mcp_so_the_two_always_match(tmp_path):
 
 
 @needs_uv
-@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.28 does not
+@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.29 does not yet
 def test_wirk_version_pins_the_two_clients_and_the_skill_stays_the_latest(tmp_path, version):
     """The three packages do not share versions, so the skill comes from its own latest release either way."""
     base = release(tmp_path)
