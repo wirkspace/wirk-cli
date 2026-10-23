@@ -598,3 +598,18 @@ def test_the_skill_is_refreshed_beside_a_package_upgrade_and_both_notices_are_ke
         path.parent.chmod(0o700)
     assert state(on)["notice"].startswith("wirk 0.4.27 is out; this is 0.4.21.")
     assert "; WIRK skill 0.4.29 is out;" in state(on)["notice"]
+
+
+def test_two_checks_under_one_home_each_write_their_own_temporary_file(on, tmp_path, monkeypatch):
+    """Two configuration folders have two locks but share the skill: one check's file is never opened by the other."""
+    [path] = copies(tmp_path / "home", skill("0.4.25"), FOLDERS[:1])
+    real, other = os.fsync, []
+
+    def fsync(descriptor):  # the first check has written its file; the second runs to the end before it renames
+        real(descriptor)
+        if not other:
+            other.append(None)
+            other.append(update.refresh_skill(github()))
+    monkeypatch.setattr(update.os, "fsync", fsync)
+    assert update.refresh_skill(github()) == [] and other[1] == []
+    assert path.read_text() == skill("0.4.29") and [p.name for p in path.parent.iterdir()] == ["SKILL.md"]

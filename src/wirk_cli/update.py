@@ -156,18 +156,23 @@ def skill_version(text: str) -> str:
 
 
 def replaced(path: Path, content: bytes) -> bool:
-    """Write CONTENT beside PATH with its mode, flush it to disk, then rename it over PATH."""
-    temporary = path.with_name(".SKILL.md.new")
+    """Write CONTENT beside PATH in a file of this process's own, with PATH's mode, flush it, then rename it over PATH.
+    Checks from two configuration folders share a home but not a lock, so neither may open the other's file."""
+    import tempfile
     try:
-        with open(temporary, "wb") as file:
-            os.chmod(temporary, path.stat().st_mode & 0o777)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".SKILL.md.")  # exclusive, never a link
+    except OSError:
+        return False
+    try:
+        with os.fdopen(descriptor, "wb") as file:
+            os.fchmod(file.fileno(), path.stat().st_mode & 0o777)
             file.write(content)
             file.flush()
             os.fsync(file.fileno())
         os.replace(temporary, path)
         return True
     except OSError:
-        temporary.unlink(missing_ok=True)
+        Path(temporary).unlink(missing_ok=True)
         return False
 
 
