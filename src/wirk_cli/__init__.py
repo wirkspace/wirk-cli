@@ -1,3 +1,3 @@
 """The wirk command-line client for WIRK."""
 
-__version__ = "0.4.28"
+__version__ = "0.4.29"

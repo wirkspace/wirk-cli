@@ -91,6 +91,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.29
+
 - The hourly update also replaces each installed copy of the WIRK skill that is older than the skill's latest release, after checking it against the release's SHA-256 sum. Skills carry their version on their last line from wirk-skill 0.4.29.
 
 ### 0.4.28
