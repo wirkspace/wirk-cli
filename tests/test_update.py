@@ -1,5 +1,6 @@
 """wirk keeps itself current: the hourly check after a command, and the detached upgrade it starts."""
 
+import hashlib
 import http.server
 import importlib.util
 import json
@@ -26,8 +27,10 @@ INDEX_ENVIRONMENT = ("UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_EXTRA_I
 
 @pytest.fixture
 def on(monkeypatch, tmp_path):
-    """Updates turned on, with their own configuration directory."""
+    """Updates turned on, with their own configuration directory and a home of their own for the skill's folders."""
     monkeypatch.delenv("WIRK_NO_UPDATE", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     directory = tmp_path / "config"
     monkeypatch.setenv("WIRK_CONFIG_DIR", str(directory))
     return directory
@@ -445,3 +448,153 @@ def test_an_update_that_cannot_take_the_lock_runs_nothing(on, tmp_path, monkeypa
     with pytest.raises(OSError):
         update.main(prefix, pypi())
     assert not (tmp_path / "pip.log").exists()
+
+
+# The skill, refreshed in the same detached process
+
+
+def skill(version=None, name="wirk"):
+    return f"---\nname: {name}\ndescription: WIRK for agents.\n---\n\n# WIRK\n" + (f"\nWIRK skill {version}.\n" if version else "")
+
+
+def github(tag="v0.4.29", text=None, sums=None):
+    """PyPI as pypi() answers, plus the skill's releases: the latest tag by redirect, then that tag's two files."""
+    text = skill(tag[1:]) if text is None else text
+    sums = f"{hashlib.sha256(text.encode()).hexdigest()}  SKILL.md\n" if sums is None else sums
+    asked = []
+
+    def answer(request):
+        path = request.url.path
+        asked.append(path)
+        if request.url.host == "pypi.org":
+            return httpx.Response(200, json={"info": {"version": LATEST[path.split("/")[2]]}})
+        if path == "/wirkspace/wirk-skill/releases/latest":
+            return httpx.Response(302, headers={"Location": f"https://github.com/wirkspace/wirk-skill/releases/tag/{tag}"})
+        files = {f"/wirkspace/wirk-skill/releases/download/{tag}/SKILL.md": text,
+                 f"/wirkspace/wirk-skill/releases/download/{tag}/SHA256SUMS": sums}
+        return httpx.Response(200, text=files[path]) if path in files else httpx.Response(404)
+    transport = httpx.MockTransport(answer)
+    transport.github = lambda: [path for path in asked if not path.startswith("/pypi/")]
+    return transport
+
+
+FOLDERS = (".claude/skills/wirk", ".agents/skills/wirk", ".codex/skills/wirk")
+
+
+def copies(home, text, folders=FOLDERS[:2]):
+    for folder in folders:
+        (home / folder).mkdir(parents=True)
+        (home / folder / "SKILL.md").write_text(text)
+        (home / folder / "SKILL.md").chmod(0o600)
+    return [home / folder / "SKILL.md" for folder in folders]
+
+
+@pytest.fixture
+def current(tmp_path):
+    """An install already at PyPI's latest, so only the skill can change."""
+    return install(tmp_path / "venv", {"wirk": "0.4.27"})
+
+
+def test_a_newer_skill_release_replaces_each_installed_copy_and_creates_none(on, tmp_path, current):
+    home = tmp_path / "home"
+    paths = copies(home, skill("0.4.25"))
+    transport = github()
+    update.main(current, transport)
+    assert [path.read_text() for path in paths] == [skill("0.4.29")] * 2
+    assert [oct(path.stat().st_mode & 0o777) for path in paths] == ["0o600"] * 2
+    assert not (home / ".codex").exists() and sorted(p.name for p in paths[0].parent.iterdir()) == ["SKILL.md"]
+    assert transport.github() == ["/wirkspace/wirk-skill/releases/latest",
+                                  "/wirkspace/wirk-skill/releases/download/v0.4.29/SKILL.md",
+                                  "/wirkspace/wirk-skill/releases/download/v0.4.29/SHA256SUMS"]
+    assert state(on).get("notice") is None
+
+
+def test_codex_home_names_codexs_folder(on, tmp_path, current, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    [path] = copies(tmp_path, skill("0.4.25"), ["codex/skills/wirk"])
+    update.main(current, github())
+    assert path.read_text() == skill("0.4.29")
+
+
+def test_a_copy_without_a_version_line_counts_as_older(on, tmp_path, current):
+    [path] = copies(tmp_path / "home", skill(), FOLDERS[:1])
+    update.main(current, github())
+    assert path.read_text() == skill("0.4.29")
+
+
+@pytest.mark.parametrize("installed", ["0.4.29", "0.4.30"])
+def test_a_current_skill_asks_only_for_the_tag_and_downloads_nothing(on, tmp_path, current, installed):
+    paths = copies(tmp_path / "home", skill(installed))
+    transport = github()
+    update.main(current, transport)
+    assert transport.github() == ["/wirkspace/wirk-skill/releases/latest"]
+    assert [path.read_text() for path in paths] == [skill(installed)] * 2
+
+
+def test_without_an_installed_copy_github_is_never_asked(on, tmp_path, current):
+    transport = github()
+    update.main(current, transport)
+    assert transport.github() == []
+
+
+@pytest.mark.parametrize("release", [dict(sums="0" * 64 + "  SKILL.md\n"), dict(sums=""),
+                                     dict(text=skill("0.4.28")), dict(text=skill("0.4.29", name="other"))],
+                         ids=["wrong sum", "no sum", "line is not the tag", "not the wirk skill"])
+def test_a_release_file_that_does_not_check_out_writes_nothing(on, tmp_path, current, release):
+    paths = copies(tmp_path / "home", skill("0.4.25"))
+    update.main(current, github(**release))
+    assert [path.read_text() for path in paths] == [skill("0.4.25")] * 2
+    assert state(on).get("notice") is None
+
+
+def test_links_and_other_skills_are_left_alone(on, tmp_path, current):
+    home, checkout = tmp_path / "home", tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "SKILL.md").write_text(skill("0.4.25"))
+    (home / ".claude" / "skills" / "wirk").mkdir(parents=True)
+    (home / ".claude" / "skills" / "wirk" / "SKILL.md").symlink_to(checkout / "SKILL.md")
+    (home / ".agents" / "skills").mkdir(parents=True)
+    (home / ".agents" / "skills" / "wirk").symlink_to(checkout)
+    [other] = copies(home, skill("0.4.25", name="other"), FOLDERS[2:])
+    transport = github()
+    update.main(current, transport)
+    assert (checkout / "SKILL.md").read_text() == skill("0.4.25") and other.read_text() == skill("0.4.25", "other")
+    assert transport.github() == []
+
+
+def test_a_copy_that_cannot_be_replaced_is_named_in_the_notice(on, tmp_path, current):
+    locked_copy, fine = copies(tmp_path / "home", skill("0.4.25"))
+    locked_copy.parent.chmod(0o500)
+    try:
+        update.main(current, github())
+    finally:
+        locked_copy.parent.chmod(0o700)
+    assert locked_copy.read_text() == skill("0.4.25") and fine.read_text() == skill("0.4.29")
+    assert state(on)["notice"] == (f"WIRK skill 0.4.29 is out; {locked_copy} is older. "
+                                   "To update: curl -fsSL https://wirk.life/install | sh")
+
+
+def test_an_unreachable_github_changes_nothing_and_the_next_check_retries(on, tmp_path, current):
+    paths = copies(tmp_path / "home", skill("0.4.25"))
+
+    def pypi_only(request):
+        if request.url.host != "pypi.org":
+            raise httpx.ConnectTimeout("timed out", request=request)
+        return httpx.Response(200, json={"info": {"version": LATEST[request.url.path.split("/")[2]]}})
+    update.main(current, httpx.MockTransport(pypi_only))
+    assert [path.read_text() for path in paths] == [skill("0.4.25")] * 2 and state(on).get("notice") is None
+    update.main(current, github())
+    assert [path.read_text() for path in paths] == [skill("0.4.29")] * 2
+
+
+def test_the_skill_is_refreshed_beside_a_package_upgrade_and_both_notices_are_kept(on, tmp_path):
+    prefix = install(tmp_path / "system", {"wirk": "0.4.21"})
+    (prefix / "pyvenv.cfg").unlink()  # cannot be upgraded: a notice
+    [path] = copies(tmp_path / "home", skill("0.4.25"), FOLDERS[:1])
+    path.parent.chmod(0o500)
+    try:
+        update.main(prefix, github())
+    finally:
+        path.parent.chmod(0o700)
+    assert state(on)["notice"].startswith("wirk 0.4.27 is out; this is 0.4.21.")
+    assert "; WIRK skill 0.4.29 is out;" in state(on)["notice"]
