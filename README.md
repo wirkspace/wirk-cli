@@ -22,6 +22,8 @@ By hand: `uv tool install wirk` (or the wheel attached to a [release](https://gi
 
 `wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
 
+The same background process keeps the WIRK skill current. Where the installer put a copy (`~/.claude/skills/wirk`, `~/.agents/skills/wirk`, or `$CODEX_HOME/skills/wirk`, by default `~/.codex/skills/wirk`), it reads the version on the copy's last line (`WIRK skill X.`; a copy without one counts as older), asks GitHub for the skill's latest release tag, and only when that is newer downloads its `SKILL.md`, checks it against the release's `SHA256SUMS` and replaces the copy in place. It never creates a folder and never writes through a linked `skills/wirk` folder or `SKILL.md`, though a linked parent folder such as `~/.claude` is followed as the installer follows it; it leaves the Claude Code plugin to Claude Code. A copy it cannot replace is named in the daily line.
+
 ## Use
 
 Start with `wirk status`. `wirk --help` shows commands and examples; replace sample IDs, revisions and paths with your own values before running an example.
@@ -81,6 +83,7 @@ Agents never run them; an agent decides proposals with its own token, as itself.
 - With `status`, the client's name and version, a session hash, the repository as `host/owner/name` (or a hash when it has no plain remote) and the branch name. WIRK shows these as reported, never as authority.
 - File bytes you upload, straight to storage through short-lived links.
 - At most once an hour, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
+- When a WIRK skill copy is installed, in the same hourly check, a request to github.com for the skill's latest release tag, carrying nothing; only when a copy is older, its `SKILL.md` and `SHA256SUMS`.
 
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
 
@@ -88,7 +91,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- The hourly update also replaces each installed copy of the WIRK skill that is older than the skill's latest release, after checking it against the release's SHA-256 sum. Skills carry their version on their last line from wirk-skill 0.4.29.
 
 ### 0.4.28
 
