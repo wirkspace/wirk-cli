@@ -21,7 +21,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import __version__
-from .client import Failure, Service, actor_binding, actor_path, chosen, config_dir, read_private, read_token, saved_url
+from .client import Failure, Service, actor_binding, actor_path, chosen, config_dir, launcher, read_private, read_token, \
+    saved_url
 from .update import locked
 
 SYSTEM, PROC = sys.platform, Path("/proc")
@@ -133,8 +134,8 @@ def save(path: Path, data) -> None:
 def record(url: str, binding: str) -> None:
     """Beside a chat's token, how to resume it: only for a chat that owns its harness process."""
     try:
-        parts = binding.split(",")
-        mine = [part for part in parts if len(parts) == 1 or not actor_path(url, part).exists()]
+        parts, started_by = binding.split(","), launcher(url, binding)
+        mine = [part for part in parts if len(parts) == 1 or started_by and actor_path(url, part) != started_by]
         found = harness()
         if len(mine) != 1 or not owns(found, mine[0]):
             return
@@ -294,7 +295,7 @@ def resume(path: Path, found: dict):
     program = found["program"] if os.access(found["program"], os.X_OK) else shutil.which(name, path=search)
     place = f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else ""
     words = ["--resume", found["id"], "-p"] if name == "claude" else ["exec", "resume", found["id"]]
-    env = {**os.environ, "PATH": search, **{k: v for k, v in found["env"].items() if k in (*IDS.values(), *HOMES.values())}}
+    env = {**os.environ, "PATH": search, **found["env"]}
     log = path.with_name(path.name + ".log")
     trim(log)
     descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
