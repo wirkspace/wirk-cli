@@ -101,6 +101,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.30
+
 - `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a stopped chat).
 
 ### 0.4.29

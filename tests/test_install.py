@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-LATEST = "0.4.29"
+LATEST = "0.4.30"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -262,10 +262,10 @@ def test_a_rerun_upgrades_in_place_to_the_latest_release(tmp_path):
     assert install(tmp_path, base, "--url", URL).returncode == 0
     assert not kept.parent.exists()  # nothing uses them any more
     assert versions(tmp_path) == [LATEST, LATEST]
-    publish(tmp_path, "0.4.29")
+    publish(tmp_path, "0.4.31")
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
-    assert versions(tmp_path) == ["0.4.29", "0.4.29"]
+    assert versions(tmp_path) == ["0.4.31", "0.4.31"]
     assert "wirk/wheels" not in (tmp_path / "tools" / "wirk" / "uv-receipt.toml").read_text()
 
 
@@ -293,7 +293,7 @@ def test_wirk_follows_the_latest_wirk_mcp_so_the_two_always_match(tmp_path):
 
 
 @needs_uv
-@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.29 does not yet
+@pytest.mark.parametrize("version", ["0.4.26", LATEST])  # a wirk-skill v0.4.26 release exists; a v0.4.30 does not yet
 def test_wirk_version_pins_the_two_clients_and_the_skill_stays_the_latest(tmp_path, version):
     """The three packages do not share versions, so the skill comes from its own latest release either way."""
     base = release(tmp_path)
