@@ -34,6 +34,9 @@ def prompt(place: str = "") -> str:
 
 def enrolling(request):
     """A service that enrols any chat."""
+    body = json.loads(request.content)
+    if request.url.path == "/v2/login" and body.get("for") == "agent" and body.get("format") == "json":
+        return envelope(data={"state": "logged_in", "principal": "alice-agents", "kind": "agent", "person": "alice"})
     if request.url.path == "/v2/login":
         return envelope("Logged in as agent-1 · agent of alice · account Acme\nnext: status")
     return envelope("ok")
@@ -82,6 +85,18 @@ def ask(path, answer, fakes=None):
 def state():
     path = wake.state_dir() / "wake.json"
     return json.loads(path.read_text()) if path.exists() else {}
+
+
+def write_state(data):
+    wake.state_dir().mkdir(parents=True, exist_ok=True)
+    write_token(wake.state_dir() / "wake.json", json.dumps(data))
+
+
+def signed_in(binding):
+    """A chat of BINDING with a token kept here."""
+    path = client.actor_path(URL, binding)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    write_token(path, "wirk_" + "c" * 43)
 
 
 def in_a_chat(monkeypatch, fakes, tmp_path, *, harness="claude", own=None, launcher=None, args=None,
@@ -135,7 +150,7 @@ def test_no_record_outside_a_known_harness(run, home, monkeypatch, fakes):
 def test_the_nearest_harness_is_the_chats(run, home, monkeypatch, fakes, tmp_path):
     """A codex chat started inside a claude session: the codex process is the nearest, and its thread is the chat."""
     launcher = new_id()
-    write_token(client.actor_path(URL, launcher), "wirk_" + "c" * 43)  # the session that started it is signed in
+    signed_in(launcher)  # the session that started it is signed in
     own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness="codex", launcher=launcher, chain=["/bin/bash"],
                           outer=str(fakes.bin / "claude"))
     assert run(["login"], enrolling)[0] == 0
@@ -176,7 +191,7 @@ def test_a_sub_agent_sharing_its_launchers_harness_gets_no_record(run, home, mon
     """A lane that exports its own thread ID inside its root's session process: its own part is the thread, but the
     nearest harness is the root's, whose session is not that thread. Never woken; never resumes the root."""
     root, work = in_a_chat(monkeypatch, fakes, tmp_path)
-    write_token(client.actor_path(URL, root), "wirk_" + "c" * 43)
+    signed_in(root)
     lane = new_id()
     monkeypatch.setenv("CODEX_THREAD_ID", lane)
     assert run(["login"], enrolling)[0] == 0
@@ -198,7 +213,7 @@ def test_a_planted_variable_never_reaches_the_record(run, home, monkeypatch, fak
     assert run(["login"], enrolling)[0] == 0
     path = the_record(home, own)
     assert record_of(path)["env"] == {"CLAUDE_CONFIG_DIR": str(tmp_path / "harness-config")}
-    assert "planted" not in path.read_text() and "example.com" not in path.read_text()
+    assert "xoxb" not in path.read_text() and "example.com" not in path.read_text()
 
 
 # ------------------------------------------------------------------ the refresh after each command
@@ -385,11 +400,10 @@ def test_ten_wakes_an_hour_per_user_across_configuration_directories(home, fakes
 
 def test_a_held_back_wake_follows_when_the_hour_allows(home, fakes):
     path, message = chat(home), new_id()
-    wake.state_dir().mkdir(parents=True, exist_ok=True)
-    (wake.state_dir() / "wake.json").write_text(json.dumps({"wakes": [time.time() - 3500] * 10}))
+    write_state({"wakes": [time.time() - 3500] * 10})
     ask(path, waiting(message))
     assert fakes.runs() == [] and state().get("woken", {}) == {}  # held back, not recorded
-    (wake.state_dir() / "wake.json").write_text(json.dumps({"wakes": [time.time() - 3700] * 10}))
+    write_state({"wakes": [time.time() - 3700] * 10})
     ask(path, waiting(message))
     assert len(fakes.runs()) == 1 and len(state()["wakes"]) == 1
 
@@ -508,9 +522,7 @@ def test_any_other_failure_counts_against_the_cap(home, fakes):
 
 
 def test_the_next_command_prints_one_failed_wake_line_once(run, fakes):
-    wake.state_dir().mkdir(parents=True, exist_ok=True)
-    (wake.state_dir() / "wake.json").write_text(json.dumps(
-        {"failed": {"claude": {"count": 2, "at": time.time(), "told": 0}}}))
+    write_state({"failed": {"claude": {"count": 2, "at": time.time(), "told": 0}}})
     code, out, err, fake = run(["query", "status=open", "--json"], lambda r: envelope(data={"items": []}))
     assert code == 0 and json.loads(out)["ok"]  # the answer stays parseable
     assert err == "2 wakes failed: claude is not signed in here\n"
