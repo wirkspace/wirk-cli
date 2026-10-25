@@ -150,7 +150,7 @@ def after(code: int) -> None:
     try:
         if (state_dir() / "wake.json").exists():
             with state() as data:
-                if ran in data["failed"]:  # a command in a chat of that harness, in any configuration directory
+                if held(data, ran):  # a command in a chat of that harness, in any configuration directory
                     data["failed"][ran]["ran"] = time.time()
                 tell(data)
     except Exception:

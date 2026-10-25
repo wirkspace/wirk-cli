@@ -559,6 +559,18 @@ def test_a_sign_in_failure_counts_its_message_as_woken(run, home, monkeypatch, f
     assert len(fakes.runs()) == 1 and state()["failed"]["claude"]["count"] == 1
 
 
+def test_a_lifted_hold_is_not_stamped_again(run, home, monkeypatch, fakes, tmp_path):
+    """Once a command lifted the hold, later commands leave the state file alone."""
+    fakes.write("says", SIGN_IN_REFUSAL)
+    fakes.write("exit", "1")
+    ask(chat(home), waiting(new_id()))
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)
+    path = wake.state_dir() / "wake.json"
+    before = (path.stat().st_ino, path.stat().st_mtime_ns)
+    assert run(["status"])[0] == 0
+    assert (path.stat().st_ino, path.stat().st_mtime_ns) == before
+
+
 def test_the_state_files_are_private(home, fakes):
     ask(chat(home), waiting(new_id()))
     assert [stat.S_IMODE((wake.state_dir() / name).stat().st_mode) for name in ("wake.json", "wake.lock")] == [0o600] * 2
