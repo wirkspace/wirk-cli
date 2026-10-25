@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlencode
 
-from . import __version__, context, grammar, update
+from . import __version__, context, grammar, update, wake
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
     chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
     write_private
@@ -338,6 +338,13 @@ def download(words, options, transport):
 
 
 def login(words, options, transport):
+    code = sign_in(words, options, transport)
+    if code == 0 and not options.get("--person"):
+        wake.install()  # the listener for this configuration directory; it says one line when it cannot start
+    return code
+
+
+def sign_in(words, options, transport):
     if words:
         raise UsageError("login takes --url URL, --new and nothing else")
     person = bool(options.get("--person"))
@@ -424,6 +431,8 @@ def enrol(machine: Service, path: Path, started_by: Path | None) -> int:
         answer["errors"][0].pop("hint", None)  # the service's hint is for the launcher's chat, not this one
         print("The chat that started this one was refused, so this one does not sign in. Run wirk login in that chat, "
               "then here again.", flush=True)
+    if answer["ok"]:
+        wake.record(machine.url, actor_binding())
     return emit(answer, {})
 
 
@@ -608,6 +617,7 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     code = run(argv, transport)
     update.after(argv[0] if argv and not argv[0].startswith("-") else "")
+    wake.after(code)
     return code
 
 
