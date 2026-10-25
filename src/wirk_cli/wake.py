@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -138,8 +139,6 @@ def record(url: str, binding: str) -> None:
 def after(code: int) -> None:
     """In the command's process, once its answer is out: refresh the chat's record, then say failed wakes."""
     used, Service.used = Service.used, None
-    if os.name != "posix":
-        return
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
             refresh(wake_path(url, binding), used)
@@ -180,8 +179,8 @@ def state():
             data = json.loads(read_private(path))
         except (OSError, ValueError, Failure):  # lost or broken: at most one more wake per chat
             data = {}
-        before = json.dumps(data)
         data = {"wakes": [], "woken": {}, "failed": {}, **data}
+        before = json.dumps(data)
         yield data
         if json.dumps(data) != before:
             save(path, data)
@@ -201,17 +200,20 @@ def tell() -> None:
 # ------------------------------------------------------------------ the listener
 
 
-def admitted(directory: Path) -> list[Path]:
-    """The records to listen for: token present, last command under 7 days old, the 8 most recent."""
-    found, now = [], time.time()
-    for path in (directory / "actors").glob("*.wake"):
+def records(directory: Path):
+    """(path, record) for each readable resume record in an actors folder."""
+    for path in directory.glob("*.wake"):
         try:
-            last = json.loads(read_private(path))["last"]
+            yield path, json.loads(read_private(path))
         except Exception:
             continue
-        if path.with_suffix("").exists() and now - last < IDLE:
-            found.append((last, path))
-    return [path for _, path in sorted(found, reverse=True)[:HELD]]
+
+
+def admitted(directory: Path) -> list[Path]:
+    """The records to listen for: token present, last command under 7 days old, the 8 most recent."""
+    found = sorted(((data["last"], path) for path, data in records(directory / "actors")
+                    if path.with_suffix("").exists() and time.time() - data["last"] < IDLE), reverse=True)
+    return [path for _, path in found[:HELD]]
 
 
 def listen(path: Path, stop, transport=None) -> None:
@@ -267,16 +269,8 @@ def wake(path: Path, found: dict, message: str) -> None:
 def held(data: dict, name: str, directory: Path) -> bool:
     """After a sign-in failure, no wake for that harness until a record of it shows a later command."""
     failure = data["failed"].get(name)
-    if not failure:
-        return False
-    for path in directory.glob("*.wake"):
-        try:
-            other = json.loads(read_private(path))
-        except Exception:
-            continue
-        if other["harness"] == name and other["last"] > failure["at"]:
-            return False
-    return True
+    return bool(failure) and not any(other["harness"] == name and other["last"] > failure["at"]
+                                     for _, other in records(directory))
 
 
 def resume(path: Path, found: dict):
@@ -306,13 +300,8 @@ def resume(path: Path, found: dict):
 
 def trim(log: Path) -> None:
     """Past 1 MB, the log keeps its last half."""
-    try:
-        if log.stat().st_size > LOG:
-            with open(log, "rb") as stream:
-                stream.seek(-LOG // 2, os.SEEK_END)
-                save(log, stream.read().decode(errors="replace"))
-    except FileNotFoundError:
-        pass
+    if log.exists() and log.stat().st_size > LOG:
+        save(log, log.read_bytes()[-LOG // 2:].decode(errors="replace"))
 
 
 def refused(name: str, process, log: Path, offset: int) -> bool:
@@ -322,9 +311,7 @@ def refused(name: str, process, log: Path, offset: int) -> bool:
             return False
     except subprocess.TimeoutExpired:
         return False
-    with open(log, "rb") as stream:
-        stream.seek(max(offset, os.path.getsize(log) - 2048))
-        tail = stream.read().decode(errors="replace")
+    tail = log.read_bytes()[offset:][-2048:].decode(errors="replace")
     return any(phrase in tail for phrase in REFUSALS[name])
 
 
@@ -336,10 +323,10 @@ def label() -> str:
 
 
 def job() -> tuple[Path, str]:
-    """This configuration directory's job file and its name for launchctl or systemctl."""
+    """This configuration directory's job file and its name: a launchd label, or a systemd unit."""
     if SYSTEM == "darwin":
         name = f"life.wirk.listener.{label()}"
-        return Path.home() / "Library" / "LaunchAgents" / f"{name}.plist", f"gui/{os.getuid()}/{name}"
+        return Path.home() / "Library" / "LaunchAgents" / f"{name}.plist", name
     name = f"wirk-listener-{label()}.service"
     return Path.home() / ".config" / "systemd" / "user" / name, name
 
@@ -359,12 +346,12 @@ def install() -> None:
         search = os.pathsep.join(dict.fromkeys(e for e in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(e)))
         if SYSTEM == "darwin":
             import plistlib
-            text = plistlib.dumps({"Label": name.rsplit("/", 1)[1], "ProgramArguments": CHILD,
+            text = plistlib.dumps({"Label": name, "ProgramArguments": CHILD,
                                    "EnvironmentVariables": {"WIRK_CONFIG_DIR": directory, "PATH": search},
                                    "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}).decode()
         else:
             text = (f"[Unit]\nDescription=WIRK listener\n\n[Service]\n"
-                    f"ExecStart={' '.join(quoted(part).replace('$', '$$') for part in CHILD[:1])} -I -m wirk_cli.wake\n"
+                    f"ExecStart={quoted(CHILD[0]).replace('$', '$$')} {' '.join(CHILD[1:])}\n"
                     f"Environment={quoted('WIRK_CONFIG_DIR=' + directory)}\nEnvironment={quoted('PATH=' + search)}\n"
                     "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n")
         changed = not path.exists() or path.read_text() != text
@@ -372,11 +359,12 @@ def install() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             save(path, text)
         if SYSTEM == "darwin":
-            loaded = control("launchctl", "print", name, check=False)
+            domain = f"gui/{os.getuid()}"
+            loaded = control("launchctl", "print", f"{domain}/{name}", check=False)
             if changed and loaded:
-                control("launchctl", "bootout", name, check=False)
+                control("launchctl", "bootout", f"{domain}/{name}", check=False)
             if changed or not loaded:
-                control("launchctl", "bootstrap", name.rsplit("/", 1)[0], str(path))
+                control("launchctl", "bootstrap", domain, str(path))
         else:
             for words in ([["daemon-reload"], ["enable", name], ["restart", name]] if changed else [["enable", "--now", name]]):
                 control("systemctl", "--user", *words)
@@ -395,8 +383,8 @@ def remove() -> None:
     path, name = job()
     if SYSTEM == "darwin":
         path.unlink(missing_ok=True)
-        control("launchctl", "bootout", name, check=False)  # stops this process too
-    elif SYSTEM == "linux":
+        control("launchctl", "bootout", f"gui/{os.getuid()}/{name}", check=False)  # stops this process too
+    else:
         control("systemctl", "--user", "disable", name, check=False)
         path.unlink(missing_ok=True)
         control("systemctl", "--user", "daemon-reload", check=False)
@@ -417,32 +405,27 @@ def installed() -> str:
 def main(transport=None) -> int:
     """The job: one wait per admitted chat, rescanned every minute; exits 75 for a new version, 0 when its directory or
     last token is gone (after removing itself) or another listener holds this directory."""
-    import threading
-    directory = config_dir()
-    if not live(directory):
-        remove()
-        return 0
-    with locked(directory, name="listener.lock") as mine:
-        if not mine:
-            return 0
-        waits = {}
-        while True:
-            if not live(directory):
-                remove()
+    directory, waits = config_dir(), {}
+    if live(directory):  # checked first: the lock would make the directory again
+        with locked(directory, name="listener.lock") as mine:
+            if not mine:
                 return 0
-            if installed() != __version__:
-                return 75
-            chosen_ = admitted(directory)
-            for path in list(waits):
-                if path not in chosen_:
-                    waits.pop(path)[1].set()
-            for path in chosen_:
-                if path not in waits or not waits[path][0].is_alive():
-                    stop = threading.Event()
-                    thread = threading.Thread(target=listen, args=(path, stop, transport), daemon=True)
-                    thread.start()
-                    waits[path] = (thread, stop)
-            time.sleep(SCAN)
+            while live(directory):
+                if installed() != __version__:
+                    return 75
+                wanted = admitted(directory)
+                for path in list(waits):
+                    if path not in wanted:
+                        waits.pop(path)[1].set()
+                for path in wanted:
+                    if path not in waits or not waits[path][0].is_alive():
+                        stop = threading.Event()
+                        thread = threading.Thread(target=listen, args=(path, stop, transport), daemon=True)
+                        thread.start()
+                        waits[path] = (thread, stop)
+                time.sleep(SCAN)
+    remove()
+    return 0
 
 
 if __name__ == "__main__":
