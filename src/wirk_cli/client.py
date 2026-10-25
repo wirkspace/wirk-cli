@@ -187,6 +187,8 @@ def digest(token: str) -> str:
 class Service:
     """One HTTP client for one address; follows no redirect and resends identical bytes once when no answer came."""
 
+    used = None  # the workspace_id the last ok answer's request carried, for the chat's resume record
+
     def __init__(self, url: str, token: str, transport=None, wirkspace: str | None = None):
         """`wirkspace` is the chat's choice: sent with every body that names none (a show revoke takes the link alone)."""
         self.url, self._token, self._transport, self.wirkspace, self._http = url, token, transport, wirkspace, None
@@ -213,7 +215,10 @@ class Service:
             try:
                 answer = self.http.post(self.url + route, json=body, timeout=httpx.Timeout(60 + body.get("wait", 0), connect=10),
                                         headers={"Authorization": f"Bearer {self._token}", **(headers or {})})
-                return self.envelope(answer, route, lost if uncertain else None)
+                data = self.envelope(answer, route, lost if uncertain else None)
+                if data["ok"] and body.get("workspace_id"):
+                    Service.used = body["workspace_id"]
+                return data
             except httpx.TransportError as error:
                 failure = error
         sent = not isinstance(failure, (httpx.ConnectError, httpx.ConnectTimeout))
