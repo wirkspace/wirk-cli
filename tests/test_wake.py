@@ -15,6 +15,7 @@ from wirk_cli import __version__, client, wake
 
 STARTED = "Sat Oct 24 10:00:00 2026"
 LATER = "Sat Oct 24 11:30:00 2026"
+IDS = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
 SIGN_IN_REFUSAL = "Failed to authenticate: OAuth session expired and could not be refreshed\n"
 
 
@@ -118,6 +119,18 @@ def in_a_chat(monkeypatch, fakes, tmp_path, *, harness="claude", own=None, launc
     return own, work
 
 
+def a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, directory, harness="claude"):
+    """A command that ends ok in a chat of HARNESS with a record in configuration DIRECTORY."""
+    monkeypatch.setenv("WIRK_CONFIG_DIR", str(directory))
+    for name in IDS:
+        monkeypatch.delenv(name, raising=False)
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness=harness)
+    chat(directory, harness=harness, session=own, pid=900, cwd=work)
+    code, out, err, fake = run(["status"])
+    assert code == 0, err
+    fakes.write("ps-args", "")
+
+
 def the_record(home, binding):
     path = client.actor_path(URL, binding)
     return path.with_name(path.name + ".wake")
@@ -157,6 +170,18 @@ def test_the_nearest_harness_is_the_chats(run, home, monkeypatch, fakes, tmp_pat
     record = record_of(the_record(home, f"{own},{launcher}"))
     assert (record["harness"], record["id"], record["pid"]) == ("codex", own, 900)
     assert record["env"] == {"CLAUDE_CODE_SESSION_ID": launcher}  # the resumed process computes the same binding
+
+
+@pytest.mark.parametrize("named", ["its own", "another"])
+def test_the_harness_process_must_name_the_chats_session(run, home, monkeypatch, fakes, tmp_path, named):
+    """The session the harness process itself runs, from the file it keeps for its PID, not only the variable a process
+    under it may have set."""
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    sessions = fakes.root / "home" / ".claude" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "900.json").write_text(json.dumps({"pid": 900, "sessionId": own if named == "its own" else new_id()}))
+    assert run(["login"], enrolling)[0] == 0
+    assert the_record(home, own).exists() == (named == "its own")
 
 
 def test_a_harness_path_with_a_space_is_found(run, home, monkeypatch, fakes, tmp_path):
@@ -230,6 +255,13 @@ def test_a_command_in_a_chat_records_its_wirkspace_time_and_new_process(run, hom
     assert (record["pid"], record["started"], record["cwd"], record["program"]) == (900, LATER, str(work),
                                                                                      str(fakes.bin / "claude"))
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_a_command_in_the_recorded_process_never_looks_up_its_directory(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    path = chat(home, session=own, pid=900, cwd=work, last=int(time.time()) - 3600)
+    assert run(["query", "status=open"])[0] == 0
+    assert abs(record_of(path)["last"] - time.time()) < 5 and not (fakes.root / "lsof-calls").exists()
 
 
 def test_a_command_without_a_wirkspace_keeps_the_recorded_one(run, home, monkeypatch, fakes, tmp_path):
@@ -479,7 +511,7 @@ def test_a_chat_idle_past_seven_days_is_not_listened_to(home, fakes):
     assert wake.admitted(home) == [recent]
 
 
-def test_a_sign_in_failure_holds_that_harness_until_a_later_command(home, fakes):
+def test_a_sign_in_failure_holds_that_harness_until_a_later_command(run, home, monkeypatch, fakes, tmp_path):
     fakes.write("says", SIGN_IN_REFUSAL)
     fakes.write("exit", "1")
     first, second, thread = chat(home), chat(home), chat(home, harness="codex")
@@ -492,26 +524,45 @@ def test_a_sign_in_failure_holds_that_harness_until_a_later_command(home, fakes)
     fakes.write("exit", "0")
     ask(thread, waiting(new_id()))
     assert len(fakes.runs()) == 2  # another harness is not held
-    record = record_of(second)
-    write_token(second, json.dumps({**record, "last": int(failure["at"]) + 1}))  # a later command in a claude chat
-    fakes.write("ps-args", "")
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home, harness="codex")
+    ask(second, waiting(new_id()))
+    assert len(fakes.runs()) == 2  # a command in another harness's chat does not clear it
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)
     ask(second, waiting(new_id()))
     assert len(fakes.runs()) == 3
 
 
-def test_a_sign_in_failure_counts_its_message_as_woken(home, fakes):
+def test_a_later_command_in_any_configuration_directory_clears_a_sign_in_hold(run, home, monkeypatch, fakes, tmp_path):
+    fakes.write("says", SIGN_IN_REFUSAL)
+    fakes.write("exit", "1")
+    held = chat(home)
+    ask(chat(home), waiting(new_id()))
+    fakes.write("ps-args", "")
+    other = tmp_path / "other-config"
+    other.mkdir(mode=0o700)
+    (other / "config.json").write_text(json.dumps({"service_url": URL}))
+    write_token(other / "agent-token", TOKEN)
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, other)
+    monkeypatch.setenv("WIRK_CONFIG_DIR", str(home))
+    ask(held, waiting(new_id()))
+    assert len(fakes.runs()) == 2
+
+
+def test_a_sign_in_failure_counts_its_message_as_woken(run, home, monkeypatch, fakes, tmp_path):
     """Once per message, and outside the cap."""
     fakes.write("says", SIGN_IN_REFUSAL)
     fakes.write("exit", "1")
     path, message = chat(home), new_id()
     ask(path, waiting(message))
     assert state()["woken"] == {path.name.removesuffix(".wake"): message} and state()["wakes"] == []
-    failure = state()["failed"]["claude"]
-    record = record_of(path)
-    write_token(path, json.dumps({**record, "last": int(failure["at"]) + 1}))  # the hold clears
-    fakes.write("ps-args", "")
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)  # the hold clears
     ask(path, waiting(message))
     assert len(fakes.runs()) == 1 and state()["failed"]["claude"]["count"] == 1
+
+
+def test_the_state_files_are_private(home, fakes):
+    ask(chat(home), waiting(new_id()))
+    assert [stat.S_IMODE((wake.state_dir() / name).stat().st_mode) for name in ("wake.json", "wake.lock")] == [0o600] * 2
 
 
 def test_any_other_failure_counts_against_the_cap(home, fakes):

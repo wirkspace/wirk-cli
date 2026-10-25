@@ -79,7 +79,7 @@ FAKE_PROGRAMS = {
     # ps answers from files a test writes: the process table, or every process's arguments.
     "ps": '[ -f "$WAKE_FAKES/ps-fails" ] && exit 1\n'
           'case "$*" in *args=*) cat "$WAKE_FAKES/ps-args" ;; *) cat "$WAKE_FAKES/ps" ;; esac 2>/dev/null\nexit 0\n',
-    "lsof": 'cat "$WAKE_FAKES/lsof-$3" 2>/dev/null\nexit 0\n',  # lsof -a -p PID -d cwd -Fn
+    "lsof": 'echo "lsof $*" >> "$WAKE_FAKES/lsof-calls"\ncat "$WAKE_FAKES/lsof-$3" 2>/dev/null\nexit 0\n',  # -a -p PID
     "launchctl": 'echo "launchctl $*" >> "$WAKE_FAKES/calls"\n[ -f "$WAKE_FAKES/jobs-fail" ] && exit 5\n'
                  'case "$1" in print) [ -f "$WAKE_FAKES/loaded" ] ;; bootstrap) touch "$WAKE_FAKES/loaded" ;;\n'
                  '  bootout) rm -f "$WAKE_FAKES/loaded" ;; esac\n',
@@ -142,5 +142,7 @@ def fakes(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PATH", f"{found.bin}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("HOME", str(root / "home"))
     monkeypatch.setenv("XDG_STATE_HOME", str(root / "state"))
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME"):  # a harness's own files are the temporary home's, never the real
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(wake, "SYSTEM", "darwin")
     return found
