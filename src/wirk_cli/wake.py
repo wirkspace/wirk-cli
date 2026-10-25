@@ -84,11 +84,24 @@ def harness() -> dict | None:
 
 
 def owns(found: dict | None, own: str) -> bool:
-    """FOUND is the chat OWN's own process: its harness names OWN, and a thread's process carries it in its
-    arguments (a shared app server, started without one, serves many chats)."""
-    return bool(found) and (os.environ.get(IDS[found["harness"]]) or "").lower() == own and (
-        found["harness"] != "codex" or any(line.split(None, 1)[0] == str(found["pid"]) and own in line
-                                           for line in arguments()))
+    """FOUND is the chat OWN's own process: a session's harness names OWN in the file it keeps for its PID (else in
+    the variable it exported), and a thread's process carries OWN in its arguments (a shared app server, started
+    without one, serves many chats)."""
+    if not found:
+        return False
+    if found["harness"] == "codex":
+        return os.environ.get(IDS["codex"], "").lower() == own and any(
+            line.split(None, 1)[0] == str(found["pid"]) and own in line for line in arguments())
+    return (session(found["pid"]) or os.environ.get(IDS["claude"], "")).lower() == own
+
+
+def session(pid: int) -> str | None:
+    """The session a claude process runs, from the sessions/PID.json it keeps in its configuration directory."""
+    home = Path(os.environ.get(HOMES["claude"]) or Path.home() / ".claude")
+    try:
+        return json.loads((home / "sessions" / f"{pid}.json").read_text())["sessionId"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def running(record: dict) -> bool:
