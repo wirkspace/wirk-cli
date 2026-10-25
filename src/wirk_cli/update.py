@@ -205,7 +205,7 @@ def locked(directory: Path, wait: bool = False, name: str = "update.lock"):
     failure to lock raises: nothing runs without the lock."""
     import fcntl  # POSIX only: the module itself still loads anywhere
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with open(directory / name, "a") as file:
+    with open(directory / name, "a", opener=lambda path, flags: os.open(path, flags, 0o600)) as file:
         try:
             fcntl.flock(file, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
