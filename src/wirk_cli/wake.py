@@ -67,7 +67,8 @@ def directory_of(pid: int) -> str:
 
 
 def harness() -> dict | None:
-    """The nearest claude or codex process above this one, by its executable's name, or None."""
+    """The nearest claude or codex process above this one, by its executable's name, or None. Its directory is
+    looked up only when a record takes it (directory_of), so most commands run no lsof."""
     rows, pid = table(), os.getppid()
     while pid in rows:
         parent, started, program = rows[pid]
@@ -77,8 +78,7 @@ def harness() -> dict | None:
             except OSError:
                 program = ""
         if Path(program).name in IDS:
-            return {"harness": Path(program).name, "pid": pid, "started": started, "program": program,
-                    "cwd": directory_of(pid)}
+            return {"harness": Path(program).name, "pid": pid, "started": started, "program": program}
         pid = parent
     return None
 
@@ -143,7 +143,7 @@ def record(url: str, binding: str) -> None:
         env.update({HOMES[name]: os.environ[HOMES[name]]} if os.environ.get(HOMES[name]) else {})
         path = wake_path(url, binding)
         kept = json.loads(read_private(path))["wirkspace"] if path.exists() else None  # a login names none
-        save(path, {**found, "id": mine[0], "env": env, "url": url, "wirkspace": chosen(url, binding) or kept,
+        save(path, {**found, "cwd": directory_of(found["pid"]), "id": mine[0], "env": env, "url": url, "wirkspace": chosen(url, binding) or kept,
                     "last": int(time.time())})
     except Exception:  # a wake is extra: enrolment stands without it
         pass
@@ -170,7 +170,7 @@ def refresh(path: Path, used: str | None) -> None:
     found = harness()
     if found and found["harness"] == old["harness"] and (found["pid"], found["started"]) != (old["pid"], old["started"]) \
             and owns(found, old["id"]):
-        new.update(found)
+        new.update(found, cwd=directory_of(found["pid"]))
     if new != old:
         save(path, new)
 
