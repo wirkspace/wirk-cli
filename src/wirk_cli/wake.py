@@ -86,11 +86,13 @@ def harness() -> dict | None:
 
 
 def owns(found: dict | None, own: str) -> bool:
-    """FOUND is the chat OWN's own process: the nearest harness is the one whose ID variable equals OWN, and a
-    thread's process also carries OWN in its arguments (a shared app server, started without one, serves many chats)."""
-    return bool(found) and os.environ.get(IDS[found["harness"]], "").lower() == own and (
-        found["harness"] != "codex" or any(line.split(None, 1)[0] == str(found["pid"]) and own in line
-                                           for line in arguments()))
+    """FOUND is the chat OWN's own process: a session's harness is the one whose ID variable equals OWN; a thread's
+    process carries OWN in its arguments (a shared app server, started without one, serves many chats)."""
+    if not found:
+        return False
+    if found["harness"] == "codex":
+        return any(line.split(None, 1)[0] == str(found["pid"]) and own in line for line in arguments())
+    return os.environ.get(IDS["claude"], "").lower() == own
 
 
 def running(record: dict) -> bool:
