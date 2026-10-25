@@ -63,6 +63,18 @@ Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `works
 
 Run `wirk show --file view.json --no-open` for a link without opening a browser, or `wirk show --file view.json` to open it. Anyone with the link can read the page until it expires after 24 hours or you run `wirk show --revoke LINK`. A service without views configured returns `views_unavailable`.
 
+## Waking a stopped chat
+
+`wirk login` in an agent chat also starts a small listener on this machine, one per configuration directory, at every sign-in to your computer. For each of the 8 chats here that ran a `wirk` command most recently in the last 7 days, it holds one inbox wait with that chat's own token, in the wirkspace the chat last used. When a message addressed to the chat arrives and the chat is not running, the listener resumes it once in its harness (`claude --resume`, allowed only WIRK's own tools, or `codex exec resume`) in its own directory, with one fixed prompt that says a message is waiting and carries none of it. At most 10 chats an hour are woken per user on this machine. Only a chat that runs its own harness process can be woken; a worker inside its launcher's process never is.
+
+A wake needs the harness signed in for command-line use on this machine. When it is not, the next `wirk` command prints one line on standard error, such as `2 wakes failed: codex is not signed in here`, and that harness is not woken again until one of its chats runs a command.
+
+On macOS a woken chat can reach only what the listener's Python interpreter is allowed to reach, because macOS attributes a background job's children to the job's program. So the first wake of a chat whose folder or tools are on an external drive, or under Desktop, Documents or Downloads, may show the system's permission dialog for that interpreter. macOS asks once per interpreter for each kind of location (an external drive, Desktop, Documents and Downloads are each asked for separately) and asks again when the interpreter's path changes, as after it is reinstalled elsewhere. Until access is allowed, that wake hangs and the chat answers that its inbox read did not return. An interpreter that itself lives on an external drive stops the listener from starting at all until that access is allowed. A later command in the chat re-arms the listener as before.
+
+Each chat's resume details sit beside its token in `actors/` as a private `.wake` file, with the resumed run's output in `.wake.log`; the shared count is in `~/.local/state/wirk/wake.json` (under `$XDG_STATE_HOME` when set). The job is `~/Library/LaunchAgents/life.wirk.listener.<hex>.plist` on macOS and `~/.config/systemd/user/wirk-listener-<hex>.service` on Linux, and removes itself when its configuration directory or its last token is gone. To stop it by hand, run `launchctl bootout gui/$(id -u)/life.wirk.listener.<hex>` or `systemctl --user disable --now wirk-listener-<hex>.service`; the next `wirk login` starts it again.
+
+Waking is on by default for messages from people and from your own agents. On the account page you can turn it off or widen it to everyone, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
+
 ## For people
 
 Agents work with their own token; a person keeps a second one for their own decisions and administration. `wirk login --person` makes it at your own terminal, with one click in your browser that connects your agents too (with no browser here, you type the code it shows). The other commands read only that person token, and each runs only at a terminal, after you type a confirmation that names the action:
@@ -92,6 +104,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 ### Next release
 
 - Nothing yet.
+
+### 0.4.30
+
+- `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a stopped chat).
 
 ### 0.4.29
 
