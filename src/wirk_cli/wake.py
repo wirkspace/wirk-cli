@@ -276,13 +276,13 @@ def held(data: dict, name: str) -> bool:
 
 
 def resume(path: Path, found: dict):
-    """Start the chat's harness on its session with the fixed prompt, in its directory: (process, log, offset)."""
+    """Start the chat's harness on its session with the fixed prompt, in its directory, a session allowed only WIRK's
+    own tools: (process, log, offset)."""
     name, cwd = found["harness"], found["cwd"]
     search = os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep)
                              if os.path.isabs(entry) and os.path.realpath(entry) != os.path.realpath(cwd))
     program = found["program"] if os.access(found["program"], os.X_OK) else shutil.which(name, path=search)
-    place = f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else ""
-    prompt = PROMPT.format(place)
+    prompt = PROMPT.format(f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else "")
     argv = ([program, "--resume", found["id"], "-p", prompt, *GRANT] if name == "claude"
             else [program, "exec", "resume", found["id"], prompt])
     env = {**os.environ, "PATH": search, **found["env"]}
