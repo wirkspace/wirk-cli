@@ -85,14 +85,13 @@ def harness() -> dict | None:
 
 
 def owns(found: dict | None, own: str) -> bool:
-    """FOUND is the chat OWN's own process: a session's harness names OWN in the file it keeps for its PID (else in
-    the variable it exported), and a thread's process carries OWN in its arguments (a shared app server, started
-    without one, serves many chats)."""
+    """FOUND is the chat OWN's own process: a thread's process carries OWN in its arguments (a shared app server,
+    started without one, serves many chats); a session's names OWN in the file it keeps for its PID, else in the
+    variable it exported."""
     if not found:
         return False
     if found["harness"] == "codex":
-        return os.environ.get(IDS["codex"], "").lower() == own and any(
-            line.split(None, 1)[0] == str(found["pid"]) and own in line for line in arguments())
+        return any(line.split(None, 1)[0] == str(found["pid"]) and own in line for line in arguments())
     return (session(found["pid"]) or os.environ.get(IDS["claude"], "")).lower() == own
 
 
@@ -101,7 +100,7 @@ def session(pid: int) -> str | None:
     home = Path(os.environ.get(HOMES["claude"]) or Path.home() / ".claude")
     try:
         return json.loads((home / "sessions" / f"{pid}.json").read_text())["sessionId"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:  # none kept, as by an older harness
         return None
 
 
@@ -141,11 +140,12 @@ def record(url: str, binding: str) -> None:
             return
         name = found["harness"]
         env = {IDS["codex" if name == "claude" else "claude"]: part for part in parts if part != mine[0]}
-        env.update({HOMES[name]: os.environ[HOMES[name]]} if os.environ.get(HOMES[name]) else {})
+        if os.environ.get(HOMES[name]):
+            env[HOMES[name]] = os.environ[HOMES[name]]
         path = wake_path(url, binding)
         kept = json.loads(read_private(path))["wirkspace"] if path.exists() else None  # a login names none
-        save(path, {**found, "cwd": directory_of(found["pid"]), "id": mine[0], "env": env, "url": url, "wirkspace": chosen(url, binding) or kept,
-                    "last": int(time.time())})
+        save(path, {**found, "cwd": directory_of(found["pid"]), "id": mine[0], "env": env, "url": url,
+                    "wirkspace": chosen(url, binding) or kept, "last": int(time.time())})
     except Exception:  # a wake is extra: enrolment stands without it
         pass
 
