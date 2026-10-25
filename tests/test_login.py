@@ -5,19 +5,22 @@ import http.client
 import json
 import os
 import platform
+import plistlib
 import re
 import socket
 import stat
 import struct
 import subprocess
+import sys
 import time
 import webbrowser
+from pathlib import Path
 
 import httpx
 import pytest
 
 from conftest import TOKEN, envelope, refusal
-from wirk_cli import cli
+from wirk_cli import cli, wake
 
 
 @pytest.fixture(autouse=True)
@@ -745,3 +748,66 @@ def test_a_name_is_one_line_of_at_most_40_characters(fresh, capsys, clock, monke
 @pytest.mark.parametrize("hostname", ["", "localhost", "..."])
 def test_no_usable_name_falls_back_to_the_clis_own_label(fresh, capsys, clock, monkeypatch, hostname):
     assert sent_label(monkeypatch, capsys, hostname) == f"wirk-cli on {platform.system() or 'unknown'}"
+
+
+# ---------------------------------------------------------------- the listener's job, installed by an agent login
+
+
+def job_file(directory, system):
+    label = hashlib.sha256(str(directory.resolve()).encode()).hexdigest()[:8]
+    home = Path(os.environ["HOME"])
+    if system == "darwin":
+        return home / "Library" / "LaunchAgents" / f"life.wirk.listener.{label}.plist"
+    return home / ".config" / "systemd" / "user" / f"wirk-listener-{label}.service"
+
+
+@pytest.mark.parametrize("system", ["darwin", "linux"])
+def test_login_installs_the_listener_once_on_macos_and_linux(fresh, capsys, fakes, monkeypatch, system):
+    monkeypatch.setattr(wake, "SYSTEM", system)
+    monkeypatch.setenv("PATH", f"{fakes.bin}:relative/bin:/usr/bin:/bin")
+    code, out, err, requests = login([], without_web_sign_in(logged_in), capsys)
+    path = job_file(fresh, system)
+    first = path.read_bytes()
+    assert code == 0 and err == "" and stat.S_IMODE(path.stat().st_mode) & 0o022 == 0
+    where, search = str(fresh.resolve()), f"{fakes.bin}:/usr/bin:/bin"  # absolute entries only
+    if system == "darwin":
+        label = path.stem
+        assert plistlib.loads(first) == {
+            "Label": label, "ProgramArguments": [sys.executable, "-I", "-m", "wirk_cli.wake"],
+            "EnvironmentVariables": {"WIRK_CONFIG_DIR": where, "PATH": search}, "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False}}
+        installed = [f"launchctl print gui/{os.getuid()}/{label}", f"launchctl bootstrap gui/{os.getuid()} {path}"]
+        again = [f"launchctl print gui/{os.getuid()}/{label}"]
+    else:
+        text = first.decode()
+        assert f'ExecStart="{sys.executable}" -I -m wirk_cli.wake\n' in text and "Restart=on-failure\n" in text
+        assert f'Environment="WIRK_CONFIG_DIR={where}"\n' in text and f'Environment="PATH={search}"\n' in text
+        assert "WantedBy=default.target\n" in text
+        installed = ["systemctl --user daemon-reload", f"systemctl --user enable {path.name}",
+                     f"systemctl --user restart {path.name}"]
+        again = [f"systemctl --user enable --now {path.name}"]
+    assert fakes.calls() == installed
+    assert login([], without_web_sign_in(logged_in), capsys)[0] == 0
+    assert path.read_bytes() == first and fakes.calls() == installed + again  # unchanged: not written, not reloaded
+
+
+def test_two_spellings_of_one_directory_install_one_job(fresh, capsys, fakes, monkeypatch, tmp_path):
+    login([], without_web_sign_in(logged_in), capsys)
+    (tmp_path / "alias").symlink_to(fresh)
+    monkeypatch.setenv("WIRK_CONFIG_DIR", str(tmp_path / "alias"))
+    assert login([], without_web_sign_in(logged_in), capsys)[0] == 0
+    assert [path.name for path in (Path(os.environ["HOME"]) / "Library" / "LaunchAgents").iterdir()] == \
+        [job_file(fresh, "darwin").name]
+
+
+def test_a_job_that_cannot_be_installed_never_fails_login(fresh, capsys, fakes):
+    fakes.write("jobs-fail", "")
+    code, out, err, requests = login([], without_web_sign_in(logged_in), capsys)
+    assert code == 0 and "Logged in to https://api.wirk.life as alice-agents" in out
+    assert len(err.splitlines()) == 1 and "listener" in err
+
+
+def test_person_login_installs_nothing(fresh, capsys, fakes, monkeypatch):
+    monkeypatch.setattr(cli, "at_terminal", lambda: None)
+    assert login(["--person"], without_web_sign_in(logged_in), capsys)[0] == 0
+    assert fakes.calls() == [] and not (Path(os.environ["HOME"]) / "Library").exists()
