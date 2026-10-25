@@ -313,7 +313,8 @@ def test_a_wake_resumes_the_chat_in_its_directory_with_the_fixed_prompt_and_no_m
     [started] = fakes.runs()
     assert keep and sent == [{"fields": {"inbox": "me"}, "wait": 60, "limit": 1, "format": "json", "workspace_id": space}]
     assert started["program"] == str(fakes.bin / "claude")  # the recorded one is gone: found on PATH
-    assert started["cwd"] == record["cwd"] and started["args"] == ["--resume", record["id"], "-p", prompt(f" workspace_id={space}")]
+    assert started["cwd"] == record["cwd"] and started["args"] == ["--resume", record["id"], "-p", prompt(f" workspace_id={space}"),
+                                                                "--allowedTools", "Bash(wirk:*)", "mcp__wirk__*"]
     assert started["env"]["CODEX_THREAD_ID"] == record["env"]["CODEX_THREAD_ID"] and message not in "".join(started["args"])
     assert state()["woken"] == {path.name.removesuffix(".wake"): message}
     assert record_of(path) == record  # the listener never writes the record
@@ -323,13 +324,13 @@ def test_a_wake_resumes_the_chat_in_its_directory_with_the_fixed_prompt_and_no_m
 def test_a_malformed_wirkspace_never_reaches_the_prompt(home, fakes, bad):
     path = chat(home, wirkspace=bad)
     ask(path, waiting(new_id()))
-    assert fakes.runs()[0]["args"][-1] == prompt()
+    assert fakes.runs()[0]["args"][3] == prompt()
 
 
 def test_a_short_wirkspace_reaches_the_prompt(home, fakes):
     short = uuid.uuid4().hex[:8]
     ask(chat(home, wirkspace=short), waiting(new_id()))
-    assert fakes.runs()[0]["args"][-1] == prompt(f" workspace_id={short}")
+    assert fakes.runs()[0]["args"][3] == prompt(f" workspace_id={short}")
 
 
 def test_a_thread_chat_resumes_with_exec_resume(home, fakes):
