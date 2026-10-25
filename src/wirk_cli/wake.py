@@ -152,20 +152,25 @@ def record(url: str, binding: str) -> None:
 
 def after(code: int) -> None:
     """In the command's process, once its answer is out: refresh the chat's record, then say failed wakes."""
-    used, Service.used = Service.used, None
+    used, Service.used, ran = Service.used, None, None
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
-            refresh(wake_path(url, binding), used)
+            ran = refresh(wake_path(url, binding), used)
     except Exception:
         pass
     try:
-        tell()
+        if (state_dir() / "wake.json").exists():
+            with state() as data:
+                if ran in data["failed"]:  # a command in a chat of that harness, in any configuration directory
+                    data["failed"][ran]["ran"] = time.time()
+                tell(data)
     except Exception:
         pass
 
 
-def refresh(path: Path, used: str | None) -> None:
-    """The time of the command, the wirkspace it named and, when it runs in another process of the chat, that one."""
+def refresh(path: Path, used: str | None) -> str:
+    """The time of the command, the wirkspace it named and, when it runs in another process of the chat, that one;
+    gives the chat's harness."""
     old = json.loads(read_private(path))
     new = {**old, "last": int(time.time()), "wirkspace": used or old["wirkspace"]}
     found = harness()
@@ -174,6 +179,7 @@ def refresh(path: Path, used: str | None) -> None:
         new.update(found, cwd=directory_of(found["pid"]))
     if new != old:
         save(path, new)
+    return old["harness"]
 
 
 # ------------------------------------------------------------------ state per OS user
@@ -200,34 +206,28 @@ def state():
             save(path, data)
 
 
-def tell() -> None:
+def tell(data: dict) -> None:
     """The failed-wake line, once per failure, on standard error so a JSON answer stays parseable."""
-    if not (state_dir() / "wake.json").exists():
-        return
-    with state() as data:
-        for name, failure in data["failed"].items():
-            if failure["count"] > failure["told"]:
-                print(f"{failure['count'] - failure['told']} wakes failed: {name} is not signed in here", file=sys.stderr)
-                failure["told"] = failure["count"]
+    for name, failure in data["failed"].items():
+        if failure["count"] > failure["told"]:
+            print(f"{failure['count'] - failure['told']} wakes failed: {name} is not signed in here", file=sys.stderr)
+            failure["told"] = failure["count"]
 
 
 # ------------------------------------------------------------------ the listener
 
 
-def records(directory: Path):
-    """(path, record) for each readable resume record in an actors folder."""
-    for path in directory.glob("*.wake"):
-        try:
-            yield path, json.loads(read_private(path))
-        except Exception:
-            continue
-
-
 def admitted(directory: Path) -> list[Path]:
     """The records to listen for: token present, last command under 7 days old, the 8 most recent."""
-    found = sorted(((data["last"], path) for path, data in records(directory / "actors")
-                    if path.with_suffix("").exists() and time.time() - data["last"] < IDLE), reverse=True)
-    return [path for _, path in found[:HELD]]
+    found = []
+    for path in (directory / "actors").glob("*.wake"):
+        try:
+            last = json.loads(read_private(path))["last"]
+        except Exception:
+            continue
+        if path.with_suffix("").exists() and time.time() - last < IDLE:
+            found.append((last, path))
+    return [path for _, path in sorted(found, reverse=True)[:HELD]]
 
 
 def listen(path: Path, stop, transport=None) -> None:
@@ -267,7 +267,7 @@ def wake(path: Path, found: dict, message: str) -> None:
     with state() as data:
         now = time.time()
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
-        if data["woken"].get(chat) == message or len(data["wakes"]) >= CAP or held(data, name, path.parent) \
+        if data["woken"].get(chat) == message or len(data["wakes"]) >= CAP or held(data, name) \
                 or running(found):
             return
         data["woken"][chat] = message
@@ -280,11 +280,10 @@ def wake(path: Path, found: dict, message: str) -> None:
             failure.update(count=failure["count"] + 1, at=now)
 
 
-def held(data: dict, name: str, directory: Path) -> bool:
-    """After a sign-in failure, no wake for that harness until a record of it shows a later command."""
+def held(data: dict, name: str) -> bool:
+    """After a sign-in failure, no wake for that harness until a chat of it runs a command."""
     failure = data["failed"].get(name)
-    return bool(failure) and not any(other["harness"] == name and other["last"] > failure["at"]
-                                     for _, other in records(directory))
+    return bool(failure) and failure.get("ran", 0) <= failure["at"]
 
 
 def resume(path: Path, found: dict):
