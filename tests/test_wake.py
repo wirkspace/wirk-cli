@@ -172,16 +172,14 @@ def test_the_nearest_harness_is_the_chats(run, home, monkeypatch, fakes, tmp_pat
     assert record["env"] == {"CLAUDE_CODE_SESSION_ID": launcher}  # the resumed process computes the same binding
 
 
-@pytest.mark.parametrize("named", ["its own", "another"])
-def test_the_harness_process_must_name_the_chats_session(run, home, monkeypatch, fakes, tmp_path, named):
-    """The session the harness process itself runs, from the file it keeps for its PID, not only the variable a process
-    under it may have set."""
+def test_the_session_is_the_one_its_harness_exported(run, home, monkeypatch, fakes, tmp_path):
+    """Decision 7's check is the variable the nearest harness exported; nothing else the harness keeps is read."""
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     sessions = fakes.root / "home" / ".claude" / "sessions"
     sessions.mkdir(parents=True)
-    (sessions / "900.json").write_text(json.dumps({"pid": 900, "sessionId": own if named == "its own" else new_id()}))
+    (sessions / "900.json").write_text(json.dumps({"pid": 900, "sessionId": new_id()}))
     assert run(["login"], enrolling)[0] == 0
-    assert the_record(home, own).exists() == (named == "its own")
+    assert the_record(home, own).exists()
 
 
 def test_a_harness_path_with_a_space_is_found(run, home, monkeypatch, fakes, tmp_path):

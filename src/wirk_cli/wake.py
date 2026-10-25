@@ -86,23 +86,11 @@ def harness() -> dict | None:
 
 
 def owns(found: dict | None, own: str) -> bool:
-    """FOUND is the chat OWN's own process: a thread's process carries OWN in its arguments (a shared app server,
-    started without one, serves many chats); a session's names OWN in the file it keeps for its PID, else in the
-    variable it exported."""
-    if not found:
-        return False
-    if found["harness"] == "codex":
-        return any(line.split(None, 1)[0] == str(found["pid"]) and own in line for line in arguments())
-    return (session(found["pid"]) or os.environ.get(IDS["claude"], "")).lower() == own
-
-
-def session(pid: int) -> str | None:
-    """The session a claude process runs, from the sessions/PID.json it keeps in its configuration directory."""
-    home = Path(os.environ.get(HOMES["claude"]) or Path.home() / ".claude")
-    try:
-        return json.loads((home / "sessions" / f"{pid}.json").read_text())["sessionId"]
-    except Exception:  # none kept, as by an older harness
-        return None
+    """FOUND is the chat OWN's own process: the nearest harness is the one whose ID variable equals OWN, and a
+    thread's process also carries OWN in its arguments (a shared app server, started without one, serves many chats)."""
+    return bool(found) and os.environ.get(IDS[found["harness"]], "").lower() == own and (
+        found["harness"] != "codex" or any(line.split(None, 1)[0] == str(found["pid"]) and own in line
+                                           for line in arguments()))
 
 
 def running(record: dict) -> bool:
