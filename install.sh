@@ -103,7 +103,7 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
 }
 
 # shellcheck disable=SC2016  # backticks in RULE are literal Markdown
-RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow what its answer says.'
+RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool).'
 put_rules() {  # WIRK's own line as file $1 in Grok's global rules, written like the skill: never through a link
   printf '%s\n' "$RULE" > "$TMP/wirk.md"
   quietly mkdir -p "$(dirname "$1")"
