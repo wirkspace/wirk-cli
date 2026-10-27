@@ -127,7 +127,6 @@ for host in claude codex grok; do
     note "$name left as it is (later: run this again, or with --yes)"
     continue
   fi
-  failed=""
   # from an empty folder, so Claude Code reports its user entry rather than a project's own
   if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND"
     was=$(cd "$TMP" && grok mcp list < /dev/null 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
@@ -139,16 +138,8 @@ for host in claude codex grok; do
       note "$name: replacing the wirk MCP server that ran $was"
       if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's and Grok's adds replace
     fi
-    if [ "$host" = grok ]; then  # a refused add is one note; the install goes on to wirk login
-      if [ "$DRY" -eq 1 ]; then quietly grok mcp add wirk -- "$BIN/wirk-mcp"
-      elif ! grok mcp add wirk -- "$BIN/wirk-mcp" < /dev/null > "$TMP/log" 2>&1; then
-        note "Grok: could not add the WIRK MCP server ($(sed -n '$p' "$TMP/log")); run: grok mcp add wirk -- $BIN/wirk-mcp"
-        failed=1
-      fi
-    else
-      # shellcheck disable=SC2086  # $scope is zero or two words on purpose
-      quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
-    fi
+    # shellcheck disable=SC2086  # $scope is zero or two words on purpose
+    quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
   fi
   if [ -z "${SKILL:-}" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
   if [ "$host" = claude ]; then
@@ -163,7 +154,7 @@ for host in claude codex grok; do
     done
     if [ -z "$made" ]; then put_skill "$HOME/.agents/skills/wirk"; fi
   fi
-  if [ -z "$failed" ]; then ok "$name: the WIRK MCP server and skill"; fi
+  ok "$name: the WIRK MCP server and skill"
 done
 
 # connect this machine
