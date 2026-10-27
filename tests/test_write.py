@@ -107,6 +107,11 @@ def test_an_explicit_kind_record_sends_owner_as_the_records_owner(run):
     assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner="])["operations"][0]["patch"] == {"owner": None}
 
 
+def test_kind_record_with_criteria_and_no_owner_still_makes_work(run):
+    assert sent(run, ["write", "new", "T", "kind=record", "--criterion", "c"])["operations"][0]["data"] == {
+        "title": "T", "work": {"criteria": [{"text": "c"}]}}
+
+
 def test_without_kind_record_owner_still_makes_work(run):
     assert sent(run, ["write", "new", "T", "owner=me"])["operations"][0]["data"] == {"title": "T", "work": {"owner_id": "me"}}
     assert sent(run, ["write", "new", "T", "kind=work", "owner=me"])["operations"][0]["data"] == {

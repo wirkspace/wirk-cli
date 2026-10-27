@@ -151,7 +151,7 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
         raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
     if (level is None) != (kind != "context") or level not in (None, "organization", "initiative"):
         raise UsageError("kind=context needs level=organization or level=initiative, and level needs kind=context")
-    if record and options.get("--criterion"):
+    if record and "owner" in pairs and options.get("--criterion"):
         raise UsageError("kind=record owner= sets a record's owner and criteria make work: give one or the other")
     fields, owner = fields_and_owner(pairs, clearing=False, record=record)
     work = owner.pop("work", None)
