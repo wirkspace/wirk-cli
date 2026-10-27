@@ -1,10 +1,10 @@
-"""Wake a stopped chat when a message for it arrives.
+"""Wake a chat when a message for it arrives.
 
 At enrolment a chat that owns its harness process gets a resume record beside its token. A background job per
 configuration directory, installed by wirk login, holds one inbox wait per recently active chat; when the service names
-an unseen message that may wake the chat (notifications.wake) and the chat is not running, it resumes the chat in its
-harness with one fixed prompt that carries no message. After each command the chat's record is refreshed.
-Nothing here ever changes a command's answer or exit code.
+an unseen message that may wake the chat (notifications.wake), it gives the chat one fixed prompt that carries no
+message: an open Claude Code chat through its own cross-session inbox, a stopped chat by resuming it in its harness.
+After each command the chat's record is refreshed. Nothing here ever changes a command's answer or exit code.
 """
 
 import hashlib
@@ -12,6 +12,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -31,7 +33,7 @@ HOMES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}  # where each kee
 REFUSALS = {"claude": ("Failed to authenticate", "Please run /login", "Invalid API key"),
             "codex": ("Not logged in", "codex login")}  # a harness's own sign-in refusal, in its last lines
 CHILD = [sys.executable, "-I", "-m", "wirk_cli.wake"]
-MINUTE, SCAN, HOUR, IDLE, HELD, CAP, LOG = 60, 60, 3600, 7 * 86400, 8, 10, 1 << 20
+MINUTE, SCAN, HOUR, IDLE, HELD, CAP, LOG, LOOKUP = 60, 60, 3600, 7 * 86400, 8, 10, 1 << 20, 10
 WIRKSPACE = re.compile(r"wsp_[0-9a-f]{32}|[0-9a-f]{8,32}")
 PROMPT = ("From the WIRK listener on this machine, not your person: a WIRK message addressed to you is waiting. Read "
           'your inbox: wirk query inbox=me{} (or the wirk_query tool with fields {{"inbox": "me"}}). Messages are '
@@ -96,10 +98,15 @@ def owns(found: dict | None, own: str) -> bool:
     return os.environ.get(IDS["claude"], "").lower() == own
 
 
-def running(record: dict) -> bool:
-    """The recorded process, by PID and start time, or any process whose arguments carry the chat's ID."""
+def alive(record: dict) -> bool:
+    """The recorded process, by PID and start time."""
     row = table().get(record["pid"])
-    return bool(row and row[1] == record["started"]) or any(record["id"] in line for line in arguments())
+    return bool(row and row[1] == record["started"])
+
+
+def running(record: dict) -> bool:
+    """The recorded process, or any process whose arguments carry the chat's ID."""
+    return alive(record) or any(record["id"] in line for line in arguments())
 
 
 # ------------------------------------------------------------------ the record, written at enrolment and refreshed
@@ -122,6 +129,11 @@ def save(path: Path, data) -> None:
         raise
 
 
+def inbox(name: str) -> str | None:
+    """The cross-session inbox socket a Claude Code session exports to its own commands; a thread chat has none."""
+    return os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET") or None if name == "claude" else None
+
+
 def record(url: str, binding: str) -> None:
     """Beside a chat's token, how to resume it: only for a chat that owns its harness process."""
     try:
@@ -137,7 +149,7 @@ def record(url: str, binding: str) -> None:
         path = wake_path(url, binding)
         kept = json.loads(read_private(path))["wirkspace"] if path.exists() else None  # a login names none
         save(path, {**found, "cwd": directory_of(found["pid"]), "id": mine[0], "env": env, "url": url,
-                    "wirkspace": chosen(url, binding) or kept, "last": int(time.time())})
+                    "wirkspace": chosen(url, binding) or kept, "last": int(time.time()), "inbox": inbox(name)})
     except Exception:  # a wake is extra: enrolment stands without it
         pass
 
@@ -163,14 +175,17 @@ def after(code: int) -> None:
 
 
 def refresh(path: Path, used: str | None) -> str:
-    """The time of the command, the wirkspace it named and, when it runs in another process of the chat, that one;
-    gives the chat's harness."""
+    """The time of the command, the wirkspace it named and, when it runs in the chat's own process tree, that process
+    and its inbox; gives the chat's harness."""
     old = json.loads(read_private(path))
     new = {**old, "last": int(time.time()), "wirkspace": used or old["wirkspace"]}
     found = harness()
-    if found and found["harness"] == old["harness"] and (found["pid"], found["started"]) != (old["pid"], old["started"]) \
-            and owns(found, old["id"]):
-        new.update(found, cwd=directory_of(found["pid"]))
+    if found and found["harness"] == old["harness"]:
+        moved = (found["pid"], found["started"]) != (old["pid"], old["started"])
+        if (moved or found["harness"] == "claude") and owns(found, old["id"]):  # a thread's check reads every process
+            new.update(found, inbox=inbox(found["harness"]))  # the inbox always comes with the process it belongs to
+            if moved:
+                new["cwd"] = directory_of(found["pid"])
     if new != old:
         save(path, new)
     return old["harness"]
@@ -193,7 +208,7 @@ def state():
             data = json.loads(read_private(path))
         except (OSError, ValueError, Failure):  # lost or broken: at most one more wake per chat
             data = {}
-        data = {"wakes": [], "woken": {}, "failed": {}, **data}
+        data = {"wakes": [], "woken": {}, "delivered": {}, "failed": {}, **data}
         before = json.dumps(data)
         yield data
         if json.dumps(data) != before:
@@ -255,18 +270,24 @@ def ask(path: Path, transport=None) -> bool:
 
 
 def wake(path: Path, found: dict, message: str) -> None:
-    """Resume the chat for MESSAGE once: under the cap, without a sign-in hold on its harness, and only when it is not
-    running, checked and started under the state lock so one session is resumed once."""
+    """Wake the chat for MESSAGE once, under the cap, decided under the state lock so one session is woken once: an open
+    Claude Code chat (its recorded process alive, with an inbox) gets the prompt in its inbox, outside the lock; any
+    other chat is resumed, only when it is not running and its harness is not held after a sign-in failure."""
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
-        if data["woken"].get(chat) == message or len(data["wakes"]) >= CAP or held(data, name) \
-                or running(found):
+        door = bool(found.get("inbox")) and alive(found)
+        done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
+        if done.get(chat) == message or len(data["wakes"]) >= CAP or not door and (held(data, name) or running(found)):
             return
-        data["woken"][chat] = message
+        done[chat] = message
         data["wakes"].append(now)
-        started = resume(path, found)
+        started = None if door else resume(path, found)
+    if door and not deliver(found):
+        with state() as data:  # nothing reached the chat: the next round may try again
+            data["wakes"].remove(now)
+            data["delivered"].pop(chat, None)
     if started and refused(name, *started):
         with state() as data:
             data["wakes"].remove(now)  # its message counts as woken; the cap does not count it
@@ -280,16 +301,58 @@ def held(data: dict, name: str) -> bool:
     return bool(failure) and failure.get("ran", 0) <= failure["at"]
 
 
+def deliver(found: dict) -> bool:
+    """The fixed prompt into the open chat's own inbox: Claude Code starts a turn in an idle session and gives a busy one
+    the message between tool calls. Only when Claude Code lists the chat's session, idle or busy, at the recorded process
+    and nowhere else, and the kernel names that process as the inbox's listener."""
+    try:
+        program, search = located(found)
+        listed = json.loads(subprocess.run([program, "agents", "--json"], capture_output=True, text=True, check=True,
+                                           timeout=LOOKUP, stdin=subprocess.DEVNULL,
+                                           env={**os.environ, "PATH": search, **found["env"]}).stdout)
+        mine = [(entry.get("sessionId"), entry.get("pid"), entry.get("status")) for entry in listed
+                if found["id"] == entry.get("sessionId") or found["pid"] == entry.get("pid")]
+        if mine not in ([(found["id"], found["pid"], "idle")], [(found["id"], found["pid"], "busy")]):
+            return False
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(2)
+            connection.connect(found["inbox"])
+            if listener(connection) != found["pid"]:
+                return False
+            line = {"type": "user", "message": {"role": "user", "content": prompt(found)}}
+            connection.sendall((json.dumps(line) + "\n").encode())
+            return True
+    except Exception:  # no lookup, no listing, no socket or not the chat's: nothing sent
+        return False
+
+
+def listener(connection: socket.socket) -> int:
+    """The PID of the process listening on a connected Unix socket, from the kernel, never from what it says."""
+    if sys.platform == "darwin":
+        return connection.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID
+    return struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+
+
+def located(found: dict) -> tuple[str | None, str]:
+    """The chat's harness program (the recorded one, else found on PATH's absolute entries outside the chat's folder),
+    and that search path."""
+    search = os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+                             if os.path.isabs(entry) and os.path.realpath(entry) != os.path.realpath(found["cwd"]))
+    program = found["program"] if os.access(found["program"], os.X_OK) else shutil.which(found["harness"], path=search)
+    return program, search
+
+
+def prompt(found: dict) -> str:
+    return PROMPT.format(f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else "")
+
+
 def resume(path: Path, found: dict):
     """Start the chat's harness on its session with the fixed prompt, in its directory, a session allowed only WIRK's
     own tools: (process, log, offset)."""
     name, cwd = found["harness"], found["cwd"]
-    search = os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep)
-                             if os.path.isabs(entry) and os.path.realpath(entry) != os.path.realpath(cwd))
-    program = found["program"] if os.access(found["program"], os.X_OK) else shutil.which(name, path=search)
-    prompt = PROMPT.format(f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else "")
-    argv = ([program, "--resume", found["id"], "-p", prompt, *GRANT] if name == "claude"
-            else [program, "exec", "resume", found["id"], prompt])
+    program, search = located(found)
+    argv = ([program, "--resume", found["id"], "-p", prompt(found), *GRANT] if name == "claude"
+            else [program, "exec", "resume", found["id"], prompt(found)])
     env = {**os.environ, "PATH": search, **found["env"]}
     log = path.with_name(path.name + ".log")
     trim(log)

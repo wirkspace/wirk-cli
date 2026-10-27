@@ -3,7 +3,11 @@
 import fcntl
 import json
 import os
+import shutil
+import socket
 import stat
+import tempfile
+import threading
 import time
 import uuid
 
@@ -53,7 +57,7 @@ def waiting(wake_id=None, *, wirkspace=None):
 
 
 def chat(directory, *, harness="claude", session=None, cwd=None, last=None, wirkspace=None, program=None, pid=4242,
-         started=STARTED, env=None):
+         started=STARTED, env=None, inbox=None):
     """A chat enrolled in DIRECTORY with its resume record, as enrol() leaves it."""
     session = session or new_id()
     token = client.actor_path(URL, session)
@@ -63,7 +67,7 @@ def chat(directory, *, harness="claude", session=None, cwd=None, last=None, wirk
     cwd.mkdir(exist_ok=True)
     record = {"harness": harness, "id": session, "env": env or {}, "cwd": str(cwd), "pid": pid, "started": started,
               "program": program or str(directory.parent / "gone" / harness), "url": URL, "wirkspace": wirkspace,
-              "last": int(time.time()) if last is None else last}
+              "last": int(time.time()) if last is None else last, **({"inbox": inbox} if inbox else {})}
     path = token.with_name(token.name + ".wake")
     write_token(path, json.dumps(record))
     return path
@@ -146,7 +150,8 @@ def test_enrol_writes_the_resume_record_beside_the_token(run, home, monkeypatch,
     assert code == 0 and path.exists() and client.actor_path(URL, own).exists()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     record = record_of(path)
-    assert set(record) == {"harness", "id", "env", "cwd", "pid", "started", "program", "url", "wirkspace", "last"}
+    assert set(record) == {"harness", "id", "env", "cwd", "pid", "started", "program", "url", "wirkspace", "last", "inbox"}
+    assert record["inbox"] is None  # this chat's harness exported no inbox
     assert (record["harness"], record["id"], record["cwd"], record["pid"], record["started"], record["program"],
             record["url"], record["env"]) == ("claude", own, str(work), 900, STARTED, str(fakes.bin / "claude"), URL, {})
     assert abs(record["last"] - time.time()) < 5
@@ -239,6 +244,22 @@ def test_a_planted_variable_never_reaches_the_record(run, home, monkeypatch, fak
     assert "xoxb" not in path.read_text() and "example.com" not in path.read_text()
 
 
+def test_enrolment_keeps_the_chats_inbox_and_never_its_token(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/900.sock")
+    monkeypatch.setenv("CLAUDE_CODE_MESSAGING_TOKEN", "secret-messaging-token")
+    assert run(["login"], enrolling)[0] == 0
+    path = the_record(home, own)
+    assert record_of(path)["inbox"] == "/tmp/cc-socks/900.sock" and "secret-messaging-token" not in path.read_text()
+
+
+def test_a_thread_record_has_no_inbox(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness="codex")
+    monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/1.sock")  # a Claude Code chat above codex
+    assert run(["login"], enrolling)[0] == 0
+    assert record_of(the_record(home, own))["inbox"] is None
+
+
 # ------------------------------------------------------------------ the refresh after each command
 
 
@@ -303,6 +324,22 @@ def test_an_existing_record_is_refreshed_not_rewritten(run, home, monkeypatch, f
     assert run(["query", "status=open"])[0] == 0
     record = record_of(path)
     assert record["cwd"] == str(tmp_path / "recorded") and abs(record["last"] - time.time()) < 5
+
+
+def test_a_command_in_the_recorded_process_adds_its_inbox_to_an_older_record(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    path = chat(home, session=own, pid=900, cwd=work, last=int(time.time()) - 3600)  # written before inboxes
+    monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/900.sock")
+    assert run(["query", "status=open"])[0] == 0
+    assert record_of(path)["inbox"] == "/tmp/cc-socks/900.sock" and not (fakes.root / "lsof-calls").exists()
+
+
+def test_a_new_process_without_an_inbox_clears_the_recorded_one(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    path = chat(home, session=own, pid=111, inbox="/tmp/cc-socks/111.sock")
+    assert run(["query", "status=open"])[0] == 0
+    record = record_of(path)
+    assert (record["pid"], record["inbox"]) == (900, None)
 
 
 def test_a_failed_command_leaves_the_record(run, home, monkeypatch, fakes, tmp_path):
@@ -633,6 +670,187 @@ def test_the_wake_log_is_kept_under_a_megabyte(home, fakes):
     text = log.read_text()
     assert log.stat().st_size < 1 << 20 and text.endswith("the newest line\nresumed\n")
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
+
+
+# ------------------------------------------------------------------ an open chat, through its own inbox
+
+
+class Inbox:
+    """A listening Unix socket, as a Claude Code session binds one, in a short directory (macOS caps the path near 104
+    bytes); keeps what each connection sent. This test process is its listener."""
+
+    def __init__(self):
+        self.directory = tempfile.mkdtemp(prefix="wk", dir="/tmp")
+        self.path = os.path.join(self.directory, "s.sock")
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(self.path)
+        self.server.listen(4)
+        self.received = []
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                connection, _ = self.server.accept()
+            except OSError:
+                return
+            with connection:
+                data = b""
+                while chunk := connection.recv(65536):
+                    data += chunk
+                if data:  # a connection that wrote nothing delivered nothing
+                    self.received.append(data)
+
+    def lines(self, settle=0.3):
+        time.sleep(settle)
+        return self.received
+
+    def close(self):
+        self.server.close()
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+
+@pytest.fixture
+def inbox():
+    found = Inbox()
+    yield found
+    found.close()
+
+
+def open_chat(home, fakes, inbox, *, status="idle", **options):
+    """A chat whose recorded process (this test's, the inbox's listener) is alive, listed by Claude Code at that PID."""
+    path = chat(home, pid=os.getpid(), inbox=inbox.path, program=str(fakes.bin / "claude"), **options)
+    fakes.ps((os.getpid(), 1, STARTED, str(fakes.bin / "claude")))
+    fakes.agents((record_of(path)["id"], os.getpid(), status))
+    return path
+
+
+def line(text):
+    return (json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n").encode()
+
+
+def test_an_open_chat_gets_one_line_in_its_inbox_and_no_second_process(home, fakes, inbox):
+    space = wirkspace_id()
+    path, message = open_chat(home, fakes, inbox, wirkspace=space), new_id()
+    record = record_of(path)
+    ask(path, waiting(message))
+    [sent] = inbox.lines()
+    assert sent == line(prompt(f" workspace_id={space}")) and message.encode() not in sent
+    assert fakes.runs() == [] and record_of(path) == record
+    assert state()["delivered"] == {path.name.removesuffix(".wake"): message} and state()["woken"] == {}
+    assert len(state()["wakes"]) == 1
+
+
+def test_a_busy_chat_gets_its_line_too(home, fakes, inbox):
+    ask(open_chat(home, fakes, inbox, status="busy"), waiting(new_id()))
+    assert len(inbox.lines()) == 1 and fakes.runs() == []
+
+
+def test_an_open_chat_gets_each_message_once(home, fakes, inbox):
+    path, first = open_chat(home, fakes, inbox), new_id()
+    for _ in range(3):
+        ask(path, waiting(first))
+    ask(path, waiting(new_id()))
+    assert len(inbox.lines()) == 2
+
+
+@pytest.mark.parametrize("listed", ["other session at its pid", "its session at another pid", "nothing", "twice",
+                                    "waiting on its person", "lookup fails", "not json"])
+def test_no_line_unless_claude_code_lists_the_session_idle_or_busy_at_its_process(home, fakes, inbox, listed):
+    path = open_chat(home, fakes, inbox)
+    session, pid = record_of(path)["id"], os.getpid()
+    rows = {"other session at its pid": [(new_id(), pid, "idle")], "its session at another pid": [(session, 31337, "idle")],
+            "nothing": [], "twice": [(session, pid, "idle"), (session, 4343, "idle")],
+            "waiting on its person": [(session, pid, "waiting")]}
+    fakes.agents(*rows.get(listed, [(session, pid, "idle")]))
+    if listed == "lookup fails":
+        fakes.write("agents-exit", "1")
+    if listed == "not json":
+        fakes.write("agents", "Claude Code is updating")
+    ask(path, waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == []
+    assert state().get("delivered", {}) == {} and state()["wakes"] == []  # undone: the next round may try again
+
+
+def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes, inbox):
+    path = chat(home, pid=4242, inbox=inbox.path, program=str(fakes.bin / "claude"))  # the inbox's listener is not 4242
+    fakes.ps((4242, 1, STARTED, str(fakes.bin / "claude")))
+    fakes.agents((record_of(path)["id"], 4242, "idle"))
+    ask(path, waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+
+
+@pytest.mark.parametrize("shape", ["missing", "a regular file"])
+def test_no_line_without_a_listening_socket_at_the_recorded_path(home, fakes, inbox, shape):
+    target = os.path.join(inbox.directory, "elsewhere.sock")
+    if shape == "a regular file":
+        open(target, "w").close()
+    path = open_chat(home, fakes, inbox)
+    record = {**record_of(path), "inbox": target}
+    write_token(path, json.dumps(record))
+    ask(path, waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == []
+
+
+def test_the_listener_reads_only_the_record_never_its_own_environment(home, fakes, inbox, monkeypatch):
+    other = Inbox()
+    try:
+        monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", other.path)
+        ask(open_chat(home, fakes, inbox), waiting(new_id()))
+        assert len(inbox.lines()) == 1 and other.lines(0) == []
+    finally:
+        other.close()
+
+
+def test_a_slow_lookup_gives_up_in_time_and_never_holds_the_state_lock(home, fakes, inbox, monkeypatch):
+    monkeypatch.setattr(wake, "LOOKUP", 1)
+    path = open_chat(home, fakes, inbox)
+    fakes.write("agents-delay", "5")
+    worker = threading.Thread(target=ask, args=(path, waiting(new_id())))
+    begun = time.monotonic()
+    worker.start()
+    time.sleep(0.3)
+    with wake.state():  # what every wirk command's after() takes
+        locked_after = time.monotonic() - begun
+    worker.join(10)
+    assert locked_after < 1 and time.monotonic() - begun < 4 and inbox.lines() == []
+
+
+def test_a_chat_running_elsewhere_than_its_record_is_still_left_alone(home, fakes, inbox):
+    path = chat(home, pid=4242, inbox=inbox.path)  # 4242 has ended; another process carries the chat's ID
+    fakes.args((5151, f"/usr/local/bin/claude --resume {record_of(path)['id']}"))
+    ask(path, waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == []
+
+
+def test_a_stopped_chat_with_an_inbox_is_resumed(home, fakes, inbox):
+    ask(chat(home, pid=4242, inbox=inbox.path), waiting(new_id()))
+    assert len(fakes.runs()) == 1 and inbox.lines() == []
+
+
+def test_a_delivered_message_still_resumes_the_chat_once_it_stops(home, fakes, inbox):
+    path, message = open_chat(home, fakes, inbox), new_id()
+    ask(path, waiting(message))
+    fakes.ps()  # the chat's process has ended, the message is still unread
+    for _ in range(2):
+        ask(path, waiting(message))
+        fakes.write("ps-args", "")
+    assert len(inbox.lines()) == 1 and len(fakes.runs()) == 1
+
+
+def test_an_open_chat_counts_against_the_hourly_cap(home, fakes, inbox):
+    write_state({"wakes": [time.time() - 60] * 10})
+    ask(open_chat(home, fakes, inbox), waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == []
+
+
+def test_no_wake_value_means_no_line(home, fakes, inbox):
+    ask(open_chat(home, fakes, inbox), waiting(None))
+    assert inbox.lines() == []
+
+
+def test_no_test_carries_the_inbox_of_the_chat_running_it():
+    assert "CLAUDE_CODE_MESSAGING_SOCKET" not in os.environ and "CLAUDE_CODE_MESSAGING_TOKEN" not in os.environ
 
 
 # ------------------------------------------------------------------ the job
