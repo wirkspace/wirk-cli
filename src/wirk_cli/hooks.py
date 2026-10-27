@@ -38,7 +38,6 @@ HAND_BACK = re.compile(r"(DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED)\b")
 PYTHON, MARKER, DEADLINE = sys.executable, "wirk_cli.hooks", 5.0
 OURS = re.compile(r"\[ -x (.+) \] && \1 -I -m " + re.escape(MARKER) + r" \w+ \w+( card)? \|\| true")
 EVENTS = {"start": "SessionStart", "end": "SessionEnd"}
-IDS = {**wake.IDS, "grok": "GROK_SESSION_ID"}  # the variable that names each harness's session
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 
 
@@ -171,7 +170,7 @@ def bind(name: str, payload: dict) -> bool:
     session = payload.get("session_id") or payload.get("sessionId")
     if not isinstance(session, str):
         return False
-    os.environ[IDS[name]] = session
+    os.environ[wake.IDS[name]] = session
     binding = actor_binding()
     try:
         url = saved_url(config_dir())
