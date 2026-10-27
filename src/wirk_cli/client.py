@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import __version__
 from .grammar import command
 
 DEFAULT_URL = "https://api.wirk.life"
@@ -198,7 +199,8 @@ class Service:
         """Made on first use, so a Service that is only compared (as the MCP server's cache does) opens nothing."""
         if self._http is None:
             import httpx
-            self._http = httpx.Client(transport=self._transport, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
+            self._http = httpx.Client(transport=self._transport, follow_redirects=False, timeout=httpx.Timeout(60, connect=10),
+                                      headers={"User-Agent": f"wirk/{__version__}"})  # the service refuses writes from an old wirk
         return self._http
 
     def same(self, other: "Service") -> bool:
