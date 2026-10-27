@@ -9,6 +9,7 @@ from conftest import TOKEN, URL, envelope, refusal, write_token
 from wirk_cli import client
 
 CODEX_A, CODEX_B, CLAUDE = str(uuid.UUID(int=11)), str(uuid.UUID(int=12)), str(uuid.UUID(int=13)).upper()
+GROK = str(uuid.UUID(int=14)).upper()
 
 
 def service(refuse=()):
@@ -198,3 +199,32 @@ def test_a_refused_launcher_says_why_and_signs_in_nowhere(run, monkeypatch, reas
     assert code == 1 and reason in out and "started this one" in out
     assert bearers(fake) == [launcher]  # never enrolled under the machine instead
     assert chat_token(CODEX_A) == launcher
+
+
+def test_a_grok_session_alone_gets_its_own_chat_identity(run, monkeypatch):
+    monkeypatch.setenv("GROK_SESSION_ID", GROK)
+    assert "actor_setup_required" in run(["status"], service())[2]
+    assert run(["login"], service())[0] == 0
+    assert run(["status"], service())[1].strip() == f"You: {chat_token(GROK)}"
+
+
+def test_a_grok_session_started_from_a_claude_code_chat_is_filed_under_it(run, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
+    assert run(["login"], service())[0] == 0
+    launcher = chat_token(CLAUDE)
+    monkeypatch.setenv("GROK_SESSION_ID", GROK)  # a Grok session the Claude Code chat started
+    code, out, err, fake = run(["login"], service())
+    assert code == 0 and bearers(fake) == [launcher]
+    assert fake.requests[-1].headers["wirk-actor-authorization"] == f"Bearer {chat_token(CLAUDE, GROK)}"
+
+
+def test_a_malformed_grok_session_falls_back_to_the_machine(run, monkeypatch):
+    monkeypatch.setenv("GROK_SESSION_ID", "not a session")
+    code, out, err, fake = run(["status"], service())
+    assert code == 0 and out.strip() == f"You: {TOKEN}"
+
+
+@pytest.mark.parametrize("var", ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"])
+def test_only_the_uuid_shape_names_a_chat(monkeypatch, var):
+    monkeypatch.setenv(var, "-" * 32 + "dead")  # 36 hex and dashes, but not 8-4-4-4-12: it could pass for an option
+    assert client.actor_binding() is None and client.actor_binding("-" * 32 + "dead") is None
