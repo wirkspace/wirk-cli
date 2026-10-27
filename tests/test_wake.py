@@ -389,6 +389,23 @@ def test_a_grok_chat_resumes_with_grok_resume_grants_and_the_fixed_prompt(home, 
     assert message not in "".join(started["args"])
 
 
+@pytest.mark.parametrize("harness", ["claude", "codex", "grok"])
+def test_a_record_whose_session_is_not_a_uuid_resumes_nothing(home, fakes, harness):
+    grok_on_path(fakes)
+    path = chat(home, harness=harness, program=str(fakes.bin / harness))
+    write_token(path, json.dumps({**record_of(path), "id": "-" * 32 + "dead"}))  # would reach the harness as an option
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == []
+
+
+def test_a_listener_started_from_a_chat_never_passes_that_chats_ids_along(home, fakes, monkeypatch):
+    for name in IDS:
+        monkeypatch.setenv(name, new_id())
+    launcher = new_id()
+    ask(chat(home, env={"CODEX_THREAD_ID": launcher}), waiting(new_id()))  # a Claude Code chat a Codex thread started
+    env = fakes.runs()[0]["env"]
+    assert env.get("CODEX_THREAD_ID") == launcher and not {"CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} & set(env)
+
 def test_the_fallback_program_comes_from_absolute_path_entries_only(home, fakes, monkeypatch, tmp_path):
     path = chat(home)
     work = record_of(path)["cwd"]
