@@ -126,16 +126,17 @@ def links(source: str, options: dict, expect: dict) -> list:
     return operations
 
 
-def fields_and_owner(pairs: dict, *, clearing: bool) -> tuple[dict, dict | None]:
-    fields, work = {}, None
+def fields_and_owner(pairs: dict, *, clearing: bool, record: bool) -> tuple[dict, dict]:
+    """The fields, and the owner's place in the request: work.owner_id, or owner on a record named kind=record."""
+    fields, owner = {}, {}
     for key, text in pairs.items():
         if not text and not clearing:
             raise UsageError(f"{key}= needs a value")
         if key == "owner":
-            work = {"owner_id": text or None}
+            owner = {"owner": text or None} if record else {"work": {"owner_id": text or None}}
         else:
             fields[key] = None if not text else text.split(",") if "," in text else text
-    return fields, work
+    return fields, owner
 
 
 def write_new(title: str, words: list[str], options: dict, body_text: str | None) -> dict:
@@ -144,13 +145,16 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
         raise UsageError(f"write new takes one title (quote it): {' '.join(positionals)}")
     if "reservation" in pairs:
         raise UsageError("reservation is only available on edit; new items start vacant")
-    workspace, kind, level = pairs.pop("workspace_id", None), pairs.pop("kind", "record"), pairs.pop("level", None)
+    workspace, level, record = pairs.pop("workspace_id", None), pairs.pop("level", None), pairs.get("kind") == "record"
+    kind = pairs.pop("kind", "record")
     if kind not in ("record", "doc", "work", "wirk", "context"):  # doc and wirk are older words, read and never shown
         raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
     if (level is None) != (kind != "context") or level not in (None, "organization", "initiative"):
         raise UsageError("kind=context needs level=organization or level=initiative, and level needs kind=context")
-    fields, work = fields_and_owner(pairs, clearing=False)
-    data = {"title": title, **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {})}
+    fields, owner = fields_and_owner(pairs, clearing=False, record=record)
+    work = owner.pop("work", None)
+    data = {"title": title, **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {}),
+            **owner}
     criteria = [{"text": text} for text in options.get("--criterion", [])]
     if work or criteria or kind in ("work", "wirk"):
         data["work"] = {**(work or {}), **({"criteria": criteria} if criteria else {})}
@@ -169,16 +173,19 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
 def write_edit(target: str, words: list[str], options: dict, body_text: str | None) -> dict:
     item, read = revision(target, "write edit")
     positionals, pairs = split(words)
+    record = pairs.get("kind") == "record"
+    if record:
+        del pairs["kind"]
     if positionals or "kind" in pairs or "level" in pairs or "--criterion" in options:
         raise UsageError("write edit changes fields, owner, title, body, links and files; for kind, context or "
                          "criteria use wirk write --request")
     workspace = pairs.pop("workspace_id", None)
     reservation = pairs.pop("reservation", None)
-    fields, work = fields_and_owner(pairs, clearing=True)
+    fields, owner = fields_and_owner(pairs, clearing=True, record=record)
     patch = {**({"title": options["--title"]} if "--title" in options else {}),
              **({"reservation": reservation} if reservation is not None else {}),
              **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {}),
-             **({"work": work} if work else {}), **({"attach_uploads": options["--upload"]} if options.get("--upload") else {})}
+             **owner, **({"attach_uploads": options["--upload"]} if options.get("--upload") else {})}
     expect = {item: read}
     operations = [{"op": "item.edit", "id": item, "patch": patch}, *links(item, options, expect)]
     return write_body(operations, expect, options, workspace)

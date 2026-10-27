@@ -17,6 +17,13 @@ def sent(run, argv, answer=None):
     return body
 
 
+def sent_query(run, argv):
+    code, out, err, fake = run(argv)
+    assert code == 0, (out, err)
+    body = fake.bodies()[-1]
+    return {key: value for key, value in body.items() if key not in ("request_id", "format")}
+
+
 def test_progress_note_linked_to_two_items(run):
     assert sent(run, ["write", "new", "R1.5 progress", "--body", "Did things.", "--link", "related_to:5c1e7a90",
                       "--link", "related_to:8d24f6b1"]) == {"operations": [
@@ -89,6 +96,26 @@ def test_edit_fields_owner_title_body_and_links(run):
             {"op": "item.edit", "id": "5c1e7a90", "patch": {"title": "New", "body": "B", "fields": {"priority": None},
                                                              "work": {"owner_id": None}}},
             {"op": "link.create", "data": {"type": "requires", "from": "5c1e7a90", "to": "6a0d2e83"}}]}
+
+
+def test_an_explicit_kind_record_sends_owner_as_the_records_owner(run):
+    assert sent(run, ["write", "new", "Ada Lovelace", "kind=record", "owner=me"])["operations"][0]["data"] == {
+        "title": "Ada Lovelace", "owner": "me"}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner=samlarson-agents", "status=open"]) == {
+        "expect": {"5c1e7a90": 3}, "operations": [
+            {"op": "item.edit", "id": "5c1e7a90", "patch": {"fields": {"status": "open"}, "owner": "samlarson-agents"}}]}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner="])["operations"][0]["patch"] == {"owner": None}
+
+
+def test_without_kind_record_owner_still_makes_work(run):
+    assert sent(run, ["write", "new", "T", "owner=me"])["operations"][0]["data"] == {"title": "T", "work": {"owner_id": "me"}}
+    assert sent(run, ["write", "new", "T", "kind=work", "owner=me"])["operations"][0]["data"] == {
+        "title": "T", "work": {"owner_id": "me"}}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "owner=me"])["operations"][0]["patch"] == {"work": {"owner_id": "me"}}
+
+
+def test_query_passes_owner_with_kind_record_through(run):
+    assert sent_query(run, ["query", "kind=record", "owner=me"]) == {"fields": {"kind": "record", "owner": "me"}}
 
 
 def test_propose_and_link(run):
