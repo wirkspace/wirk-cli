@@ -147,7 +147,7 @@ def after(code: int) -> None:
     used, Service.used, ran = Service.used, None, None
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
-            ran = refresh(wake_path(url, binding), used)
+            ran = refresh(wake_path(url, binding), used or chosen(url, binding))  # wirk wirkspace names none
     except Exception:
         pass
     try:
