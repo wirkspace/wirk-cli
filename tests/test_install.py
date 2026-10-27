@@ -264,7 +264,7 @@ def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
     assert f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp" in result.stdout
     assert "would run: claude mcp remove --scope user wirk" in result.stdout
     assert "would run: grok mcp add wirk -- " in result.stdout
-    assert f"would write: {home}/.grok/rules/wirk.md" in result.stdout
+    assert f"/wirk.md {home}/.grok/rules/wirk.md" in result.stdout  # would run: cp
     calls = (tmp_path / "calls").read_text()
     assert "mcp add" not in calls and "mcp remove" not in calls
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
@@ -334,14 +334,12 @@ def test_a_link_where_the_rule_file_goes_is_replaced_and_its_target_is_untouched
 
 
 @needs_uv
-def test_a_folder_where_the_rule_file_goes_is_one_note_and_the_install_goes_on(tmp_path):
+def test_a_folder_where_the_rule_file_goes_stops_the_install_like_the_skill(tmp_path):
     base = release(tmp_path)
     (tmp_path / "home" / ".grok" / "rules" / "wirk.md").mkdir(parents=True)
     result = install(tmp_path, base, "--url", URL)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.count("Grok: could not write") == 1
-    assert "Grok: the WIRK MCP server and skill" not in result.stdout
-    assert f"wirk {LATEST} login --url {URL}" in result.stdout
+    assert result.returncode != 0
+    assert f"This step failed: rm -f {tmp_path}/home/.grok/rules/wirk.md" in result.stderr
 
 
 @needs_uv

@@ -104,12 +104,11 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
 
 # shellcheck disable=SC2016  # backticks in RULE are literal Markdown
 RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow what its answer says.'
-put_rules() {  # WIRK's own line in Grok's global rules: the whole file, never through a link; a failure is one note
-  if [ "$DRY" -eq 1 ]; then printf '    would write: %s\n' "$1"; return 0; fi
-  if ! { mkdir -p "$(dirname "$1")" && rm -f "$1" && printf '%s\n' "$RULE" > "$1"; } 2> "$TMP/log"; then
-    note "Grok: could not write $1 ($(sed -n '$p' "$TMP/log"))"
-    failed=1
-  fi
+put_rules() {  # WIRK's own line as file $1 in Grok's global rules, written like the skill: never through a link
+  printf '%s\n' "$RULE" > "$TMP/wirk.md"
+  quietly mkdir -p "$(dirname "$1")"
+  quietly rm -f "$1"
+  quietly cp "$TMP/wirk.md" "$1"
 }
 
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
