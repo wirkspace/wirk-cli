@@ -104,7 +104,11 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
 
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
 for host in claude codex grok; do
-  if [ "$host" = claude ]; then name="Claude Code"; scope="--scope user"; elif [ "$host" = grok ]; then name="Grok"; scope=""; else name="Codex"; scope=""; fi
+  case "$host" in
+    claude) name="Claude Code"; scope="--scope user" ;;
+    codex) name="Codex"; scope="" ;;
+    grok) name="Grok"; scope="" ;;
+  esac
   if ! command -v "$host" > /dev/null 2>&1; then
     note "$name is not installed; skipped"
     continue
