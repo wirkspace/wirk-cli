@@ -31,6 +31,7 @@ def on(monkeypatch, tmp_path):
     monkeypatch.delenv("WIRK_NO_UPDATE", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("GROK_HOME", raising=False)
     directory = tmp_path / "config"
     monkeypatch.setenv("WIRK_CONFIG_DIR", str(directory))
     return directory
@@ -502,7 +503,8 @@ def test_a_newer_skill_release_replaces_each_installed_copy_and_creates_none(on,
     update.main(current, transport)
     assert [path.read_text() for path in paths] == [skill("0.4.29")] * 2
     assert [oct(path.stat().st_mode & 0o777) for path in paths] == ["0o600"] * 2
-    assert not (home / ".codex").exists() and sorted(p.name for p in paths[0].parent.iterdir()) == ["SKILL.md"]
+    assert not (home / ".codex").exists() and not (home / ".grok").exists()
+    assert sorted(p.name for p in paths[0].parent.iterdir()) == ["SKILL.md"]
     assert transport.github() == ["/wirkspace/wirk-skill/releases/latest",
                                   "/wirkspace/wirk-skill/releases/download/v0.4.29/SKILL.md",
                                   "/wirkspace/wirk-skill/releases/download/v0.4.29/SHA256SUMS"]
@@ -514,6 +516,34 @@ def test_codex_home_names_codexs_folder(on, tmp_path, current, monkeypatch):
     [path] = copies(tmp_path, skill("0.4.25"), ["codex/skills/wirk"])
     update.main(current, github())
     assert path.read_text() == skill("0.4.29")
+
+
+def test_a_grok_copy_is_replaced_like_the_others(on, tmp_path, current):
+    home = tmp_path / "home"
+    [path] = copies(home, skill("0.4.25"), [".grok/skills/wirk"])
+    update.main(current, github())
+    assert path.read_text() == skill("0.4.29")
+    assert sorted(p.name for p in home.iterdir()) == [".grok"]
+
+
+def test_grok_home_names_groks_folder(on, tmp_path, current, monkeypatch):
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok"))
+    [path] = copies(tmp_path, skill("0.4.25"), ["grok/skills/wirk"])
+    update.main(current, github())
+    assert path.read_text() == skill("0.4.29")
+
+
+def test_a_linked_grok_skill_is_never_written_through(on, tmp_path, current):
+    home, checkout = tmp_path / "home", tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "SKILL.md").write_text(skill("0.4.25"))
+    (home / ".grok" / "skills").mkdir(parents=True)
+    (home / ".grok" / "skills" / "wirk").symlink_to(checkout)
+    [path] = copies(home, skill("0.4.25"), [".claude/skills/wirk"])
+    update.main(current, github())
+    assert path.read_text() == skill("0.4.29")
+    assert (checkout / "SKILL.md").read_text() == skill("0.4.25")
+    assert sorted(p.name for p in checkout.iterdir()) == ["SKILL.md"]
 
 
 def test_a_copy_without_a_version_line_counts_as_older(on, tmp_path, current):
