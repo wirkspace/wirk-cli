@@ -147,7 +147,7 @@ def after(code: int) -> None:
     used, Service.used, ran = Service.used, None, None
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
-            if not (path := wake_path(url, binding)).exists():
+            if not (path := wake_path(url, binding)).exists() and actor_path(url, binding).exists():
                 record(url, binding)  # a chat enrolled before 0.4.30 gets its record here
             ran = refresh(path, used)
     except Exception:

@@ -290,6 +290,13 @@ def test_a_chat_outside_a_harness_gets_no_record_on_its_next_command(run, home, 
     assert not the_record(home, own).exists()
 
 
+def test_a_chat_that_never_signed_in_gets_no_record(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    the_record(home, own).parent.mkdir(mode=0o700, parents=True, exist_ok=True)  # other chats' tokens live here
+    assert run(["--help"])[0] == 0
+    assert not the_record(home, own).exists()
+
+
 def test_an_existing_record_is_refreshed_not_rewritten(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     path = chat(home, session=own, pid=900, cwd=tmp_path / "recorded", last=1000)
