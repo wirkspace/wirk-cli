@@ -309,8 +309,8 @@ def test_a_grok_add_that_fails_is_one_note_and_the_install_goes_on(tmp_path):
 def test_grok_gets_the_wirk_rule_file_and_a_rerun_leaves_it_byte_identical(tmp_path):
     base = release(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
-    (home / "AGENTS.md").write_text("my own rules\n")
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "AGENTS.md").write_text("my own rules\n")  # Grok's global rules, read from ~/.grok
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode == 0, result.stdout + result.stderr
     rules = home / ".grok" / "rules" / "wirk.md"
@@ -318,7 +318,7 @@ def test_grok_gets_the_wirk_rule_file_and_a_rerun_leaves_it_byte_identical(tmp_p
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
     assert rules.read_bytes() == GROK_RULE_FILE
-    assert (home / "AGENTS.md").read_text() == "my own rules\n"  # the user's own files are never touched
+    assert (home / ".grok" / "AGENTS.md").read_text() == "my own rules\n"  # the user's own rules are never touched
 
 
 @needs_uv
