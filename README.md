@@ -103,7 +103,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
 
 ### 0.4.30
 

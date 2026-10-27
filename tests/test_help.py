@@ -329,6 +329,12 @@ def test_write_help_spells_the_owner_three_ways_in_one_sentence(capsys):
     assert len(sentences) == 1 and all(word in sentences[0] for word in ("owner=me", "work.owner_id", "owner at the top"))
 
 
+def test_write_help_says_kind_record_sends_owner_to_the_record(capsys):
+    for words in (("write",), ("write", "edit")):
+        text = " ".join(help_of(capsys, *words).split())
+        assert "with kind=record" in text, words
+
+
 def test_write_edit_help_is_the_edit_section_alone(capsys):
     """11be4836: `wirk write edit --help` printed the whole write help; it gives the edit form, its examples, the owner
     spelling and the kind change a claim makes, within the line limit."""
