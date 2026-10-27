@@ -19,7 +19,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from . import __version__
@@ -321,6 +321,9 @@ def deliver(found: dict) -> bool:
                 return False
             line = {"type": "user", "message": {"role": "user", "content": prompt(found)}}
             connection.sendall((json.dumps(line) + "\n").encode())
+            with suppress(OSError):  # Claude Code closes it once it has the line and its sender's verified PID
+                connection.shutdown(socket.SHUT_WR)
+                connection.recv(1)
             return True
     except Exception:  # no lookup, no listing, no socket or not the chat's: nothing sent
         return False

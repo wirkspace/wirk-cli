@@ -685,7 +685,7 @@ class Inbox:
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.bind(self.path)
         self.server.listen(4)
-        self.received = []
+        self.received, self.waited = [], []
         threading.Thread(target=self.serve, daemon=True).start()
 
     def serve(self):
@@ -700,6 +700,12 @@ class Inbox:
                     data += chunk
                 if data:  # a connection that wrote nothing delivered nothing
                     self.received.append(data)
+                    time.sleep(0.05)  # Claude Code reads its sender's PID while the connection is open, then closes it
+                    try:
+                        connection.sendall(b"\n")
+                        self.waited.append(True)
+                    except OSError:
+                        self.waited.append(False)
 
     def lines(self, settle=0.3):
         time.sleep(settle)
@@ -739,6 +745,11 @@ def test_an_open_chat_gets_one_line_in_its_inbox_and_no_second_process(home, fak
     assert fakes.runs() == [] and record_of(path) == record
     assert state()["delivered"] == {path.name.removesuffix(".wake"): message} and state()["woken"] == {}
     assert len(state()["wakes"]) == 1
+
+
+def test_the_listener_waits_for_the_inbox_to_close_so_claude_code_can_verify_its_sender(home, fakes, inbox):
+    ask(open_chat(home, fakes, inbox), waiting(new_id()))
+    assert len(inbox.lines()) == 1 and inbox.waited == [True]
 
 
 def test_a_busy_chat_gets_its_line_too(home, fakes, inbox):
