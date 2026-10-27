@@ -341,6 +341,21 @@ def test_an_existing_record_is_refreshed_not_rewritten(run, home, monkeypatch, f
     assert record["cwd"] == str(tmp_path / "recorded") and abs(record["last"] - time.time()) < 5
 
 
+@pytest.mark.parametrize("before", ["none", "another"])
+def test_choosing_a_wirkspace_is_where_the_listener_waits(run, home, monkeypatch, fakes, tmp_path, before):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    chosen, other = wirkspace_id(), wirkspace_id()
+    path = chat(home, session=own, pid=900, wirkspace=other if before == "another" else None)
+    choices = [{"key": key, "name": f"{key[4:12]} {name}"} for key, name in ((chosen, "Sales"), (other, "Support"))]
+    several = envelope("Error choose_wirkspace", ok=False, status=422, errors=[
+        {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces", "choices": choices}])
+    assert run(["wirkspace", "Sales"], lambda request: several)[0] == 0  # asked without one, as it always is
+    assert record_of(path)["wirkspace"] == chosen
+    write_token(path, json.dumps({**record_of(path), "wirkspace": other}))  # a later command named the other one
+    assert run(["wirkspace"], lambda request: several)[0] == 0  # shows the choice, names none
+    assert record_of(path)["wirkspace"] == other  # only choosing moves the wait
+
+
 def test_a_failed_command_leaves_the_record(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     path = chat(home, session=own, pid=900, last=1000)

@@ -170,8 +170,8 @@ def after(code: int) -> None:
 
 
 def refresh(path: Path, used: str | None) -> str:
-    """The time of the command, the wirkspace it named and, when it runs in another process of the chat, that one;
-    gives the chat's harness."""
+    """The time of the command, the wirkspace it named or chose (wirk wirkspace NAME) and, when it runs in another
+    process of the chat, that one; gives the chat's harness."""
     old = json.loads(read_private(path))
     new = {**old, "last": int(time.time()), "wirkspace": used or old["wirkspace"]}
     found = harness()
