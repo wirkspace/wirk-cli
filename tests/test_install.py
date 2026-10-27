@@ -292,7 +292,8 @@ def test_grok_leaves_a_server_the_person_turned_off_off(tmp_path, was, notes):
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "grok mcp add" not in (tmp_path / "calls").read_text()
-    assert "Grok: the wirk MCP server is turned off; left off" in result.stdout
+    assert "Grok: the WIRK skill and instructions; its wirk MCP server stays off, as it was" in result.stdout
+    assert "Grok: the WIRK MCP server, skill and instructions" not in result.stdout  # the done line says what was set up
 
 
 @needs_uv

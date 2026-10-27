@@ -133,7 +133,7 @@ for host in claude codex grok; do
     was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
   fi
   if [ "$was" != "${was% (*disabled*)}" ]; then  # an add would turn back on what the person turned off
-    note "$name: the wirk MCP server is turned off; left off"
+    what="the WIRK skill and instructions; its wirk MCP server stays off, as it was"
   elif [ "$was" != "$BIN/wirk-mcp" ]; then
     if [ -n "$was" ]; then
       note "$name: replacing the wirk MCP server that ran $was"
