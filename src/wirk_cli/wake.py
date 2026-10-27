@@ -299,7 +299,8 @@ def resume(path: Path, found: dict):
     prompt = PROMPT.format(f" workspace_id={found['wirkspace']}" if WIRKSPACE.fullmatch(found["wirkspace"] or "") else "")
     argv = ([program, "--resume", found["id"], "-p", prompt, *GRANTS[name]] if name in GRANTS
             else [program, "exec", "resume", found["id"], prompt])
-    env = {var: value for var, value in os.environ.items() if var not in IDS.values()}  # never the listener's own chat
+    mine = {*IDS.values(), *HOMES.values()}  # the listener's own chat and session stores, never the resumed chat's
+    env = {var: value for var, value in os.environ.items() if var not in mine}
     env.update(PATH=search, **found["env"])
     log = path.with_name(path.name + ".log")
     trim(log)

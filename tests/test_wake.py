@@ -439,6 +439,18 @@ def test_a_listener_started_from_a_chat_never_passes_that_chats_ids_along(home, 
     env = fakes.runs()[0]["env"]
     assert env.get("CODEX_THREAD_ID") == launcher and not {"CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} & set(env)
 
+
+def test_a_listener_started_from_a_chat_never_points_a_resumed_chat_at_its_own_session_store(home, fakes, monkeypatch,
+                                                                                               tmp_path):
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / "listener" / name))
+    grok_on_path(fakes)
+    ask(chat(home, harness="grok", env={"GROK_HOME": str(tmp_path / "chat")}), waiting(new_id()))
+    env = fakes.runs()[0]["env"]
+    assert env.get("GROK_HOME") == str(tmp_path / "chat") and not {"CLAUDE_CONFIG_DIR", "CODEX_HOME"} & set(env)
+    assert env["WIRK_CONFIG_DIR"] == os.environ["WIRK_CONFIG_DIR"]  # WIRK's own folder stays as the listener has it
+
+
 def test_the_fallback_program_comes_from_absolute_path_entries_only(home, fakes, monkeypatch, tmp_path):
     path = chat(home)
     work = record_of(path)["cwd"]
