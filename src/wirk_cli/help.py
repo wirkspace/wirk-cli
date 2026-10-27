@@ -14,7 +14,7 @@ Start with: wirk status
   query inbox=me                       messages for you, until you mark them seen
   review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
   write new 'Title' --link related_to:ID          a record; add kind=work for a task
-  write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
+  write edit ID@N status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
   write message --on ID --body 'Ready'            a message on an item's board; --to ID addresses someone
   write seen ID                        mark messages seen once you have read them

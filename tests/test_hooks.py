@@ -330,6 +330,13 @@ def test_every_wirkspace_is_checked(home, monkeypatch):
     assert [write["workspace_id"] for write in writes] == ["wsp_a", "wsp_b"]
 
 
+def test_the_clis_example_evidence_names_something_a_reviewer_can_check():
+    """The method's proof rule: 'tests pass' names nothing; a test count and a commit can be checked."""
+    from wirk_cli.help import HELP
+    assert "--evidence 'tests pass'" not in HELP[""]
+    assert "write edit ID@N status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'" in HELP[""]
+
+
 def test_the_ported_tables_notices_ship_with_wirk():
     root = Path(__file__).parent.parent
     notice = (root / "NOTICE").read_text()
