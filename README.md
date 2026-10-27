@@ -103,10 +103,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
+- Nothing yet.
 
 ### 0.4.31
 
+- `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
 - A chat enrolled before 0.4.30 gets its resume record on its next successful command, so the listener can wake it.
 - Every request names the client, `User-Agent: wirk/<version>`, so the service can refuse writes from a `wirk` older than its minimum; reads stay open.
 
