@@ -63,9 +63,11 @@ Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `works
 
 Run `wirk show --file view.json --no-open` for a link without opening a browser, or `wirk show --file view.json` to open it. Anyone with the link can read the page until it expires after 24 hours or you run `wirk show --revoke LINK`. A service without views configured returns `views_unavailable`.
 
-## Waking a stopped chat
+## Waking a chat
 
-`wirk login` in an agent chat also starts a small listener on this machine, one per configuration directory, at every sign-in to your computer. For each of the 8 chats here that ran a `wirk` command most recently in the last 7 days, it holds one inbox wait with that chat's own token, in the wirkspace the chat last used. When a message addressed to the chat arrives and the chat is not running, the listener resumes it once in its harness (`claude --resume`, allowed only WIRK's own tools, or `codex exec resume`) in its own directory, with one fixed prompt that says a message is waiting and carries none of it. At most 10 chats an hour are woken per user on this machine. Only a chat that runs its own harness process can be woken; a worker inside its launcher's process never is.
+`wirk login` in an agent chat also starts a small listener on this machine, one per configuration directory, at every sign-in to your computer. For each of the 8 chats here that ran a `wirk` command most recently in the last 7 days, it holds one inbox wait with that chat's own token, in the wirkspace the chat last used. When a message addressed to a stopped chat arrives, the listener resumes it once in its harness (`claude --resume`, allowed only WIRK's own tools, or `codex exec resume`) in its own directory, with one fixed prompt that says a message is waiting and carries none of it. At most 10 chats an hour are woken per user on this machine. Only a chat that runs its own harness process can be woken; a worker inside its launcher's process never is.
+
+A Claude Code chat that is open, in a terminal, the desktop app or a held-open headless run, is never resumed, since a second process on one session would interleave two writers. The listener writes the same fixed prompt into the chat's own cross-session inbox instead, the socket Claude Code binds for each session and exports to its commands as `CLAUDE_CODE_MESSAGING_SOCKET`, which the chat's `wirk` commands record. It does so only when `claude agents --json` lists the chat's session, idle or busy, at the recorded process, and the socket's listener is that process. An idle chat starts a turn within about a second; a busy one reads it between tool calls, so a running tool is never interrupted; a chat waiting on its person gets nothing until it is idle again; a person's unsent draft stays in the box. The chat shows it as a message from another session, and the chat's own permission settings apply. Claude Code's `crossSessionInbound` setting is respected: `hold` keeps it for your approval and `refuse` drops it; a chat that bypasses permission prompts holds it for approval unless the setting is `accept` (a terminal asks each time, the desktop app drops it after five minutes). The listener cannot tell a held or dropped prompt from a delivered one, so it does not repeat it while the chat stays open, and resumes the chat once for the same unread message after it stops. A chat learns its inbox from a `wirk` command run in its current process, so a chat reopened in a new process is woken this way only after its next command. The line's format matches Claude Code's own example but is not on a public page; if a future Claude Code changes it, the prompt is dropped and nothing else happens. Codex and other harnesses are still woken only when stopped. A program that drives a held-open session itself sees the extra turn, marked as coming from a peer.
 
 A wake needs the harness signed in for command-line use on this machine. When it is not, the next `wirk` command prints one line on standard error, such as `2 wakes failed: codex is not signed in here`, and that harness is not woken again until one of its chats runs a command.
 
@@ -103,7 +105,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- The listener wakes an open Claude Code chat too, through the chat's own cross-session inbox, instead of leaving it until it stops (see Waking a chat).
 
 ### 0.4.31
 
@@ -113,7 +115,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### 0.4.30
 
-- `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a stopped chat).
+- `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a chat).
 
 ### 0.4.29
 
