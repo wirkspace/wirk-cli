@@ -154,7 +154,7 @@ for host in claude codex grok; do
     done
     if [ -z "$made" ]; then put_skill "$HOME/.agents/skills/wirk"; fi
   fi
-  ok "$name: the WIRK MCP server and skill"
+  ok "$name: $what"
 done
 
 # connect this machine

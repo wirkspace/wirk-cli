@@ -312,6 +312,7 @@ def test_grok_gets_the_wirk_rule_file_and_a_rerun_leaves_it_byte_identical(tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     rules = home / ".grok" / "rules" / "wirk.md"
     assert rules.read_bytes() == GROK_RULE_FILE
+    assert "Grok: the WIRK MCP server, skill and instructions" in result.stdout  # as the question names them
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
     assert rules.read_bytes() == GROK_RULE_FILE
