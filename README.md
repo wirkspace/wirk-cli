@@ -90,7 +90,7 @@ Agents never run them; an agent decides proposals with its own token, as itself.
 
 ## What leaves your machine
 
-- The requests you or your agents make, and their content.
+- The requests you or your agents make, and their content, each naming the client as `wirk/<version>`.
 - The token, only as the bearer header to the address it was made for: never to another address, a redirect or a storage link, and never in output, logs or errors.
 - With `status`, the client's name and version, a session hash, the repository as `host/owner/name` (or a hash when it has no plain remote) and the branch name. WIRK shows these as reported, never as authority.
 - File bytes you upload, straight to storage through short-lived links.
@@ -104,6 +104,12 @@ There is no telemetry. People keep a separate token of their own for their own d
 ### Next release
 
 - Nothing yet.
+
+### 0.4.31
+
+- `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
+- A chat enrolled before 0.4.30 gets its resume record on its next successful command, so the listener can wake it.
+- Every request names the client, `User-Agent: wirk/<version>`, so the service can refuse writes from a `wirk` older than its minimum; reads stay open.
 
 ### 0.4.30
 

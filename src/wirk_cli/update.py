@@ -119,7 +119,8 @@ def refresh_skill(transport=None) -> list:
     import hashlib
     import httpx
     home = Path.home()
-    folders = [home / ".claude", Path(os.environ.get("CODEX_HOME") or home / ".codex"), home / ".agents"]
+    folders = [home / ".claude", Path(os.environ.get("CODEX_HOME") or home / ".codex"), home / ".agents",
+               Path(os.environ.get("GROK_HOME") or home / ".grok")]
     copies = {}
     for path in (folder / "skills" / "wirk" / "SKILL.md" for folder in folders):
         try:
