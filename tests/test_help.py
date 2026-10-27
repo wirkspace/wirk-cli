@@ -91,9 +91,12 @@ PRIVATE = ["/Us" "ers/", r"/home/[a-z]", r"\b(?:wsp|item|change|proposal|link|ac
 
 
 def history(root: Path) -> str:
-    """Each commit's author and message; the files themselves are scanned one by one."""
-    return subprocess.run(["git", "-C", str(root), "log", "--all", "--format=%an %ae%n%B"],
-                          capture_output=True, text=True, check=True).stdout
+    """Each commit's author and message: this branch's own commits, those origin/main lacks, or on main the one being
+    published. Another branch's messages are its own scan's business. The files themselves are scanned one by one."""
+    def log(*revisions):
+        return subprocess.run(["git", "-C", str(root), "log", "--format=%an %ae%n%B", *revisions],
+                              capture_output=True, text=True).stdout
+    return log("origin/main..HEAD") or log("-1", "HEAD")
 
 
 def tracked_text():
@@ -134,6 +137,26 @@ def test_the_history_scan_reads_authors_and_messages(tmp_path):
     text = history(tmp_path)
     assert "Add a test" in text and "@pytest.fixture" not in text
     assert not [pattern for pattern in PRIVATE if re.search(pattern, text)]
+
+
+def test_the_history_scan_reads_only_this_branchs_own_commits(tmp_path):
+    """Another branch's messages never fail this one; on main, the commit being published is read."""
+    def git(*words):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=A Person", "-c",
+                        "user.email=1+someone@users.noreply.github.com", *words], check=True, capture_output=True)
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "Earlier on main")
+    git("commit", "-q", "--allow-empty", "-m", "Published on main")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("checkout", "-q", "-b", "elsewhere")
+    git("commit", "-q", "--allow-empty", "-m", "Elsewhere")
+    git("checkout", "-q", "-b", "mine", "main")
+    git("commit", "-q", "--allow-empty", "-m", "Mine")
+    def messages():
+        return [line for line in history(tmp_path).splitlines() if line and not line.startswith("A Person")]
+    assert messages() == ["Mine"]
+    git("checkout", "-q", "main")
+    assert messages() == ["Published on main"]
 
 
 def test_version_prints_the_version(capsys):
