@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
 LATEST = "0.4.31"
+GROK_RULE_FILE = b"WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool).\n"
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -262,10 +263,12 @@ def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
     assert f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp" in result.stdout
     assert "would run: claude mcp remove --scope user wirk" in result.stdout
     assert "would run: grok mcp add wirk -- " in result.stdout
+    assert f"/wirk.md {home}/.grok/rules/wirk.md" in result.stdout  # would run: cp
     calls = (tmp_path / "calls").read_text()
     assert "mcp add" not in calls and "mcp remove" not in calls
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
     assert (home / ".claude" / "skills" / "wirk").is_symlink() and (home / ".agents" / "skills" / "wirk").is_symlink()
+    assert not (home / ".grok").exists()
 
 
 @needs_uv
@@ -276,6 +279,18 @@ def test_grok_replaces_an_entry_that_runs_another_command(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Grok: replacing the wirk MCP server that ran https://old.example/mcp" in result.stdout
     assert registered(tmp_path, "grok") == f"{tmp_path}/bin/wirk-mcp"
+
+
+@needs_uv
+@pytest.mark.parametrize("was", ["current", "https://old.example/mcp"])
+def test_grok_leaves_a_server_the_person_turned_off_off(tmp_path, was):
+    base = release(tmp_path)
+    command = f"{tmp_path}/bin/wirk-mcp" if was == "current" else was
+    (tmp_path / "grok-wirk").write_text(f"{command} (disabled)")
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "grok mcp add" not in (tmp_path / "calls").read_text()  # an add would turn it back on
+    assert "Grok: the wirk MCP server is turned off; left off" in result.stdout
 
 
 @needs_uv
@@ -296,6 +311,56 @@ def test_a_grok_add_that_fails_stops_the_install_like_any_hosts(tmp_path):
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode != 0
     assert f"This step failed: grok mcp add wirk -- {tmp_path}/bin/wirk-mcp" in result.stdout + result.stderr
+
+
+@needs_uv
+def test_grok_gets_the_wirk_rule_file_and_a_rerun_leaves_it_byte_identical(tmp_path):
+    base = release(tmp_path)
+    home = tmp_path / "home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "AGENTS.md").write_text("my own rules\n")  # Grok's global rules, read from ~/.grok
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    rules = home / ".grok" / "rules" / "wirk.md"
+    assert rules.read_bytes() == GROK_RULE_FILE
+    assert "Grok: the WIRK MCP server, skill and instructions" in result.stdout  # as the question names them
+    again = install(tmp_path, base, "--url", URL)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert rules.read_bytes() == GROK_RULE_FILE
+    assert (home / ".grok" / "AGENTS.md").read_text() == "my own rules\n"  # the user's own rules are never touched
+
+
+@needs_uv
+def test_a_link_where_the_rule_file_goes_is_replaced_and_its_target_is_untouched(tmp_path):
+    base = release(tmp_path)
+    target = tmp_path / "someone-elses-rules.md"
+    target.write_text("their rules\n")
+    rules = tmp_path / "home" / ".grok" / "rules" / "wirk.md"
+    rules.parent.mkdir(parents=True)
+    rules.symlink_to(target)
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not rules.is_symlink() and rules.read_bytes() == GROK_RULE_FILE
+    assert target.read_text() == "their rules\n"
+
+
+@needs_uv
+def test_a_folder_where_the_rule_file_goes_stops_the_install_like_the_skill(tmp_path):
+    base = release(tmp_path)
+    (tmp_path / "home" / ".grok" / "rules" / "wirk.md").mkdir(parents=True)
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode != 0
+    assert f"This step failed: rm -f {tmp_path}/home/.grok/rules/wirk.md" in result.stderr
+
+
+@needs_uv
+def test_grok_home_holds_the_rule_file(tmp_path):
+    base = release(tmp_path)
+    grok_home = tmp_path / "grok-home"
+    result = install(tmp_path, base, "--url", URL, GROK_HOME=str(grok_home))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (grok_home / "rules" / "wirk.md").read_bytes() == GROK_RULE_FILE
+    assert not (tmp_path / "home" / ".grok").exists()
 
 
 @needs_uv

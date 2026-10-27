@@ -102,28 +102,39 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
   quietly cp "$TMP/SKILL.md" "$1/SKILL.md"
 }
 
+# shellcheck disable=SC2016  # backticks in RULE are literal Markdown
+RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool).'
+put_rules() {  # WIRK's own line as file $1 in Grok's global rules, written like the skill: never through a link
+  printf '%s\n' "$RULE" > "$TMP/wirk.md"
+  quietly mkdir -p "$(dirname "$1")"
+  quietly rm -f "$1"
+  quietly cp "$TMP/wirk.md" "$1"
+}
+
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
 for host in claude codex grok; do
   case "$host" in
-    claude) name="Claude Code"; scope="--scope user" ;;
-    codex) name="Codex"; scope="" ;;
-    grok) name="Grok"; scope="" ;;
+    claude) name="Claude Code"; scope="--scope user"; what="the WIRK MCP server and skill" ;;
+    codex) name="Codex"; scope=""; what="the WIRK MCP server and skill" ;;
+    grok) name="Grok"; scope=""; what="the WIRK MCP server, skill and instructions" ;;
   esac
   if ! command -v "$host" > /dev/null 2>&1; then
     note "$name is not installed; skipped"
     continue
   fi
-  if ! ask "Set up $name with the WIRK MCP server and skill?"; then
+  if ! ask "Set up $name with $what?"; then
     note "$name left as it is (later: run this again, or with --yes)"
     continue
   fi
   # from an empty folder, so Claude Code reports its user entry rather than a project's own
-  if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND"
+  if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND", then " (disabled)"
     was=$(cd "$TMP" && grok mcp list < /dev/null 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
   else
     was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
   fi
-  if [ "$was" != "$BIN/wirk-mcp" ]; then
+  if [ "$was" != "${was% (disabled)}" ]; then  # an add would turn back on what the person turned off
+    note "$name: the wirk MCP server is turned off; left off"
+  elif [ "$was" != "$BIN/wirk-mcp" ]; then
     if [ -n "$was" ]; then
       note "$name: replacing the wirk MCP server that ran $was"
       if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's and Grok's adds replace
@@ -136,6 +147,7 @@ for host in claude codex grok; do
     put_skill "$HOME/.claude/skills/wirk"
   elif [ "$host" = grok ]; then
     put_skill "${GROK_HOME:-$HOME/.grok}/skills/wirk"
+    put_rules "${GROK_HOME:-$HOME/.grok}/rules/wirk.md"
   else  # Codex reads both folders and lists each copy: refresh what an earlier install made, else use the shared one
     made=""
     for folder in "${CODEX_HOME:-$HOME/.codex}/skills/wirk" "$HOME/.agents/skills/wirk"; do
@@ -143,7 +155,7 @@ for host in claude codex grok; do
     done
     if [ -z "$made" ]; then put_skill "$HOME/.agents/skills/wirk"; fi
   fi
-  ok "$name: the WIRK MCP server and skill"
+  ok "$name: $what"
 done
 
 # connect this machine
