@@ -25,7 +25,7 @@ NEW_CHAT = "If this session works on WIRK items, run `wirk login` in it first."
 
 @pytest.fixture(autouse=True)
 def outside_grok(monkeypatch):
-    for name in ("GROK_HOOK_EVENT", "GROK_SESSION_ID", "WIRK_CONFIG_DIR"):
+    for name in ("GROK_HOOK_EVENT", "WIRK_CONFIG_DIR"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -351,7 +351,6 @@ def test_end_ignores_what_is_not_this_sessions_own_end(home, monkeypatch, starte
 
 def test_grok_ends_through_claude_codes_hook_as_itself(home, monkeypatch, started):
     monkeypatch.setenv("GROK_HOOK_EVENT", "SessionEnd")
-    monkeypatch.setattr(hooks, "actor_binding", lambda: os.environ.get("GROK_SESSION_ID"))  # as wirk-cli #101 binds it
     own_token()
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"sessionId": CHAT, "hookEventName": "session_end"})))
     hooks.main(["end", "claude"])
