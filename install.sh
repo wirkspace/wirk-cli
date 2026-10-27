@@ -7,8 +7,8 @@
 #   sh install.sh --url URL        connect to another WIRK service
 #
 # It installs uv if it is missing (after asking), installs or upgrades the wirk command and the wirk-mcp server to
-# their latest release on PyPI (WIRK_VERSION=X installs X of both instead), sets up Claude Code and Codex with the
-# latest skill when they are present (after asking), and runs wirk login. It never uses sudo. Running it again is
+# their latest release on PyPI (WIRK_VERSION=X installs X of both instead), sets up Claude Code, Codex and Grok with
+# the latest skill when they are present (after asking), and runs wirk login. It never uses sudo. Running it again is
 # safe: it upgrades both clients in place and replaces an earlier wirk MCP server and skill.
 set -eu
 
@@ -103,8 +103,12 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
 }
 
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
-for host in claude codex; do
-  if [ "$host" = claude ]; then name="Claude Code"; scope="--scope user"; else name="Codex"; scope=""; fi
+for host in claude codex grok; do
+  case "$host" in
+    claude) name="Claude Code"; scope="--scope user" ;;
+    codex) name="Codex"; scope="" ;;
+    grok) name="Grok"; scope="" ;;
+  esac
   if ! command -v "$host" > /dev/null 2>&1; then
     note "$name is not installed; skipped"
     continue
@@ -114,11 +118,15 @@ for host in claude codex; do
     continue
   fi
   # from an empty folder, so Claude Code reports its user entry rather than a project's own
-  was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
+  if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND"
+    was=$(cd "$TMP" && grok mcp list < /dev/null 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
+  else
+    was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
+  fi
   if [ "$was" != "$BIN/wirk-mcp" ]; then
     if [ -n "$was" ]; then
       note "$name: replacing the wirk MCP server that ran $was"
-      if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's add replaces
+      if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's and Grok's adds replace
     fi
     # shellcheck disable=SC2086  # $scope is zero or two words on purpose
     quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
@@ -126,6 +134,8 @@ for host in claude codex; do
   if [ -z "${SKILL:-}" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
   if [ "$host" = claude ]; then
     put_skill "$HOME/.claude/skills/wirk"
+  elif [ "$host" = grok ]; then
+    put_skill "${GROK_HOME:-$HOME/.grok}/skills/wirk"
   else  # Codex reads both folders and lists each copy: refresh what an earlier install made, else use the shared one
     made=""
     for folder in "${CODEX_HOME:-$HOME/.codex}/skills/wirk" "$HOME/.agents/skills/wirk"; do

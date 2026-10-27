@@ -143,7 +143,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.30"
+    assert project == __version__ == "0.4.31"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -327,6 +327,12 @@ def test_write_help_spells_the_owner_three_ways_in_one_sentence(capsys):
     """11be4836: owner=me in the CLI, work.owner_id on the wire, owner at the top of a read; none of them changes."""
     sentences = [s for s in " ".join(help_of(capsys, "write").split()).split(". ") if "owner_id" in s]
     assert len(sentences) == 1 and all(word in sentences[0] for word in ("owner=me", "work.owner_id", "owner at the top"))
+
+
+def test_write_help_says_kind_record_sends_owner_to_the_record(capsys):
+    for words in (("write",), ("write", "edit")):
+        text = " ".join(help_of(capsys, *words).split())
+        assert "with kind=record" in text, words
 
 
 def test_write_edit_help_is_the_edit_section_alone(capsys):

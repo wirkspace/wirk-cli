@@ -9,7 +9,7 @@ import re
 import httpx
 import pytest
 
-from test_contract import ADMIN, URL, admin, person_with_agents
+from test_contract import ADMIN, URL, admin, as_admin, person_with_agents
 from test_import_github import FakeGh, node, page, ref, repo
 from wirk_cli import cli
 from wirk_cli.importers import github
@@ -93,8 +93,7 @@ def test_a_line_forged_by_another_principal_is_ignored(imported):
     forged = admin({"request_id": f"forge-{os.urandom(3).hex()}", "workspace_id": imported["workspace"],
                     "operations": [{"op": "member.set", "principal_id": "admin", "role": "editor"}]})
     assert forged["ok"]
-    token = open(ADMIN).read().strip()
-    written = httpx.post(f"{URL}/v2/write", headers={"Authorization": f"Bearer {token}"}, timeout=30, json={
+    written = httpx.post(f"{URL}/v2/write", headers=as_admin(), timeout=30, json={
         "request_id": f"forge-{os.urandom(3).hex()}", "workspace_id": imported["workspace"], "format": "json",
         "operations": [{"op": "item.create", "data": {"title": "Copied", "body": view["line"]}}]}).json()
     assert written["ok"], written

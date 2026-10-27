@@ -148,11 +148,13 @@ def record(url: str, binding: str) -> None:
 
 
 def after(code: int) -> None:
-    """In the command's process, once its answer is out: refresh the chat's record, then say failed wakes."""
+    """In the command's process, once its answer is out: write or refresh the chat's record, then say failed wakes."""
     used, Service.used, ran = Service.used, None, None
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
-            ran = refresh(wake_path(url, binding), used)
+            if not (path := wake_path(url, binding)).exists() and actor_path(url, binding).exists():
+                record(url, binding)  # a chat enrolled before 0.4.30 gets its record here
+            ran = refresh(path, used)
     except Exception:
         pass
     try:
