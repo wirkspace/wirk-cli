@@ -102,18 +102,25 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
   quietly cp "$TMP/SKILL.md" "$1/SKILL.md"
 }
 
+# shellcheck disable=SC2016  # backticks in RULE are literal Markdown
+RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow the method card at the top of its answer.'
+put_rules() {  # WIRK's own line in Grok's global rules: the whole file, never through a link; a failure is one note
+  if [ "$DRY" -eq 1 ]; then printf '    would write: %s\n' "$1"; return 0; fi
+  if ! { mkdir -p "$(dirname "$1")" && rm -f "$1" && printf '%s\n' "$RULE" > "$1"; } 2> "$TMP/log"; then note "Grok: could not write $1 ($(sed -n '$p' "$TMP/log"))"; failed=1; fi
+}
+
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
 for host in claude codex grok; do
   case "$host" in
-    claude) name="Claude Code"; scope="--scope user" ;;
-    codex) name="Codex"; scope="" ;;
-    grok) name="Grok"; scope="" ;;
+    claude) name="Claude Code"; scope="--scope user"; what="the WIRK MCP server and skill" ;;
+    codex) name="Codex"; scope=""; what="the WIRK MCP server and skill" ;;
+    grok) name="Grok"; scope=""; what="the WIRK MCP server, skill and instructions" ;;
   esac
   if ! command -v "$host" > /dev/null 2>&1; then
     note "$name is not installed; skipped"
     continue
   fi
-  if ! ask "Set up $name with the WIRK MCP server and skill?"; then
+  if ! ask "Set up $name with $what?"; then
     note "$name left as it is (later: run this again, or with --yes)"
     continue
   fi
@@ -145,6 +152,7 @@ for host in claude codex grok; do
     put_skill "$HOME/.claude/skills/wirk"
   elif [ "$host" = grok ]; then
     put_skill "${GROK_HOME:-$HOME/.grok}/skills/wirk"
+    put_rules "${GROK_HOME:-$HOME/.grok}/rules/wirk.md"
   else  # Codex reads both folders and lists each copy: refresh what an earlier install made, else use the shared one
     made=""
     for folder in "${CODEX_HOME:-$HOME/.codex}/skills/wirk" "$HOME/.agents/skills/wirk"; do

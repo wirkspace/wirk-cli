@@ -15,6 +15,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
 LATEST = "0.4.30"
+GROK_RULE_FILE = ("WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow "
+                  "the method card at the top of its answer.\n").encode()
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
@@ -262,10 +264,12 @@ def test_a_dry_run_names_the_replacement_and_changes_nothing(tmp_path):
     assert f"replacing the wirk MCP server that ran {old}/.venv/bin/wirk-mcp" in result.stdout
     assert "would run: claude mcp remove --scope user wirk" in result.stdout
     assert "would run: grok mcp add wirk -- " in result.stdout
+    assert f"would write: {home}/.grok/rules/wirk.md" in result.stdout
     calls = (tmp_path / "calls").read_text()
     assert "mcp add" not in calls and "mcp remove" not in calls
     assert registered(tmp_path, "claude") == registered(tmp_path, "codex") == f"{old}/.venv/bin/wirk-mcp"
     assert (home / ".claude" / "skills" / "wirk").is_symlink() and (home / ".agents" / "skills" / "wirk").is_symlink()
+    assert not (home / ".grok").exists()
 
 
 @needs_uv
@@ -299,6 +303,57 @@ def test_a_grok_add_that_fails_is_one_note_and_the_install_goes_on(tmp_path):
     assert f"; run: grok mcp add wirk -- {tmp_path}/bin/wirk-mcp" in result.stdout
     assert "Grok: the WIRK MCP server and skill" not in result.stdout
     assert f"wirk {LATEST} login --url {URL}" in result.stdout
+
+
+@needs_uv
+def test_grok_gets_the_wirk_rule_file_and_a_rerun_leaves_it_byte_identical(tmp_path):
+    base = release(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "AGENTS.md").write_text("my own rules\n")
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    rules = home / ".grok" / "rules" / "wirk.md"
+    assert rules.read_bytes() == GROK_RULE_FILE
+    again = install(tmp_path, base, "--url", URL)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert rules.read_bytes() == GROK_RULE_FILE
+    assert (home / "AGENTS.md").read_text() == "my own rules\n"  # the user's own files are never touched
+
+
+@needs_uv
+def test_a_link_where_the_rule_file_goes_is_replaced_and_its_target_is_untouched(tmp_path):
+    base = release(tmp_path)
+    target = tmp_path / "someone-elses-rules.md"
+    target.write_text("their rules\n")
+    rules = tmp_path / "home" / ".grok" / "rules" / "wirk.md"
+    rules.parent.mkdir(parents=True)
+    rules.symlink_to(target)
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not rules.is_symlink() and rules.read_bytes() == GROK_RULE_FILE
+    assert target.read_text() == "their rules\n"
+
+
+@needs_uv
+def test_a_folder_where_the_rule_file_goes_is_one_note_and_the_install_goes_on(tmp_path):
+    base = release(tmp_path)
+    (tmp_path / "home" / ".grok" / "rules" / "wirk.md").mkdir(parents=True)
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("Grok: could not write") == 1
+    assert "Grok: the WIRK MCP server and skill" not in result.stdout
+    assert f"wirk {LATEST} login --url {URL}" in result.stdout
+
+
+@needs_uv
+def test_grok_home_holds_the_rule_file(tmp_path):
+    base = release(tmp_path)
+    grok_home = tmp_path / "grok-home"
+    result = install(tmp_path, base, "--url", URL, GROK_HOME=str(grok_home))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (grok_home / "rules" / "wirk.md").read_bytes() == GROK_RULE_FILE
+    assert not (tmp_path / "home" / ".grok").exists()
 
 
 @needs_uv
