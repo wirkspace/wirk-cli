@@ -121,11 +121,13 @@ def new_token(path: Path) -> str:
 
 def actor_binding(thread_id: str | None = None) -> str | None:
     """The agent chat this process serves, so it signs in as itself: Codex's thread (as MCP's request names it, else
-    the environment's) and Claude Code's session, each a UUID, joined. A worker one chat starts carries an ID its
-    launcher lacks, so it never acts as its launcher. None outside any chat: the machine's shared identity."""
+    the environment's), Claude Code's session and Grok's session, each a UUID, joined in that order. A worker one chat
+    starts carries an ID its launcher lacks, so it never acts as its launcher. None outside any chat: the machine's
+    shared identity."""
     def valid(value: str | None) -> str | None:
         return value.lower() if value and re.fullmatch(r"[0-9a-fA-F-]{36}", value) else None
-    ids = (valid(thread_id) or valid(os.environ.get("CODEX_THREAD_ID")), valid(os.environ.get("CLAUDE_CODE_SESSION_ID")))
+    ids = (valid(thread_id) or valid(os.environ.get("CODEX_THREAD_ID")),
+           valid(os.environ.get("CLAUDE_CODE_SESSION_ID")), valid(os.environ.get("GROK_SESSION_ID")))
     return ",".join(i for i in ids if i) or None
 
 
