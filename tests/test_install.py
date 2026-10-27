@@ -282,14 +282,16 @@ def test_grok_replaces_an_entry_that_runs_another_command(tmp_path):
 
 
 @needs_uv
-@pytest.mark.parametrize("was", ["current", "https://old.example/mcp"])
-def test_grok_leaves_a_server_the_person_turned_off_off(tmp_path, was):
+@pytest.mark.parametrize("was, notes", [("current", "disabled"),
+                                        ("https://old.example/mcp", "blocked by organization policy, disabled")])
+def test_grok_leaves_a_server_the_person_turned_off_off(tmp_path, was, notes):
     base = release(tmp_path)
     command = f"{tmp_path}/bin/wirk-mcp" if was == "current" else was
-    (tmp_path / "grok-wirk").write_text(f"{command} (disabled)")
+    (tmp_path / "grok-wirk").write_text(f"{command} ({notes})")
+    (tmp_path / "grok-refuses").write_text("")  # as a policy refuses it; an add would also turn the server back on
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "grok mcp add" not in (tmp_path / "calls").read_text()  # an add would turn it back on
+    assert "grok mcp add" not in (tmp_path / "calls").read_text()
     assert "Grok: the wirk MCP server is turned off; left off" in result.stdout
 
 

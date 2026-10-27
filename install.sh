@@ -127,12 +127,12 @@ for host in claude codex grok; do
     continue
   fi
   # from an empty folder, so Claude Code reports its user entry rather than a project's own
-  if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND", then " (disabled)"
+  if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND", notes in brackets
     was=$(cd "$TMP" && grok mcp list < /dev/null 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
   else
     was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
   fi
-  if [ "$was" != "${was% (disabled)}" ]; then  # an add would turn back on what the person turned off
+  if [ "$was" != "${was% (*disabled*)}" ]; then  # an add would turn back on what the person turned off
     note "$name: the wirk MCP server is turned off; left off"
   elif [ "$was" != "$BIN/wirk-mcp" ]; then
     if [ -n "$was" ]; then
