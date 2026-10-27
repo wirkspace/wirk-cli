@@ -418,7 +418,7 @@ def test_a_grok_chat_resumes_with_grok_resume_grants_and_the_fixed_prompt(home, 
     [started] = fakes.runs()
     assert started["program"] == str(fakes.bin / "grok") and started["cwd"] == record["cwd"]
     assert started["args"] == ["--resume", record["id"], "-p", prompt(f" workspace_id={space}"), "--permission-mode",
-                               "dontAsk", "--allow", "Bash(wirk *)", "--allow", "mcp__wirk__*"]
+                               "dontAsk", "--allow", "Bash(wirk *)", "--allow", "mcp__wirk__*", "--deny", "Edit"]
     assert message not in "".join(started["args"])
 
 
