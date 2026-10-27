@@ -106,7 +106,10 @@ put_skill() {  # the release SKILL.md in folder $1, replacing a link an earlier 
 RULE='WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow the method card at the top of its answer.'
 put_rules() {  # WIRK's own line in Grok's global rules: the whole file, never through a link; a failure is one note
   if [ "$DRY" -eq 1 ]; then printf '    would write: %s\n' "$1"; return 0; fi
-  if ! { mkdir -p "$(dirname "$1")" && rm -f "$1" && printf '%s\n' "$RULE" > "$1"; } 2> "$TMP/log"; then note "Grok: could not write $1 ($(sed -n '$p' "$TMP/log"))"; failed=1; fi
+  if ! { mkdir -p "$(dirname "$1")" && rm -f "$1" && printf '%s\n' "$RULE" > "$1"; } 2> "$TMP/log"; then
+    note "Grok: could not write $1 ($(sed -n '$p' "$TMP/log"))"
+    failed=1
+  fi
 }
 
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
