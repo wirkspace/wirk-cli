@@ -17,6 +17,13 @@ def sent(run, argv, answer=None):
     return body
 
 
+def sent_query(run, argv):
+    code, out, err, fake = run(argv)
+    assert code == 0, (out, err)
+    body = fake.bodies()[-1]
+    return {key: value for key, value in body.items() if key not in ("request_id", "format")}
+
+
 def test_progress_note_linked_to_two_items(run):
     assert sent(run, ["write", "new", "R1.5 progress", "--body", "Did things.", "--link", "related_to:5c1e7a90",
                       "--link", "related_to:8d24f6b1"]) == {"operations": [
@@ -91,6 +98,31 @@ def test_edit_fields_owner_title_body_and_links(run):
             {"op": "link.create", "data": {"type": "requires", "from": "5c1e7a90", "to": "6a0d2e83"}}]}
 
 
+def test_an_explicit_kind_record_sends_owner_as_the_records_owner(run):
+    assert sent(run, ["write", "new", "Ada Lovelace", "kind=record", "owner=me"])["operations"][0]["data"] == {
+        "title": "Ada Lovelace", "owner": "me"}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner=ada", "status=open"]) == {
+        "expect": {"5c1e7a90": 3}, "operations": [
+            {"op": "item.edit", "id": "5c1e7a90", "patch": {"fields": {"status": "open"}, "owner": "ada"}}]}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner="])["operations"][0]["patch"] == {"owner": None}
+
+
+def test_kind_record_with_criteria_and_no_owner_still_makes_work(run):
+    assert sent(run, ["write", "new", "T", "kind=record", "--criterion", "c"])["operations"][0]["data"] == {
+        "title": "T", "work": {"criteria": [{"text": "c"}]}}
+
+
+def test_without_kind_record_owner_still_makes_work(run):
+    assert sent(run, ["write", "new", "T", "owner=me"])["operations"][0]["data"] == {"title": "T", "work": {"owner_id": "me"}}
+    assert sent(run, ["write", "new", "T", "kind=work", "owner=me"])["operations"][0]["data"] == {
+        "title": "T", "work": {"owner_id": "me"}}
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "owner=me"])["operations"][0]["patch"] == {"work": {"owner_id": "me"}}
+
+
+def test_query_passes_owner_with_kind_record_through(run):
+    assert sent_query(run, ["query", "kind=record", "owner=me"]) == {"fields": {"kind": "record", "owner": "me"}}
+
+
 def test_propose_and_link(run):
     assert sent(run, ["write", "edit", "6a0d2e83@2", "status=cancelled", "--propose", "--reason", "Idle 30 days"]) == {
         "expect": {"6a0d2e83": 2}, "mode": "propose", "reason": "Idle 30 days",
@@ -116,6 +148,9 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires or works_at"),
     (["write", "edit", "5c1e7a90@1", "kind=work"], "--request"),
     (["write", "edit", "5c1e7a90@1", "--criterion", "x"], "--request"),
+    (["write", "edit", "5c1e7a90@1", "kind=record"], "--request"),
+    (["write", "edit", "5c1e7a90@1", "kind=record", "owner=ada", "--criterion", "x"], "--request"),
+    (["write", "new", "T", "kind=record", "owner=ada", "--criterion", "x"], "criteria make work"),
     (["write", "new", "T", "--body", "a", "--body-file", "b"], "--body"),
     (["write", "new", "T", "--evidence", "x", "--reason", "y"], "--evidence"),
     (["write", "new", "T", "--reason", "REASON"], "your own words"),
