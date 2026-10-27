@@ -222,3 +222,9 @@ def test_a_malformed_grok_session_falls_back_to_the_machine(run, monkeypatch):
     monkeypatch.setenv("GROK_SESSION_ID", "not a session")
     code, out, err, fake = run(["status"], service())
     assert code == 0 and out.strip() == f"You: {TOKEN}"
+
+
+@pytest.mark.parametrize("var", ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"])
+def test_only_the_uuid_shape_names_a_chat(monkeypatch, var):
+    monkeypatch.setenv(var, "-" * 32 + "dead")  # 36 hex and dashes, but not 8-4-4-4-12: it could pass for an option
+    assert client.actor_binding() is None and client.actor_binding("-" * 32 + "dead") is None
