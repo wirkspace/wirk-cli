@@ -272,6 +272,32 @@ def test_a_command_without_a_wirkspace_keeps_the_recorded_one(run, home, monkeyp
     assert record["wirkspace"] == space and abs(record["last"] - time.time()) < 5
 
 
+def test_a_chat_enrolled_before_wake_records_gets_one_on_its_next_command(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    signed_in(own)  # a token from before 0.4.30, and no record beside it
+    space = wirkspace_id()
+    assert run(["query", "status=open", f"workspace_id={space}"])[0] == 0
+    record = record_of(the_record(home, own))
+    assert (record["pid"], record["id"], record["cwd"], record["wirkspace"]) == (900, own, str(work), space)
+
+
+def test_a_chat_outside_a_harness_gets_no_record_on_its_next_command(run, home, monkeypatch, fakes):
+    own = new_id()
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", own)
+    fakes.ps((os.getppid(), 700, STARTED, "/bin/zsh"), (700, 1, STARTED, "/usr/bin/sshd"), (1, 0, STARTED, "/sbin/launchd"))
+    signed_in(own)
+    assert run(["query", "status=open"])[0] == 0
+    assert not the_record(home, own).exists()
+
+
+def test_an_existing_record_is_refreshed_not_rewritten(run, home, monkeypatch, fakes, tmp_path):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    path = chat(home, session=own, pid=900, cwd=tmp_path / "recorded", last=1000)
+    assert run(["query", "status=open"])[0] == 0
+    record = record_of(path)
+    assert record["cwd"] == str(tmp_path / "recorded") and abs(record["last"] - time.time()) < 5
+
+
 def test_a_failed_command_leaves_the_record(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     path = chat(home, session=own, pid=900, last=1000)

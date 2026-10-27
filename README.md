@@ -103,7 +103,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- A chat enrolled before 0.4.30 gets its resume record on its next successful command, so the listener can wake it.
 
 ### 0.4.30
 
