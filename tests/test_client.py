@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from conftest import PERSON_TOKEN, TOKEN, URL, envelope, refusal, write_token
-from wirk_cli import cli
+from wirk_cli import __version__, cli
 
 
 def test_text_by_default_and_the_envelope_with_json(run):
@@ -291,3 +291,9 @@ def test_messages_for_you_print_last_and_reach_text_unchanged(run):
                                lambda request: envelope("1a2b3c4d · message\n\nMessages for you: 1 pending"))
     assert out.endswith("Messages for you: 1 pending\n")
     assert fake.bodies()[0]["fields"] == {"kind": "message", "participant": ["api", "web"]}
+
+
+def test_every_request_names_this_wirk_and_its_version(run):
+    for argv in (["status"], ["query", "5c1e7a90"], ["write", "new", "T"]):
+        code, out, err, fake = run(argv, lambda request: envelope("ok"))
+        assert fake.requests and {request.headers["user-agent"] for request in fake.requests} == {f"wirk/{__version__}"}
