@@ -282,6 +282,18 @@ def test_grok_replaces_an_entry_that_runs_another_command(tmp_path):
 
 
 @needs_uv
+@pytest.mark.parametrize("was", ["current", "https://old.example/mcp"])
+def test_grok_leaves_a_server_the_person_turned_off_off(tmp_path, was):
+    base = release(tmp_path)
+    command = f"{tmp_path}/bin/wirk-mcp" if was == "current" else was
+    (tmp_path / "grok-wirk").write_text(f"{command} (disabled)")
+    result = install(tmp_path, base, "--url", URL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "grok mcp add" not in (tmp_path / "calls").read_text()  # an add would turn it back on
+    assert "Grok: the wirk MCP server is turned off; left off" in result.stdout
+
+
+@needs_uv
 def test_grok_leaves_a_current_entry_alone(tmp_path):
     base = release(tmp_path)
     (tmp_path / "grok-wirk").write_text(f"{tmp_path}/bin/wirk-mcp")
