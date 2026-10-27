@@ -290,15 +290,12 @@ def test_grok_leaves_a_current_entry_alone(tmp_path):
 
 
 @needs_uv
-def test_a_grok_add_that_fails_is_one_note_and_the_install_goes_on(tmp_path):
+def test_a_grok_add_that_fails_stops_the_install_like_any_hosts(tmp_path):
     base = release(tmp_path)
     (tmp_path / "grok-refuses").write_text("")
     result = install(tmp_path, base, "--url", URL)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.count("Grok: could not add the WIRK MCP server") == 1
-    assert f"; run: grok mcp add wirk -- {tmp_path}/bin/wirk-mcp" in result.stdout
-    assert "Grok: the WIRK MCP server and skill" not in result.stdout
-    assert f"wirk {LATEST} login --url {URL}" in result.stdout
+    assert result.returncode != 0
+    assert f"This step failed: grok mcp add wirk -- {tmp_path}/bin/wirk-mcp" in result.stdout + result.stderr
 
 
 @needs_uv
