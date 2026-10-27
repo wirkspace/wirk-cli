@@ -483,7 +483,7 @@ def test_reservation_help_keeps_status_examples_and_a_compact_block(capsys, argv
     else:
         status = "  write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read"
         assert '{"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}' in text
-    completed = "  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'"
+    completed = "  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'"
     assert status + "\n" + completed + "\n" + RESERVATION_EXAMPLES + "\n" + RESERVATION_GUIDANCE + "\n" in text
 
 

@@ -37,7 +37,7 @@ wirk status 'fix the webhook retries'          who you are, your wirk, what need
 wirk query about='webhook retries'             what matters for these words
 wirk query status=open kind=work owner=me      a list with filters
 wirk write new 'What I did' --body-file note.md --link related_to:5c1e7a90
-wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+wirk write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 

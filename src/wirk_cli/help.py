@@ -72,7 +72,7 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
-  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
@@ -107,7 +107,7 @@ expect: each edited, archived or linked-from item's rN; contributes_to also need
 Change one item at the revision you read: N is the rN on its card, its fetch or your last receipt.
 
   write edit 5c1e7a90@3 status=in_progress owner=me     claim it
-  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
