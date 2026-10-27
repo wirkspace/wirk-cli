@@ -85,11 +85,11 @@ KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an 
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its
 initiatives. A change to it applies directly when you may make it; for requires_review, propose with --propose --reason.
---body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record
-is the default; data.work makes work. --link TYPE is related_to, contributes_to, requires or works_at (a person record
-to a company record). --evidence: passing tests, a link, file path or file attached with --upload. Results list IDs. A
-stored refusal keeps its request_id; correct with a new ID. After an uncertain result, run the command its hint prints;
-any retry uses the identical body and request_id.
+--body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record is
+the default; data.work makes work. owner=X with kind=record makes X the record's owner. --link TYPE is related_to,
+contributes_to, requires or works_at (a person record to a company record). --evidence: passing tests, a link, file path
+or file attached with --upload. Results list IDs. A stored refusal keeps its request_id; correct with a new ID. After an
+uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
@@ -118,7 +118,7 @@ RUN is an ID you make once per run; reuse the identical request_id and body afte
 
 KEY=VALUE: owner (me or an ID) and the wirkspace's fields (status=open; a comma list for several).
 The owner is owner=me here, work.owner_id in a request body and owner at the top of what query returns.
-An owner turns a record into work and the receipt says so (record → work); a status alone on a record is refused.
+owner=X makes a record work (record → work); with kind=record, X is the record's owner. A status alone is refused.
 --body replaces the whole body; add progress as a message instead: wirk write message --on ID --body TEXT.
 --evidence is a completion's note: the tests that pass, a link, a file path, or a file attached with --upload.
 --propose needs --reason. A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.
