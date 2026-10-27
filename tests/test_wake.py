@@ -254,7 +254,7 @@ def test_a_grok_chat_started_from_a_claude_chat_records_its_launcher(run, home, 
 
 
 def test_a_grok_lane_inside_a_claude_chat_gets_no_record(run, home, monkeypatch, fakes, tmp_path):
-    """Guard: the nearest harness is the Claude chat's process, whose session is not the lane's, so no record."""
+    """Guard: the nearest harness is the Claude Code chat's process, whose session is not the lane's, so no record."""
     root, work = in_a_chat(monkeypatch, fakes, tmp_path)
     signed_in(root)
     lane = new_id()
