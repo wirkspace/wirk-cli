@@ -151,6 +151,8 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
         raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
     if (level is None) != (kind != "context") or level not in (None, "organization", "initiative"):
         raise UsageError("kind=context needs level=organization or level=initiative, and level needs kind=context")
+    if record and options.get("--criterion"):
+        raise UsageError("kind=record owner= sets a record's owner and criteria make work: give one or the other")
     fields, owner = fields_and_owner(pairs, clearing=False, record=record)
     work = owner.pop("work", None)
     data = {"title": title, **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {}),
@@ -173,7 +175,7 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
 def write_edit(target: str, words: list[str], options: dict, body_text: str | None) -> dict:
     item, read = revision(target, "write edit")
     positionals, pairs = split(words)
-    record = pairs.get("kind") == "record"
+    record = pairs.get("kind") == "record" and "owner" in pairs  # kind=record only says where the owner goes
     if record:
         del pairs["kind"]
     if positionals or "kind" in pairs or "level" in pairs or "--criterion" in options:

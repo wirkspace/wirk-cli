@@ -332,7 +332,7 @@ def test_write_help_spells_the_owner_three_ways_in_one_sentence(capsys):
 def test_write_help_says_kind_record_sends_owner_to_the_record(capsys):
     for words in (("write",), ("write", "edit")):
         text = " ".join(help_of(capsys, *words).split())
-        assert "kind=record owner=" in text, words
+        assert "with kind=record" in text, words
 
 
 def test_write_edit_help_is_the_edit_section_alone(capsys):

@@ -101,9 +101,9 @@ def test_edit_fields_owner_title_body_and_links(run):
 def test_an_explicit_kind_record_sends_owner_as_the_records_owner(run):
     assert sent(run, ["write", "new", "Ada Lovelace", "kind=record", "owner=me"])["operations"][0]["data"] == {
         "title": "Ada Lovelace", "owner": "me"}
-    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner=samlarson-agents", "status=open"]) == {
+    assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner=ada", "status=open"]) == {
         "expect": {"5c1e7a90": 3}, "operations": [
-            {"op": "item.edit", "id": "5c1e7a90", "patch": {"fields": {"status": "open"}, "owner": "samlarson-agents"}}]}
+            {"op": "item.edit", "id": "5c1e7a90", "patch": {"fields": {"status": "open"}, "owner": "ada"}}]}
     assert sent(run, ["write", "edit", "5c1e7a90@3", "kind=record", "owner="])["operations"][0]["patch"] == {"owner": None}
 
 
@@ -143,6 +143,9 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires or works_at"),
     (["write", "edit", "5c1e7a90@1", "kind=work"], "--request"),
     (["write", "edit", "5c1e7a90@1", "--criterion", "x"], "--request"),
+    (["write", "edit", "5c1e7a90@1", "kind=record"], "--request"),
+    (["write", "edit", "5c1e7a90@1", "kind=record", "owner=ada", "--criterion", "x"], "--request"),
+    (["write", "new", "T", "kind=record", "owner=ada", "--criterion", "x"], "criteria make work"),
     (["write", "new", "T", "--body", "a", "--body-file", "b"], "--body"),
     (["write", "new", "T", "--evidence", "x", "--reason", "y"], "--evidence"),
     (["write", "new", "T", "--reason", "REASON"], "your own words"),
