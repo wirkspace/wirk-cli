@@ -16,7 +16,7 @@ ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
 LATEST = "0.4.30"
 GROK_RULE_FILE = ("WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool) and follow "
-                  "the method card at the top of its answer.\n").encode()
+                  "what its answer says.\n").encode()
 
 
 def test_it_is_posix_sh_and_never_uses_sudo():
