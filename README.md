@@ -223,6 +223,12 @@ There is no telemetry. People keep a separate token of their own for their own d
 - `wirk write --help` links without `@N`, as the docs do: a link's target needs `@N` only when it is the parent work of a `contributes_to` link.
 - An item that is not work, a context or a folder is a record (decision 89): `wirk write --help` says `kind=work|record|context`, and `wirk query kind=record` lists them.
 
+### 0.4.1
+
+- Project catch-ups start from WIRK and linked records, with direct MCP preferred when available. Read-only catch-ups do not claim or change work.
+- Help reflects the current service: people and personal agents whose role may review can decide proposals. Background agents only propose. Meaning ranking is on Pro; other plans rank by words.
+- The installer replaces an earlier `wirk` MCP server and WIRK skill with the release's, without writing through a skill folder that is a link.
+
 ### 0.4.0
 
 - `wirk import github OWNER` brings a GitHub owner's issues into a wirkspace. Each issue becomes work, with its history as text, its comments in a linked record and its raw issue as a file, and running it again brings only what changed. Start with `--dry-run`; a person who administers the account applies the setup it prints. GitHub is only read, through your `gh` login. See `wirk import --help`.
