@@ -282,6 +282,9 @@ def test_choosing_a_wirkspace_is_where_the_listener_waits(run, home, monkeypatch
         {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces", "choices": choices}])
     assert run(["wirkspace", "Sales"], lambda request: several)[0] == 0  # asked without one, as it always is
     assert record_of(path)["wirkspace"] == chosen
+    write_token(path, json.dumps({**record_of(path), "wirkspace": other}))  # a later command named the other one
+    assert run(["wirkspace"], lambda request: several)[0] == 0  # shows the choice, names none
+    assert record_of(path)["wirkspace"] == other  # only choosing moves the wait
 
 
 def test_a_failed_command_leaves_the_record(run, home, monkeypatch, fakes, tmp_path):

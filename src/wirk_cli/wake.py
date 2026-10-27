@@ -147,7 +147,7 @@ def after(code: int) -> None:
     used, Service.used, ran = Service.used, None, None
     try:
         if code == 0 and (binding := actor_binding()) and (url := saved_url(config_dir())):
-            ran = refresh(wake_path(url, binding), used or chosen(url, binding))  # wirk wirkspace names none
+            ran = refresh(wake_path(url, binding), used)
     except Exception:
         pass
     try:
@@ -161,8 +161,8 @@ def after(code: int) -> None:
 
 
 def refresh(path: Path, used: str | None) -> str:
-    """The time of the command, the wirkspace it named and, when it runs in another process of the chat, that one;
-    gives the chat's harness."""
+    """The time of the command, the wirkspace it named or chose (wirk wirkspace NAME) and, when it runs in another
+    process of the chat, that one; gives the chat's harness."""
     old = json.loads(read_private(path))
     new = {**old, "last": int(time.time()), "wirkspace": used or old["wirkspace"]}
     found = harness()
