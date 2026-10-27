@@ -51,7 +51,7 @@ class Row(NamedTuple):
 
 
 # Ported from kata's table: only the harnesses WIRK installs into. Grok runs Claude Code's hooks file as its own, so
-# Claude Code's row covers it; its hooks cannot add context, so it gets the card from the MCP instructions.
+# Claude Code's row covers it; its hooks cannot add context, so it gets the card from the rules file install.sh writes.
 ROWS = {
     "claude": Row("CLAUDE_CONFIG_DIR", ".claude", "settings.json", (".claude",), ""),
     "codex": Row("CODEX_HOME", ".codex", "hooks.json", (".agents",), "trust them in Codex with /hooks"),
