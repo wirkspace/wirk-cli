@@ -105,6 +105,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
 
+### 0.4.31
+
+- A chat enrolled before 0.4.30 gets its resume record on its next successful command, so the listener can wake it.
+
 ### 0.4.30
 
 - `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a stopped chat).
