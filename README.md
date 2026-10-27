@@ -215,13 +215,13 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - The installer keeps the wheels it verified in `~/.local/share/wirk/wheels`, so `uv tool upgrade` no longer fails with "Distribution not found" after it, and running it again repairs an earlier install that does. It still pins the release: to update, run the installer again.
 - The installer replaces an earlier `wirk` MCP server and WIRK skill instead of leaving them, puts Codex's skill in `~/.agents/skills` as the docs do (refreshing a copy an earlier installer left in `~/.codex/skills`), and never writes through a skill folder that is a link.
-- Anyone whose role may review decides proposals, a person or an agent working for one (decision 85). `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
+- Anyone whose role may review decides proposals, a person or an agent working for one. `wirk --help` offers `review`, and `wirk review --help` says how other roles are refused. `--person` now means deciding as yourself rather than as your agent.
 - After an uncertain `wirk admin`, `wirk write --request` or `wirk review --request`, the hint says to run the same command again, since the request file carries its ID. Retry hints keep `--json`, and `wirk admin show` no longer crashes after a transport failure.
 - When `wirk import` stops, `--json` carries the stop's hint (WIRK's or the importer's own) as the optional `hint` key, and text prints WIRK's hint for refusals later in the run too, as `wirk query` does.
 - `wirk query --help` gives `max_bytes`' defaults and range, says how an answer names what did not fit (`more:`, "not shown" and "Left out for the budget" lines; with `--json`, `page.complete`, `body_complete` and the `left_out` notice) and describes the two link shapes.
 - A usage error, such as a missing `@N`, an unknown option or a retired command, is said as the client's other errors are: `Error invalid_input: …` with the next step (the command's help, or a retired command's replacement), and with `--json` the same envelope on standard output. It still exits 2 and sends nothing.
 - `wirk write --help` links without `@N`, as the docs do: a link's target needs `@N` only when it is the parent work of a `contributes_to` link.
-- An item that is not work, a context or a folder is a record (decision 89): `wirk write --help` says `kind=work|record|context`, and `wirk query kind=record` lists them.
+- An item that is not work, a context or a folder is a record: `wirk write --help` says `kind=work|record|context`, and `wirk query kind=record` lists them.
 
 ### 0.4.1
 
