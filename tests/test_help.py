@@ -214,7 +214,7 @@ def test_version_prints_the_version(capsys):
 
 def test_one_version_everywhere():
     project = __import__("tomllib").loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert project == __version__ == "0.4.32"
+    assert project == __version__ == "0.4.33"
 
 
 def test_main_help_offers_what_is_live_and_says_who_decides(capsys):
@@ -516,7 +516,7 @@ RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace"""
 
-RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it."""
 
 RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
@@ -554,7 +554,7 @@ def test_reservation_help_keeps_status_examples_and_a_compact_block(capsys, argv
     else:
         status = "  write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read"
         assert '{"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}' in text
-    completed = "  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'"
+    completed = "  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'"
     assert status + "\n" + completed + "\n" + RESERVATION_EXAMPLES + "\n" + RESERVATION_GUIDANCE + "\n" in text
 
 

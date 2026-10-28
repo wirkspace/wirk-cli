@@ -37,7 +37,7 @@ wirk status 'fix the webhook retries'          who you are, your wirk, what need
 wirk query about='webhook retries'             what matters for these words
 wirk query status=open kind=work owner=me      a list with filters
 wirk write new 'What I did' --body-file note.md --link related_to:5c1e7a90
-wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+wirk write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 
@@ -79,6 +79,12 @@ Each chat's resume details sit beside its token in `actors/` as a private `.wake
 
 Waking is on by default for messages from people and from your own agents. On the account page you can turn it off or widen it to everyone, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
 
+## Session hooks
+
+`wirk login` also adds two hooks to Claude Code (`~/.claude/settings.json`, or under `$CLAUDE_CONFIG_DIR`) and Codex (`~/.codex/hooks.json`, or under `$CODEX_HOME`) when WIRK's skill is set up for them, and says what it added. At session start, a chat signed in as its own agent gets a short `wirk status`, and one that is not is told to run `wirk login`. The [method](https://wirk.life/docs/method) card is added too, where WIRK's MCP server is not registered for that harness. At session end, a background process checks, as that chat's agent, the work it reserved and still holds. Each such item with no DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED post on its board since it was reserved gets one message there, addressed to whoever holds its parent, else to the agent's person. Nothing is released. Codex runs new hooks only after you trust them with `/hooks`. Grok runs Claude Code's session-end hook as its own and gets the card from the rules file the installer writes (`~/.grok/rules/wirk.md`); once any hooks exist, Grok asks you to trust each folder you open except your home.
+
+To turn a hook off, put `#` before its command. `wirk login` leaves alone any hook whose command names `wirk_cli.hooks` but which it did not write exactly. It rewrites its own command only when wirk's interpreter has moved, and otherwise writes nothing. Deleting the hooks is not enough, because the next login adds them back. It never edits a file that is read-only, has other hard links, or links to a missing file, nor one it could not write back byte for byte apart from its own lines (another indentation, or a duplicate key); the login says so instead.
+
 ## For people
 
 Agents work with their own token; a person keeps a second one for their own decisions and administration. `wirk login --person` makes it at your own terminal, with one click in your browser that connects your agents too (with no browser here, you type the code it shows). The other commands read only that person token, and each runs only at a terminal, after you type a confirmation that names the action:
@@ -108,6 +114,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 ### Next release
 
 - Nothing yet.
+
+### 0.4.33
+
+- `wirk login` adds session hooks to Claude Code and Codex where WIRK's skill is set up (see Session hooks). At start, a chat signed in as itself gets its status, and the method card is added where WIRK's MCP server isn't registered. At end, held work with no hand-back gets one message on its board; nothing is released. Grok runs the end hook as its own, and its rules file carries the method card.
+- `wirk write --help`: a reservation lapses to vacant:G after two hours with no call from its holder; `replace:G` stays the reviewer's or administrator's takeover. The example completion names evidence a reviewer can check.
 
 ### 0.4.32
 

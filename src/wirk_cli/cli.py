@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlencode
 
-from . import __version__, context, grammar, update, wake
+from . import __version__, context, grammar, hooks, update, wake
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
     chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
     write_private
@@ -341,6 +341,7 @@ def login(words, options, transport):
     code = sign_in(words, options, transport)
     if code == 0 and not options.get("--person"):
         wake.install()  # the listener for this configuration directory; it says one line when it cannot start
+        hooks.install()  # session hooks for each harness set up for WIRK here; one line when it adds any
     return code
 
 
