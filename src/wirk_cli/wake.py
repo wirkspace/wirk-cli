@@ -452,7 +452,7 @@ def install() -> None:
         directory = str(config_dir().resolve())
         search = os.pathsep.join(dict.fromkeys(e for e in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(e)))
         environment = {"WIRK_CONFIG_DIR": directory, "PATH": search}
-        if os.environ.get("WIRK_NO_UPDATE"):  # an install that turned updates off keeps its listener from updating it
+        if os.environ.get("WIRK_NO_UPDATE"):  # the test suite's switch reaches the listener its login installs
             environment["WIRK_NO_UPDATE"] = os.environ["WIRK_NO_UPDATE"]
         if SYSTEM == "darwin":
             import plistlib

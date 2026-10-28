@@ -113,7 +113,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- An idle machine keeps itself current: the message listener starts the hourly update check, so no command has to run, and `wirk login` starts it too. A listener whose login had `WIRK_NO_UPDATE` set keeps it.
+- An idle machine keeps itself current: the message listener starts the hourly update check, so no command has to run, and `wirk login` starts it too.
 
 ### 0.4.33
 
