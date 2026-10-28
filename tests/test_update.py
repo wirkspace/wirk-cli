@@ -716,9 +716,16 @@ def test_the_listener_reaps_the_check_it_started(on, monkeypatch):
     wake = listening(on, monkeypatch, [__version__] * 3)
     monkeypatch.setattr(update, "CHILD", [sys.executable, "-c", "pass"])
     spawned, real = [], update.after
-    monkeypatch.setattr(update, "after", lambda show=True: spawned.append(real(show)) or spawned[-1])
+
+    def after(show=True):
+        if child := real(show):
+            os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # it has exited; reaping is left to the listener
+            spawned.append(child)
+        return child
+    monkeypatch.setattr(update, "after", after)
     assert wake.main() == 75
-    assert spawned[0] is not None and spawned[0].returncode is not None and spawned[0] not in wake.RUNS
+    [child] = spawned
+    assert child.returncode is not None and child not in wake.RUNS
 
 
 def test_wirk_no_update_keeps_the_listener_from_checking(on, started, monkeypatch):
