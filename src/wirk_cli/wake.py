@@ -292,12 +292,13 @@ def wake(path: Path, found: dict, message: str) -> None:
         data["wakes"].append(now)
         started = None if door else resume(path, found)
     if door and not deliver(found):
-        with state() as data:  # nothing reached the chat: the next round may try again
-            data["wakes"].remove(now)
-            data["delivered"].pop(chat, None)
+        with state() as data:  # nothing reached the chat: the next round may try, unless a newer one claimed it
+            if data["delivered"].get(chat) == message:
+                del data["delivered"][chat]
+            data["wakes"] = [t for t in data["wakes"] if t != now]
     if started and refused(name, *started):
         with state() as data:
-            data["wakes"].remove(now)  # its message counts as woken; the cap does not count it
+            data["wakes"] = [t for t in data["wakes"] if t != now]  # its message counts as woken; the cap does not
             failure = data["failed"].setdefault(name, {"count": 0, "told": 0})
             failure.update(count=failure["count"] + 1, at=now)
 

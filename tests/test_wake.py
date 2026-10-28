@@ -970,6 +970,24 @@ def test_an_open_chat_counts_against_the_hourly_cap(home, fakes, inbox):
     assert inbox.lines() == [] and fakes.runs() == []
 
 
+def test_an_undo_never_removes_a_newer_claim(home, fakes, inbox):
+    path, newer = open_chat(home, fakes, inbox), new_id()
+    chat_name = path.name.removesuffix(".wake")
+    fakes.agents()  # not listed: this attempt fails, after another listener claimed a newer message meanwhile
+    newer_state = json.dumps({"wakes": [], "woken": {}, "delivered": {chat_name: newer}, "failed": {}})
+    fakes.write("agents-meanwhile", f"printf '%s' '{newer_state}' > '{wake.state_dir() / 'wake.json'}'\n")
+    ask(path, waiting(new_id()))
+    assert state()["delivered"] == {chat_name: newer}
+
+
+def test_an_undo_after_the_state_file_is_lost_keeps_no_claim(home, fakes, inbox):
+    path = open_chat(home, fakes, inbox)
+    fakes.agents()
+    fakes.write("agents-meanwhile", f"rm -f '{wake.state_dir() / 'wake.json'}'\n")
+    ask(path, waiting(new_id()))
+    assert state().get("delivered", {}) == {}
+
+
 def test_the_lookup_sees_the_chats_session_store_never_the_listeners_own(home, fakes, inbox, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/listener/own")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", new_id())
