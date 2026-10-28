@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "wirk"
-version = "0.4.31"
+version = "0.4.32"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

@@ -107,6 +107,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.32
+
 - The listener wakes an open Claude Code chat too, through the chat's own cross-session inbox, instead of leaving it until it stops (see Waking a chat).
 
 ### 0.4.31
