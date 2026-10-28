@@ -3,18 +3,21 @@
 import fcntl
 import json
 import os
+import re
 import shutil
 import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import httpx
 import pytest
 
-from conftest import TOKEN, URL, envelope, refusal, write_token
+from conftest import TOKEN, URL, envelope, exited, process_state, refusal, write_token
 from wirk_cli import __version__, client, wake
 
 STARTED = "Sat Oct 24 10:00:00 2026"
@@ -155,8 +158,7 @@ def test_enrol_writes_the_resume_record_beside_the_token(run, home, monkeypatch,
     assert code == 0 and path.exists() and client.actor_path(URL, own).exists()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     record = record_of(path)
-    assert set(record) == {"harness", "id", "env", "cwd", "pid", "started", "program", "url", "wirkspace", "last", "inbox"}
-    assert record["inbox"] is None  # this chat's harness exported no inbox
+    assert set(record) == {"harness", "id", "env", "cwd", "pid", "started", "program", "url", "wirkspace", "last"}
     assert (record["harness"], record["id"], record["cwd"], record["pid"], record["started"], record["program"],
             record["url"], record["env"]) == ("claude", own, str(work), 900, STARTED, str(fakes.bin / "claude"), URL, {})
     assert abs(record["last"] - time.time()) < 5
@@ -280,20 +282,14 @@ def test_a_planted_variable_never_reaches_the_record(run, home, monkeypatch, fak
     assert "xoxb" not in path.read_text() and "example.com" not in path.read_text()
 
 
-def test_enrolment_keeps_the_chats_inbox_and_never_its_token(run, home, monkeypatch, fakes, tmp_path):
+def test_enrolment_records_nothing_of_the_chats_messaging_variables(run, home, monkeypatch, fakes, tmp_path):
+    """The listener finds a chat's inbox from its process; what the chat's environment says is never kept."""
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/900.sock")
     monkeypatch.setenv("CLAUDE_CODE_MESSAGING_TOKEN", "secret-messaging-token")
     assert run(["login"], enrolling)[0] == 0
-    path = the_record(home, own)
-    assert record_of(path)["inbox"] == "/tmp/cc-socks/900.sock" and "secret-messaging-token" not in path.read_text()
-
-
-def test_a_thread_record_has_no_inbox(run, home, monkeypatch, fakes, tmp_path):
-    own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness="codex")
-    monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/1.sock")  # a Claude Code chat above codex
-    assert run(["login"], enrolling)[0] == 0
-    assert record_of(the_record(home, own))["inbox"] is None
+    text = the_record(home, own).read_text()
+    assert "inbox" not in record_of(the_record(home, own)) and "cc-socks" not in text and "secret-messaging" not in text
 
 
 # ------------------------------------------------------------------ the refresh after each command
@@ -362,20 +358,15 @@ def test_an_existing_record_is_refreshed_not_rewritten(run, home, monkeypatch, f
     assert record["cwd"] == str(tmp_path / "recorded") and abs(record["last"] - time.time()) < 5
 
 
-def test_a_command_in_the_recorded_process_adds_its_inbox_to_an_older_record(run, home, monkeypatch, fakes, tmp_path):
+def test_a_command_in_the_recorded_process_changes_only_the_time(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
-    path = chat(home, session=own, pid=900, cwd=work, last=int(time.time()) - 3600)  # written before inboxes
+    path = chat(home, session=own, pid=900, cwd=work, last=int(time.time()) - 3600)
     monkeypatch.setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/cc-socks/900.sock")
+    before = record_of(path)
     assert run(["query", "status=open"])[0] == 0
-    assert record_of(path)["inbox"] == "/tmp/cc-socks/900.sock" and not (fakes.root / "lsof-calls").exists()
-
-
-def test_a_new_process_without_an_inbox_clears_the_recorded_one(run, home, monkeypatch, fakes, tmp_path):
-    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
-    path = chat(home, session=own, pid=111, inbox="/tmp/cc-socks/111.sock")
-    assert run(["query", "status=open"])[0] == 0
-    record = record_of(path)
-    assert (record["pid"], record["inbox"]) == (900, None)
+    after = record_of(path)
+    assert {**after, "last": 0} == {**before, "last": 0} and after["last"] > before["last"]
+    assert not (fakes.root / "lsof-calls").exists()
 
 
 @pytest.mark.parametrize("before", ["none", "another"])
@@ -480,7 +471,7 @@ def test_a_record_whose_session_is_not_a_uuid_resumes_nothing(home, fakes, harne
     path = chat(home, harness=harness, program=str(fakes.bin / harness))
     write_token(path, json.dumps({**record_of(path), "id": "-" * 32 + "dead"}))  # would reach the harness as an option
     ask(path, waiting(new_id()))
-    assert fakes.runs() == []
+    assert fakes.runs() == [] and outcomes(path) == ["could not resume: the record's session is not a UUID"]
 
 
 def test_a_listener_started_from_a_chat_never_passes_that_chats_ids_along(home, fakes, monkeypatch):
@@ -654,6 +645,8 @@ def test_a_refused_chat_is_dropped(home, fakes, code):
             write_token(path, json.dumps({**record, "last": record["last"] + 1}))
     requests, stop = listen(path, lambda r: refusal(code, "refused", status=401), 5, between=touch)
     assert len(requests) == 2  # the first round, then once more after the record changed
+    assert outcomes(path) == [f"no wake: the service refused this chat's inbox wait ({code}); asked again after its "
+                              "next command"]
 
 
 def test_one_wait_per_chat_in_its_last_wirkspace_most_recent_eight(home, fakes):
@@ -795,9 +788,9 @@ class Inbox:
     """A listening Unix socket, as a Claude Code session binds one, in a short directory (macOS caps the path near 104
     bytes); keeps what each connection sent. This test process is its listener."""
 
-    def __init__(self):
+    def __init__(self, name=None):
         self.directory = tempfile.mkdtemp(prefix="wk", dir="/tmp")
-        self.path = os.path.join(self.directory, "s.sock")
+        self.path = os.path.join(self.directory, f"{name or os.getpid()}.sock")  # Claude Code names it by its PID
         self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server.bind(self.path)
         self.server.listen(4)
@@ -840,17 +833,20 @@ def inbox():
 
 
 def open_chat(home, fakes, inbox, *, status="idle", **options):
-    """A chat whose recorded process (this test's, the inbox's listener) is alive, listed by Claude Code at that PID."""
-    path = chat(home, pid=os.getpid(), inbox=inbox.path, program=str(fakes.bin / "claude"), **options)
+    """A chat whose recorded process (this test's, the inbox's listener) is alive, listed by Claude Code at that PID,
+    with the inbox among that process's sockets; its record names no inbox, as one written before 0.4.32."""
+    path = chat(home, pid=os.getpid(), program=str(fakes.bin / "claude"), **options)
     fakes.ps((os.getpid(), 1, STARTED, str(fakes.bin / "claude")))
+    fakes.sockets(os.getpid(), inbox.path)
     fakes.agents((record_of(path)["id"], os.getpid(), status))
     return path
 
 
 def outcomes(path):
-    """What the listener noted about each attempt, in the chat's .wake.log."""
+    """What the listener noted about each attempt, in the chat's .wake.log, without the message each names."""
     log = path.with_name(path.name + ".log")
-    return [entry.split(" wirk: ", 1)[1] for entry in log.read_text().splitlines()] if log.exists() else []
+    return [re.sub(r" \(message \w+\)$", "", entry.split(" wirk: ", 1)[1])
+            for entry in log.read_text().splitlines()] if log.exists() else []
 
 
 def line(text):
@@ -867,6 +863,7 @@ def test_an_open_chat_gets_one_line_in_its_inbox_and_no_second_process(home, fak
     assert fakes.runs() == [] and record_of(path) == record
     assert state()["delivered"] == {path.name.removesuffix(".wake"): message} and state()["woken"] == {}
     assert len(state()["wakes"]) == 1 and outcomes(path) == ["sent into the open chat's inbox"]
+    assert "inbox" not in record and (fakes.root / "lsof-calls").read_text() == f"lsof -a -p {os.getpid()} -U -Fn\n"
 
 
 def test_the_listener_waits_for_the_inbox_to_close_so_claude_code_can_verify_its_sender(home, fakes, inbox):
@@ -908,25 +905,93 @@ def test_no_line_unless_claude_code_lists_the_session_idle_or_busy_at_its_proces
     assert noted.startswith("not delivered: ") and reason.get(listed, "") in noted
 
 
-def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes, inbox):
-    path = chat(home, pid=4242, inbox=inbox.path, program=str(fakes.bin / "claude"))  # the inbox's listener is not 4242
-    fakes.ps((4242, 1, STARTED, str(fakes.bin / "claude")))
-    fakes.agents((record_of(path)["id"], 4242, "idle"))
-    ask(path, waiting(new_id()))
-    assert inbox.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
-    assert outcomes(path) == [f"not delivered: the inbox's listener is process {os.getpid()}, not 4242"]
+def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes):
+    other = Inbox("4242")  # named for 4242, as lsof says 4242 holds it, but this process listens on it
+    try:
+        path = chat(home, pid=4242, program=str(fakes.bin / "claude"))
+        fakes.ps((4242, 1, STARTED, str(fakes.bin / "claude")))
+        fakes.agents((record_of(path)["id"], 4242, "idle"))
+        fakes.sockets(4242, other.path)
+        ask(path, waiting(new_id()))
+        assert other.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+        assert outcomes(path) == [f"not delivered: the inbox's listener is process {os.getpid()}, not 4242"]
+    finally:
+        other.close()
 
 
-@pytest.mark.parametrize("shape", ["missing", "a regular file"])
-def test_no_line_without_a_listening_socket_at_the_recorded_path(home, fakes, inbox, shape):
-    target = os.path.join(inbox.directory, "elsewhere.sock")
-    if shape == "a regular file":
-        open(target, "w").close()
+@pytest.mark.parametrize("held", ["none", "only other names", "two", "gone", "a regular file"])
+def test_no_line_unless_the_process_holds_exactly_one_inbox_socket(home, fakes, inbox, held):
+    elsewhere = tempfile.mkdtemp(prefix="wk", dir="/tmp")
+    try:
+        mine = os.path.join(elsewhere, f"{os.getpid()}.sock")
+        if held == "a regular file":
+            open(mine, "w").close()
+        path = open_chat(home, fakes, inbox)
+        paths = {"none": [], "only other names": [os.path.join(elsewhere, "ide.sock")], "two": [inbox.path, mine]}
+        fakes.sockets(os.getpid(), *paths.get(held, [mine]))
+        ask(path, waiting(new_id()))
+        assert inbox.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+        [noted] = outcomes(path)
+        expected = {"none": "0 inbox sockets", "only other names": "0 inbox sockets", "two": "2 inbox sockets",
+                    "gone": "FileNotFoundError", "a regular file": "Error"}[held]  # its name differs by system
+        assert noted.startswith("not delivered: ") and expected in noted
+    finally:
+        shutil.rmtree(elsewhere, ignore_errors=True)
+
+
+def test_an_inbox_listed_twice_is_one(home, fakes, inbox):
+    """The listening socket and a connection accepted from it carry the same bound path."""
     path = open_chat(home, fakes, inbox)
-    record = {**record_of(path), "inbox": target}
-    write_token(path, json.dumps(record))
+    fakes.sockets(os.getpid(), inbox.path, inbox.path)
     ask(path, waiting(new_id()))
-    assert inbox.lines() == [] and fakes.runs() == []
+    assert len(inbox.lines()) == 1
+
+
+def test_a_recorded_inbox_is_never_used(home, fakes, inbox):
+    other = Inbox("other")
+    try:
+        path = open_chat(home, fakes, inbox)
+        write_token(path, json.dumps({**record_of(path), "inbox": other.path}))  # as 0.4.32 wrote it, or a stale one
+        ask(path, waiting(new_id()))
+        assert len(inbox.lines()) == 1 and other.lines(0) == []
+    finally:
+        other.close()
+
+
+def test_on_linux_the_inbox_comes_from_the_processs_own_proc_entries(home, fakes, inbox, monkeypatch, tmp_path):
+    pid, proc = os.getpid(), tmp_path / "proc"
+    (proc / str(pid) / "fd").mkdir(parents=True)
+    (proc / str(pid) / "net").mkdir()
+    for fd, target in {"3": "socket:[100]", "4": "socket:[101]", "5": "socket:[102]", "6": "pipe:[7]",
+                       "7": "socket:[103]"}.items():
+        (proc / str(pid) / "fd" / fd).symlink_to(target)
+    real = os.readlink
+
+    def readlink(link):
+        if str(link).endswith("/fd/7"):  # closed between the listing and the look
+            raise FileNotFoundError(link)
+        return real(link)
+    monkeypatch.setattr(wake.os, "readlink", readlink)
+    rows = [("100", "00010000", inbox.path), ("101", "00000000", inbox.path), ("102", "00010000", f"@{pid}.sock"),
+            ("999", "00010000", f"/tmp/not-its/{pid}.sock")]  # 999: in the table, not among its descriptors
+    (proc / str(pid) / "net" / "unix").write_text(
+        "Num       RefCount Protocol Flags    Type St Inode Path\n"
+        + "".join(f"0000000000000000: 00000002 00000000 {flags} 0001 01 {inode} {name}\n" for inode, flags, name in rows))
+    monkeypatch.setattr(wake, "PROC", proc)
+    monkeypatch.setattr(wake, "SYSTEM", "linux")
+    path = open_chat(home, fakes, inbox)
+    assert wake.sockets(pid) == [inbox.path]
+    ask(path, waiting(new_id()))
+    assert len(inbox.lines()) == 1 and not (fakes.root / "lsof-calls").exists()
+
+
+@pytest.mark.skipif(sys.platform not in ("darwin", "linux"), reason="lsof on macOS, /proc on Linux")
+def test_the_real_system_names_this_processs_own_inbox(monkeypatch, inbox):
+    """The real lsof or /proc, asked only about this test's own process."""
+    monkeypatch.setattr(wake, "SYSTEM", sys.platform)
+    monkeypatch.setattr(wake, "LSOF", "/usr/sbin/lsof")
+    monkeypatch.setattr(wake, "PROC", Path("/proc"))
+    assert wake.sockets(os.getpid()) == [inbox.path]
 
 
 def test_the_listener_reads_only_the_record_never_its_own_environment(home, fakes, inbox, monkeypatch):
@@ -954,15 +1019,58 @@ def test_a_slow_lookup_gives_up_in_time_and_never_holds_the_state_lock(home, fak
 
 
 def test_a_chat_running_elsewhere_than_its_record_is_still_left_alone(home, fakes, inbox):
-    path = chat(home, pid=4242, inbox=inbox.path)  # 4242 has ended; another process carries the chat's ID
+    path = chat(home, pid=4242)  # 4242 has ended; another process carries the chat's ID
     fakes.args((5151, f"/usr/local/bin/claude --resume {record_of(path)['id']}"))
     ask(path, waiting(new_id()))
     assert inbox.lines() == [] and fakes.runs() == []
+    assert outcomes(path) == ["no wake: the chat runs in a process its record does not name; woken once that stops"]
 
 
-def test_a_stopped_chat_with_an_inbox_is_resumed(home, fakes, inbox):
+def test_a_stopped_chat_is_resumed_whatever_inbox_its_record_names(home, fakes, inbox):
     ask(chat(home, pid=4242, inbox=inbox.path), waiting(new_id()))
     assert len(fakes.runs()) == 1 and inbox.lines() == []
+
+
+def test_an_open_chat_of_another_harness_is_left_alone_and_says_so(home, fakes):
+    path = chat(home, harness="codex", pid=4242, program=str(fakes.bin / "codex"))
+    fakes.ps((4242, 1, STARTED, str(fakes.bin / "codex")))
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == [] and outcomes(path) == ["no wake: the chat is open and codex has no way in while it "
+                                                     "runs; woken once it stops"]
+
+
+def test_a_message_already_woken_for_adds_no_line(home, fakes, inbox):
+    """A message nobody marks seen is asked about every minute: what its wake left in the log already says it."""
+    stopped, opened, message = chat(home), open_chat(home, fakes, inbox), new_id()
+    for _ in range(3):
+        ask(stopped, waiting(message))
+        ask(opened, waiting(message))
+    assert len(fakes.runs()) == 1 and outcomes(stopped) == []
+    assert len(inbox.lines()) == 1 and outcomes(opened) == ["sent into the open chat's inbox"]
+
+
+def test_one_wake_decision_reads_the_process_table_once(home, fakes, monkeypatch):
+    read, real = [], wake.table
+    monkeypatch.setattr(wake, "table", lambda: read.append(1) or real())
+    ask(chat(home), waiting(new_id()))
+    assert len(fakes.runs()) == 1 and len(read) == 1
+
+
+def test_a_resumed_run_can_write_its_log_but_never_read_it(home, fakes):
+    """Its output goes into the chat's .wake.log, whose earlier lines are the listener's."""
+    (fakes.bin / "claude").write_text(f"#!{sys.executable}\nimport fcntl, os\n"
+                                      "print(fcntl.fcntl(1, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY)\n")
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert path.with_name(path.name + ".log").read_text() == "True\n"
+
+
+def test_a_held_harness_says_so(home, fakes):
+    write_state({"failed": {"claude": {"count": 1, "told": 1, "at": time.time()}}})
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == [] and outcomes(path) == ["no wake: claude is held after a sign-in failure until one of its "
+                                                     "chats runs a command"]
 
 
 def test_a_delivered_message_still_resumes_the_chat_once_it_stops(home, fakes, inbox):
@@ -1024,8 +1132,9 @@ def test_no_wake_value_means_no_line(home, fakes, inbox):
     assert inbox.lines() == []
 
 
-def test_no_test_carries_the_inbox_of_the_chat_running_it():
+def test_no_test_carries_the_inbox_of_the_chat_running_it(fakes):
     assert "CLAUDE_CODE_MESSAGING_SOCKET" not in os.environ and "CLAUDE_CODE_MESSAGING_TOKEN" not in os.environ
+    assert wake.LSOF == str(fakes.bin / "lsof") and wake.PROC != Path("/proc")  # nor reads a real process's sockets
 
 
 # ------------------------------------------------------------------ the job
@@ -1063,28 +1172,13 @@ def test_the_listener_removes_its_job_when_its_directory_or_last_token_is_gone(h
     assert fakes.calls()[-len(expected):] == expected
 
 
-def process_state(pid):
-    """What the system's ps says of PID, asked without subprocess, whose next start would reap it on its own."""
-    read, write = os.pipe()
-    asked = os.posix_spawn("/bin/ps", ["ps", "-o", "stat=", "-p", str(pid)], dict(os.environ),
-                           file_actions=[(os.POSIX_SPAWN_DUP2, write, 1)])
-    os.close(write)
-    with os.fdopen(read) as out:
-        text = out.read().strip()
-    os.waitpid(asked, 0)
-    return text
-
-
 def test_a_resume_that_outlives_the_wait_is_reaped_by_the_next_pass(home, fakes, monkeypatch):
     """A run still going when the two-minute wait ends is not left defunct once it exits."""
     pids = []
     monkeypatch.setattr(wake, "refused", lambda name, run, *log: pids.append(run.pid))  # as when the wait ran out
     ask(chat(home), waiting(new_id()))
     [pid] = pids
-    deadline = time.monotonic() + 10
-    while not process_state(pid).startswith("Z") and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert process_state(pid).startswith("Z")
+    assert exited(pid)
     versions = iter([__version__, "99.0.0"])
     monkeypatch.setattr(wake, "installed", lambda: next(versions))
     monkeypatch.setattr(wake, "listen", lambda path, stop, transport=None: None)
