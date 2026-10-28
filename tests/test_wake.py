@@ -657,6 +657,16 @@ def test_the_shared_list_of_0_4_34_neither_caps_a_chat_nor_is_wiped(home, fakes,
     assert after["woken"].pop(name_of(path)) and all(after[key] == value for key, value in old.items())
 
 
+@pytest.mark.parametrize("ages, kept", [([3700] * 10, False), ([3700] * 9 + [60], True)])
+def test_the_shared_list_of_0_4_34_goes_once_every_time_in_it_is_an_hour_old(home, fakes, ages, kept):
+    """0.4.34 starts its list again when the key is gone, so a spent one goes; one recent time keeps it as it is."""
+    old = [time.time() - age for age in ages]
+    write_state({"wakes": old})
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert len(fakes.runs()) == 1 and state().get("wakes") == (old if kept else None)
+
+
 class Rounds:
     """A stop event for listen(): set after N waits, keeping how long each wait was asked to be."""
 

@@ -294,6 +294,8 @@ def wake(path: Path, found: dict, message: str) -> None:
         now = time.time()
         data["wakes_by_chat"] = {other: kept for other, theirs in data["wakes_by_chat"].items()
                                  if (kept := [t for t in theirs if now - t < HOUR])}
+        if all(now - t >= HOUR for t in data.get("wakes", [])):  # 0.4.34's shared count, spent; it starts one again
+            data.pop("wakes", None)
         times = data["wakes_by_chat"].get(chat, [])
         up = alive(found)
         door = name == "claude" and up
