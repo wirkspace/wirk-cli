@@ -1046,6 +1046,13 @@ def test_a_message_already_woken_for_is_noted_once(home, fakes):
     assert len(fakes.runs()) == 1 and outcomes(path).count("no wake: already woken for it") == 1
 
 
+def test_one_wake_decision_reads_the_process_table_once(home, fakes, monkeypatch):
+    read, real = [], wake.table
+    monkeypatch.setattr(wake, "table", lambda: read.append(1) or real())
+    ask(chat(home), waiting(new_id()))
+    assert len(fakes.runs()) == 1 and len(read) == 1
+
+
 def test_a_held_harness_says_so(home, fakes):
     write_state({"failed": {"claude": {"count": 1, "told": 1, "at": time.time()}}})
     path = chat(home)

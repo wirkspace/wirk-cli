@@ -129,11 +129,6 @@ def alive(record: dict) -> bool:
     return bool(row and row[1] == record["started"])
 
 
-def running(record: dict) -> bool:
-    """The recorded process, or any process whose arguments carry the chat's ID."""
-    return alive(record) or any(record["id"] in line for line in arguments())
-
-
 # ------------------------------------------------------------------ the record, written at enrolment and refreshed
 
 
@@ -299,15 +294,16 @@ def wake(path: Path, found: dict, message: str) -> None:
     with state() as data:
         now = time.time()
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
-        door = name == "claude" and alive(found)
+        up = alive(found)
+        door = name == "claude" and up
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
         if done.get(chat) == message:
             why = "already woken for it"
         elif not door and held(data, name):
             why = f"{name} is held after a sign-in failure until one of its chats runs a command"
-        elif not door and alive(found):
+        elif not door and up:
             why = f"the chat is open and {name} has no way in while it runs; woken once it stops"
-        elif not door and running(found):
+        elif not door and any(found["id"] in line for line in arguments()):
             why = "the chat runs in a process its record does not name; woken once that stops"
         elif len(data["wakes"]) >= CAP:
             why = f"{CAP} wakes this hour already"
