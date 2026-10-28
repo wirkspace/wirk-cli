@@ -471,7 +471,7 @@ def test_a_record_whose_session_is_not_a_uuid_resumes_nothing(home, fakes, harne
     path = chat(home, harness=harness, program=str(fakes.bin / harness))
     write_token(path, json.dumps({**record_of(path), "id": "-" * 32 + "dead"}))  # would reach the harness as an option
     ask(path, waiting(new_id()))
-    assert fakes.runs() == []
+    assert fakes.runs() == [] and outcomes(path) == ["could not resume: the record's session is not a UUID"]
 
 
 def test_a_listener_started_from_a_chat_never_passes_that_chats_ids_along(home, fakes, monkeypatch):
@@ -645,6 +645,8 @@ def test_a_refused_chat_is_dropped(home, fakes, code):
             write_token(path, json.dumps({**record, "last": record["last"] + 1}))
     requests, stop = listen(path, lambda r: refusal(code, "refused", status=401), 5, between=touch)
     assert len(requests) == 2  # the first round, then once more after the record changed
+    assert outcomes(path) == [f"no wake: the service refused this chat's inbox wait ({code}); asked again after its "
+                              "next command"]
 
 
 def test_one_wait_per_chat_in_its_last_wirkspace_most_recent_eight(home, fakes):
@@ -1013,11 +1015,35 @@ def test_a_chat_running_elsewhere_than_its_record_is_still_left_alone(home, fake
     fakes.args((5151, f"/usr/local/bin/claude --resume {record_of(path)['id']}"))
     ask(path, waiting(new_id()))
     assert inbox.lines() == [] and fakes.runs() == []
+    assert outcomes(path) == ["no wake: the chat runs in a process its record does not name; woken once that stops"]
 
 
 def test_a_stopped_chat_is_resumed_whatever_inbox_its_record_names(home, fakes, inbox):
     ask(chat(home, pid=4242, inbox=inbox.path), waiting(new_id()))
     assert len(fakes.runs()) == 1 and inbox.lines() == []
+
+
+def test_an_open_chat_of_another_harness_is_left_alone_and_says_so(home, fakes):
+    path = chat(home, harness="codex", pid=4242, program=str(fakes.bin / "codex"))
+    fakes.ps((4242, 1, STARTED, str(fakes.bin / "codex")))
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == [] and outcomes(path) == ["no wake: the chat is open and codex has no way in while it "
+                                                     "runs; woken once it stops"]
+
+
+def test_a_message_already_woken_for_is_noted_once(home, fakes):
+    path, message = chat(home), new_id()
+    for _ in range(4):
+        ask(path, waiting(message))
+    assert len(fakes.runs()) == 1 and outcomes(path).count("no wake: already woken for it") == 1
+
+
+def test_a_held_harness_says_so(home, fakes):
+    write_state({"failed": {"claude": {"count": 1, "told": 1, "at": time.time()}}})
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == [] and outcomes(path) == ["no wake: claude is held after a sign-in failure until one of its "
+                                                     "chats runs a command"]
 
 
 def test_a_delivered_message_still_resumes_the_chat_once_it_stops(home, fakes, inbox):
