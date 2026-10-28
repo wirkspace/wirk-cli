@@ -304,11 +304,19 @@ def test_after_an_hour_it_checks_again_and_a_future_stamp_counts_as_stale(on, ru
 
 
 @pytest.mark.parametrize("argv", [["login", "--bogus"], ["login", "extra"], ["login", "--help"]])
-def test_login_never_checks_or_prints_the_notice(on, run, started, argv):
+def test_login_starts_the_check_and_never_shows_the_notice(on, run, started, argv):
+    """A sign-in on an old install starts its update; the installer's own login never shows a notice it made stale."""
     on.mkdir(exist_ok=True)
     (on / "update.json").write_text(json.dumps({"notice": "wirk 0.4.27 is out"}))
     _, _, err, _ = run(argv)
-    assert started == [] and "0.4.27" not in err
+    assert len(started) == 1 and "0.4.27" not in err and "shown" not in state(on)
+
+
+def test_a_check_not_due_leaves_the_state_file_alone(on, run, started):
+    run(["status"])
+    before = (on / "update.json").stat().st_ino
+    run(["status"])
+    assert (on / "update.json").stat().st_ino == before and len(started) == 1
 
 
 def test_wirk_no_update_turns_it_all_off(on, run, started, monkeypatch):
@@ -339,7 +347,7 @@ def test_a_caller_capturing_output_does_not_wait_for_the_detached_process(on, tm
     pid_file = tmp_path / "pid"
     sleeper = [sys.executable, "-c", f"import os, time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); "
                                      "time.sleep(30)"]
-    script = f"from wirk_cli import update; update.CHILD = {sleeper!r}; update.after('status')"
+    script = f"from wirk_cli import update; update.CHILD = {sleeper!r}; update.after()"
     began = time.monotonic()
     subprocess.run([sys.executable, "-c", script], capture_output=True, timeout=5, check=True)
     assert time.monotonic() - began < 5
@@ -639,3 +647,4 @@ def test_two_checks_under_one_home_each_write_their_own_temporary_file(on, tmp_p
     monkeypatch.setattr(update.os, "fsync", fsync)
     assert update.refresh_skill(github()) == [] and other[1] == []
     assert path.read_text() == skill("0.4.29") and [p.name for p in path.parent.iterdir()] == ["SKILL.md"]
+

@@ -1,5 +1,5 @@
-"""wirk keeps itself current: after a command, at most once an hour, a detached process installs PyPI's latest
-and replaces each installed copy of the WIRK skill with its latest release.
+"""wirk keeps itself current: at most once an hour, after a command or on a pass of the message listener, a detached
+process installs PyPI's latest and replaces each installed copy of the WIRK skill with its latest release.
 
 Only after() runs in every command, so what the detached process alone needs is imported inside its functions.
 """
@@ -24,28 +24,32 @@ WIRK_SKILL = re.compile(r"---\n(?:(?!---).*\n)*?name: wirk\n")  # front matter n
 SKILL_VERSION = re.compile(r"\nWIRK skill (\d+\.\d+\.\d+)\.\n?\Z")  # the skill's last line
 
 
-def after(command: str) -> None:
-    """In the command's process, once its answer is out: show a notice once a day, start a check once an hour."""
-    if command == "login" or os.environ.get("WIRK_NO_UPDATE") or os.name != "posix":
-        return
+def after(show: bool = True):
+    """Once a command's answer is out, or on a pass of the listener: start a check once an hour and, with SHOW, show a
+    recorded notice once a day. Gives the started check, or None."""
+    if os.environ.get("WIRK_NO_UPDATE") or os.name != "posix":
+        return None
     try:
         directory = config_dir()
         with locked(directory) as held:
             if not held:  # an update is running now
-                return
+                return None
             data, now = load(directory), time.time()
-            if data.get("notice") and abs(now - data.get("shown", 0)) >= DAY:
+            before = dict(data)
+            if show and data.get("notice") and abs(now - data.get("shown", 0)) >= DAY:
                 print(data["notice"], file=sys.stderr)
                 data["shown"] = now
             due = abs(now - data.get("checked", 0)) >= HOUR
             if due:
                 data["checked"] = now
-            save(directory, data)
+            if data != before:  # the listener passes every minute: the file changes only when something did
+                save(directory, data)
         if due:
-            subprocess.Popen(CHILD, cwd=directory, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+            return subprocess.Popen(CHILD, cwd=directory, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
     except Exception:  # an update never changes a command's answer
         pass
+    return None
 
 
 def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
