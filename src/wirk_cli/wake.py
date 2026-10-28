@@ -506,9 +506,13 @@ def live(directory: Path) -> bool:
         actors.is_dir() and any(not path.suffix for path in actors.iterdir()))
 
 
-def installed() -> str:
-    from importlib.metadata import version
-    return version("wirk")
+def installed() -> str | None:
+    """The installed wirk's version; None while an update has it half in place, which may read so or fail."""
+    try:
+        from importlib.metadata import version
+        return version("wirk")
+    except Exception:
+        return None
 
 
 def main(transport=None) -> int:
@@ -522,12 +526,8 @@ def main(transport=None) -> int:
                 return 0
             while live(directory):
                 with update.locked(directory) as free:  # a restart under systemd would also end the update it started
-                    try:
-                        newer = free and installed() not in (None, __version__)
-                    except Exception:  # half installed by an update from another directory: look again next pass
-                        newer = False
-                if newer:
-                    return 75
+                    if free and installed() not in (None, __version__):
+                        return 75
                 if checking := update.after(show=False):  # its notice is for a person's next command
                     RUNS.append(checking)
                 wanted = admitted(directory)
