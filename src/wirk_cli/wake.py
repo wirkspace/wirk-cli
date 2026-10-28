@@ -3,8 +3,9 @@
 At enrolment a chat that owns its harness process gets a resume record beside its token. A background job per
 configuration directory, installed by wirk login, holds one inbox wait per recently active chat; when the service names
 an unseen message that may wake the chat (notifications.wake), it gives the chat one fixed prompt that carries no
-message: an open Claude Code chat through its own cross-session inbox, a stopped chat by resuming it in its harness.
-After each command the chat's record is refreshed. Nothing here ever changes a command's answer or exit code.
+message: an open Claude Code chat through its own cross-session inbox, a stopped chat by resuming it in its harness,
+and notes the outcome in the chat's .wake.log. After each command the chat's record is refreshed. Nothing here ever
+changes a command's answer or exit code.
 """
 
 import hashlib
@@ -286,16 +287,22 @@ def wake(path: Path, found: dict, message: str) -> None:
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
         door = bool(found.get("inbox")) and alive(found)
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
-        if done.get(chat) == message or len(data["wakes"]) >= CAP or not door and (held(data, name) or running(found)):
+        if done.get(chat) == message or not door and (held(data, name) or running(found)):
+            return
+        if len(data["wakes"]) >= CAP:
+            note(path, f"no wake: {CAP} wakes this hour already")
             return
         done[chat] = message
         data["wakes"].append(now)
         started = None if door else resume(path, found)
-    if door and not deliver(found):
-        with state() as data:  # nothing reached the chat: the next round may try, unless a newer one claimed it
-            if data["delivered"].get(chat) == message:
-                del data["delivered"][chat]
-            data["wakes"] = [t for t in data["wakes"] if t != now]
+    if door:
+        failure = deliver(found)
+        note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox")
+        if failure:
+            with state() as data:  # nothing reached the chat: the next round may try, unless a newer one claimed it
+                if data["delivered"].get(chat) == message:
+                    del data["delivered"][chat]
+                data["wakes"] = [t for t in data["wakes"] if t != now]
     if started and refused(name, *started):
         with state() as data:
             data["wakes"] = [t for t in data["wakes"] if t != now]  # its message counts as woken; the cap does not
@@ -309,10 +316,11 @@ def held(data: dict, name: str) -> bool:
     return bool(failure) and failure.get("ran", 0) <= failure["at"]
 
 
-def deliver(found: dict) -> bool:
+def deliver(found: dict) -> str | None:
     """The fixed prompt into the open chat's own inbox: Claude Code starts a turn in an idle session and gives a busy one
     the message between tool calls. Only when Claude Code lists the chat's session, idle or busy, at the recorded process
-    and nowhere else, and the kernel names that process as the inbox's listener."""
+    and nowhere else, and the kernel names that process as the inbox's listener. Returns None once the line is sent,
+    otherwise why nothing was."""
     try:
         program, env = located(found)
         listed = json.loads(subprocess.run([program, "agents", "--json"], capture_output=True, text=True, check=True,
@@ -320,20 +328,21 @@ def deliver(found: dict) -> bool:
         mine = [(entry.get("sessionId"), entry.get("pid"), entry.get("status")) for entry in listed
                 if found["id"] == entry.get("sessionId") or found["pid"] == entry.get("pid")]
         if mine not in ([(found["id"], found["pid"], "idle")], [(found["id"], found["pid"], "busy")]):
-            return False
+            return "listed " + (", ".join(f"{session} at process {pid}, {status}" for session, pid, status in mine)
+                                or "nowhere")
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(2)
             connection.connect(found["inbox"])
-            if listener(connection) != found["pid"]:
-                return False
+            if (peer := listener(connection)) != found["pid"]:
+                return f"the inbox's listener is process {peer}, not {found['pid']}"
             line = {"type": "user", "message": {"role": "user", "content": prompt(found)}}
             connection.sendall((json.dumps(line) + "\n").encode())
             with suppress(OSError):  # Claude Code closes it once it has the line and its sender's verified PID
                 connection.shutdown(socket.SHUT_WR)
                 connection.recv(1)
-            return True
-    except Exception:  # no lookup, no listing, no socket or not the chat's: nothing sent
-        return False
+            return None
+    except Exception as error:  # no lookup, no listing or no socket: nothing sent
+        return type(error).__name__
 
 
 def listener(connection: socket.socket) -> int:
@@ -367,9 +376,7 @@ def resume(path: Path, found: dict):
     program, env = located(found)
     argv = ([program, "--resume", found["id"], "-p", prompt(found), *GRANTS[name]] if name in GRANTS
             else [program, "exec", "resume", found["id"], prompt(found)])
-    log = path.with_name(path.name + ".log")
-    trim(log)
-    descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    log, descriptor = opened(path)
     try:
         offset = os.fstat(descriptor).st_size
         try:
@@ -378,16 +385,27 @@ def resume(path: Path, found: dict):
             RUNS.append(process)
             return process, log, offset
         except (OSError, TypeError) as error:  # no program, or no directory: a wake all the same, never retried
-            os.write(descriptor, f"wirk: could not resume: {type(error).__name__}\n".encode())
+            note(path, f"could not resume: {type(error).__name__}")
             return None
     finally:
         os.close(descriptor)
 
 
-def trim(log: Path) -> None:
-    """Past 1 MB, the log keeps its last half."""
+def opened(path: Path) -> tuple[Path, int]:
+    """The chat's .wake.log, open to append and never through a link; past 1 MB it first keeps its last half."""
+    log = path.with_name(path.name + ".log")
     if log.exists() and log.stat().st_size > LOG:
         save(log, log.read_bytes()[-LOG // 2:].decode(errors="replace"))
+    return log, os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+
+
+def note(path: Path, outcome: str) -> None:
+    """One line in the chat's .wake.log on what became of a wake."""
+    _, descriptor = opened(path)
+    try:
+        os.write(descriptor, f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} wirk: {outcome}\n".encode())
+    finally:
+        os.close(descriptor)
 
 
 def refused(name: str, process, log: Path, offset: int) -> bool:

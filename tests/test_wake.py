@@ -598,6 +598,7 @@ def test_a_held_back_wake_follows_when_the_hour_allows(home, fakes):
     write_state({"wakes": [time.time() - 3500] * 10})
     ask(path, waiting(message))
     assert fakes.runs() == [] and state().get("woken", {}) == {}  # held back, not recorded
+    assert outcomes(path) == ["no wake: 10 wakes this hour already"]
     write_state({"wakes": [time.time() - 3700] * 10})
     ask(path, waiting(message))
     assert len(fakes.runs()) == 1 and len(state()["wakes"]) == 1
@@ -846,6 +847,12 @@ def open_chat(home, fakes, inbox, *, status="idle", **options):
     return path
 
 
+def outcomes(path):
+    """What the listener noted about each attempt, in the chat's .wake.log."""
+    log = path.with_name(path.name + ".log")
+    return [entry.split(" wirk: ", 1)[1] for entry in log.read_text().splitlines()] if log.exists() else []
+
+
 def line(text):
     return (json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n").encode()
 
@@ -859,7 +866,7 @@ def test_an_open_chat_gets_one_line_in_its_inbox_and_no_second_process(home, fak
     assert sent == line(prompt(f" workspace_id={space}")) and message.encode() not in sent
     assert fakes.runs() == [] and record_of(path) == record
     assert state()["delivered"] == {path.name.removesuffix(".wake"): message} and state()["woken"] == {}
-    assert len(state()["wakes"]) == 1
+    assert len(state()["wakes"]) == 1 and outcomes(path) == ["sent into the open chat's inbox"]
 
 
 def test_the_listener_waits_for_the_inbox_to_close_so_claude_code_can_verify_its_sender(home, fakes, inbox):
@@ -896,6 +903,9 @@ def test_no_line_unless_claude_code_lists_the_session_idle_or_busy_at_its_proces
     ask(path, waiting(new_id()))
     assert inbox.lines() == [] and fakes.runs() == []
     assert state().get("delivered", {}) == {} and state()["wakes"] == []  # undone: the next round may try again
+    [noted] = outcomes(path)
+    reason = {"waiting on its person": ", waiting", "lookup fails": "CalledProcessError", "not json": "JSONDecodeError"}
+    assert noted.startswith("not delivered: ") and reason.get(listed, "") in noted
 
 
 def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes, inbox):
@@ -904,6 +914,7 @@ def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes, inbox)
     fakes.agents((record_of(path)["id"], 4242, "idle"))
     ask(path, waiting(new_id()))
     assert inbox.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+    assert outcomes(path) == [f"not delivered: the inbox's listener is process {os.getpid()}, not 4242"]
 
 
 @pytest.mark.parametrize("shape", ["missing", "a regular file"])
@@ -966,8 +977,9 @@ def test_a_delivered_message_still_resumes_the_chat_once_it_stops(home, fakes, i
 
 def test_an_open_chat_counts_against_the_hourly_cap(home, fakes, inbox):
     write_state({"wakes": [time.time() - 60] * 10})
-    ask(open_chat(home, fakes, inbox), waiting(new_id()))
-    assert inbox.lines() == [] and fakes.runs() == []
+    path = open_chat(home, fakes, inbox)
+    ask(path, waiting(new_id()))
+    assert inbox.lines() == [] and fakes.runs() == [] and outcomes(path) == ["no wake: 10 wakes this hour already"]
 
 
 def test_an_undo_never_removes_a_newer_claim(home, fakes, inbox):
