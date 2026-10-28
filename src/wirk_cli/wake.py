@@ -317,10 +317,14 @@ def held(data: dict, name: str) -> bool:
 
 
 def deliver(found: dict) -> str | None:
-    """The fixed prompt into the open chat's own inbox: Claude Code starts a turn in an idle session and gives a busy one
-    the message between tool calls. Only when Claude Code lists the chat's session, idle or busy, at the recorded process
-    and nowhere else, and the kernel names that process as the inbox's listener. Returns None once the line is sent,
-    otherwise why nothing was."""
+    """The fixed prompt into the open chat's own inbox, the Unix socket Claude Code binds for each session and exports
+    to its commands as CLAUDE_CODE_MESSAGING_SOCKET: Claude Code starts a turn in an idle session and gives a busy one
+    the message between tool calls. Only when `claude agents --json`, run with the chat's own session store, lists the
+    chat's session, idle or busy, at the recorded process and nowhere else, and the kernel names that process as the
+    socket's listener. The line is a stream-json user message, the form Claude Code's own debug log gives as its
+    example; it is not on a public page. Claude Code records the sender's PID as verified only when the sender
+    half-closes and waits for it to close the socket. Nothing tells the listener what the chat did with the line.
+    Returns None once the line is sent, otherwise why nothing was."""
     try:
         program, env = located(found)
         listed = json.loads(subprocess.run([program, "agents", "--json"], capture_output=True, text=True, check=True,
