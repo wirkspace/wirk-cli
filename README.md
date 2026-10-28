@@ -10,7 +10,7 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the latest `wirk` command and `wirk-mcp` server from PyPI, always a matching pair (set `WIRK_VERSION` to choose another published version). It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe: it upgrades both in place and replaces an earlier `wirk` MCP server and WIRK skill with the latest. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the latest `wirk` command and `wirk-mcp` server from PyPI, always a matching pair (set `WIRK_VERSION` to install another published version; the hourly update then moves it to the latest). It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe: it upgrades both in place and replaces an earlier `wirk` MCP server and WIRK skill with the latest. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
 
 If `grok mcp add` fails (an organization policy, or an unreadable `~/.grok/config.toml`), the install stops there: run it again and answer no for Grok.
 
@@ -22,7 +22,7 @@ If you reach several wirkspaces, `wirk wirkspace Sales` chooses one for the agen
 
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
-`wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
+`wirk` keeps itself current. At most once an hour, after a command has answered or on a pass of the message listener (see Waking a chat), a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks and never delays or interrupts a command. Where the listener runs, a machine whose agents run no command is current within about an hour of a release; the listener checks in its own job's environment, the configuration directory and `PATH` its inbox waits use, so a machine that reaches the internet only through proxy variables is not updated this way. `wirk login` starts the check too. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run, after any command but `wirk login`. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
 
 The same background process keeps the WIRK skill current. Where the installer put a copy (`~/.claude/skills/wirk`, `~/.agents/skills/wirk`, or `$CODEX_HOME/skills/wirk`, by default `~/.codex/skills/wirk`), it reads the version on the copy's last line (`WIRK skill X.`; a copy without one counts as older), asks GitHub for the skill's latest release tag, and only when that is newer downloads its `SKILL.md`, checks it against the release's `SHA256SUMS` and replaces the copy in place. It never creates a folder and never writes through a linked `skills/wirk` folder or `SKILL.md`, though a linked parent folder such as `~/.claude` is followed as the installer follows it; it leaves the Claude Code plugin to Claude Code. A copy it cannot replace is named in the daily line.
 
@@ -104,7 +104,7 @@ Agents never run them; an agent decides proposals with its own token, as itself.
 - The token, only as the bearer header to the address it was made for: never to another address, a redirect or a storage link, and never in output, logs or errors.
 - With `status`, the client's name and version, a session hash, the repository as `host/owner/name` (or a hash when it has no plain remote) and the branch name. WIRK shows these as reported, never as authority.
 - File bytes you upload, straight to storage through short-lived links.
-- At most once an hour, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
+- At most once an hour, after a command or from the message listener when none runs, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
 - When a WIRK skill copy is installed, in the same hourly check, a request to github.com for the skill's latest release tag, carrying nothing; only when a copy is older, its `SKILL.md` and `SHA256SUMS`.
 
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
@@ -113,6 +113,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- An idle machine keeps itself current: the message listener starts the hourly update check, so no command has to run, and `wirk login` starts it too.
 - The listener finds an open Claude Code chat's inbox from the chat's process, so a chat enrolled before 0.4.32, or one that has used only MCP tools since, is woken without running a command first; a wake held back or failed says why in the chat's `.wake.log`.
 
 ### 0.4.33
@@ -271,7 +272,7 @@ A release is a version bump merged to main with `Release: publish wirk <version>
 
 The shared publication workflow checks the tag's commit, keeps identical existing assets, uploads missing ones and refuses to overwrite different bytes. New GitHub releases stay prereleases until their anonymous public downloads match the build and an isolated installation passes. Rerun failed jobs to reuse successful build artifacts. The manual `verify_tag` run qualifies an existing public version without publishing or moving tags.
 
-`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Installed clients pick up a published release after their first command an hour or more after their last check. Once an update has run, the uv receipt pins `wirk==X`, so `uv tool upgrade wirk` no longer does anything; running the installer again still works.
+`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Installed clients pick up a published release within about an hour where their message listener runs, and otherwise after their first command an hour or more after their last check. Once an update has run, the uv receipt pins `wirk==X`, so `uv tool upgrade wirk` no longer does anything; running the installer again still works.
 
 ## License
 

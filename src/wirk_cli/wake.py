@@ -23,10 +23,9 @@ import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from . import __version__
+from . import __version__, update
 from .client import UUID, Failure, Service, actor_binding, actor_path, chosen, config_dir, launcher, read_private, \
     read_token, saved_url
-from .update import locked
 
 SYSTEM, PROC, LSOF = sys.platform, Path("/proc"), "/usr/sbin/lsof"  # lsof by its path: the job's PATH is a login's
 IDS = {"claude": "CLAUDE_CODE_SESSION_ID", "codex": "CODEX_THREAD_ID", "grok": "GROK_SESSION_ID"}  # each harness's chat
@@ -215,7 +214,7 @@ def state_dir() -> Path:
 def state():
     """wake.json under wake.lock: every listener of this user, in every configuration directory, shares it."""
     directory = state_dir()
-    with locked(directory, wait=True, name="wake.lock"):
+    with update.locked(directory, wait=True, name="wake.lock"):
         path = directory / "wake.json"
         try:
             data = json.loads(read_private(path))
@@ -482,16 +481,18 @@ def install() -> None:
         path, name = job()
         directory = str(config_dir().resolve())
         search = os.pathsep.join(dict.fromkeys(e for e in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(e)))
+        environment = {"WIRK_CONFIG_DIR": directory, "PATH": search}
+        if os.environ.get("WIRK_NO_UPDATE"):  # the test suite's switch reaches the listener its login installs
+            environment["WIRK_NO_UPDATE"] = os.environ["WIRK_NO_UPDATE"]
         if SYSTEM == "darwin":
             import plistlib
-            text = plistlib.dumps({"Label": name, "ProgramArguments": CHILD,
-                                   "EnvironmentVariables": {"WIRK_CONFIG_DIR": directory, "PATH": search},
+            text = plistlib.dumps({"Label": name, "ProgramArguments": CHILD, "EnvironmentVariables": environment,
                                    "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}).decode()
         else:
             text = (f"[Unit]\nDescription=WIRK listener\n\n[Service]\n"
                     f"ExecStart={quoted(CHILD[0]).replace('$', '$$')} {' '.join(CHILD[1:])}\n"
-                    f"Environment={quoted('WIRK_CONFIG_DIR=' + directory)}\nEnvironment={quoted('PATH=' + search)}\n"
-                    "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n")
+                    + "".join(f"Environment={quoted(f'{key}={value}')}\n" for key, value in environment.items())
+                    + "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n")
         changed = not path.exists() or path.read_text() != text
         if changed:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,22 +536,30 @@ def live(directory: Path) -> bool:
         actors.is_dir() and any(not path.suffix for path in actors.iterdir()))
 
 
-def installed() -> str:
-    from importlib.metadata import version
-    return version("wirk")
+def installed() -> str | None:
+    """The installed wirk's version; None while an update has it half in place, which may read so or fail."""
+    try:
+        from importlib.metadata import version
+        return version("wirk")
+    except Exception:
+        return None
 
 
 def main(transport=None) -> int:
-    """The job: one wait per admitted chat, rescanned every minute; exits 75 for a new version, 0 when its directory or
-    last token is gone (after removing itself) or another listener holds this directory."""
+    """The job: one wait per admitted chat, rescanned every minute, and the hourly update check, so an idle machine
+    stays current; exits 75 for a new version once no update holds its lock, 0 when its directory or last token is gone
+    (after removing itself) or another listener holds this directory."""
     directory, waits = config_dir(), {}
     if live(directory):  # checked first: the lock would make the directory again
-        with locked(directory, name="listener.lock") as mine:
+        with update.locked(directory, name="listener.lock") as mine:
             if not mine:
                 return 0
             while live(directory):
-                if installed() != __version__:
-                    return 75
+                with update.locked(directory) as free:  # a restart under systemd would also end the update it started
+                    if free and installed() not in (None, __version__):
+                        return 75
+                if checking := update.after(show=False):  # its notice is for a person's next command
+                    RUNS.append(checking)
                 wanted = admitted(directory)
                 for path in list(waits):
                     if path not in wanted:
