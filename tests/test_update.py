@@ -16,6 +16,7 @@ import time
 import httpx
 import pytest
 
+from conftest import exited, process_state
 from wirk_cli import __version__, update
 
 LATEST = {"wirk": "0.4.27", "wirk-mcp": "0.4.26"}
@@ -719,13 +720,13 @@ def test_the_listener_reaps_the_check_it_started(on, monkeypatch):
 
     def after(show=True):
         if child := real(show):
-            os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # it has exited; reaping is left to the listener
+            assert exited(child.pid)  # the reaping is left to the listener
             spawned.append(child)
         return child
     monkeypatch.setattr(update, "after", after)
     assert wake.main() == 75
     [child] = spawned
-    assert child.returncode is not None and child not in wake.RUNS
+    assert child.returncode is not None and child not in wake.RUNS and process_state(child.pid) == ""
 
 
 def test_wirk_no_update_keeps_the_listener_from_checking(on, started, monkeypatch):

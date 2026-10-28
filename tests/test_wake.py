@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import TOKEN, URL, envelope, refusal, write_token
+from conftest import TOKEN, URL, envelope, exited, process_state, refusal, write_token
 from wirk_cli import __version__, client, wake
 
 STARTED = "Sat Oct 24 10:00:00 2026"
@@ -1172,28 +1172,13 @@ def test_the_listener_removes_its_job_when_its_directory_or_last_token_is_gone(h
     assert fakes.calls()[-len(expected):] == expected
 
 
-def process_state(pid):
-    """What the system's ps says of PID, asked without subprocess, whose next start would reap it on its own."""
-    read, write = os.pipe()
-    asked = os.posix_spawn("/bin/ps", ["ps", "-o", "stat=", "-p", str(pid)], dict(os.environ),
-                           file_actions=[(os.POSIX_SPAWN_DUP2, write, 1)])
-    os.close(write)
-    with os.fdopen(read) as out:
-        text = out.read().strip()
-    os.waitpid(asked, 0)
-    return text
-
-
 def test_a_resume_that_outlives_the_wait_is_reaped_by_the_next_pass(home, fakes, monkeypatch):
     """A run still going when the two-minute wait ends is not left defunct once it exits."""
     pids = []
     monkeypatch.setattr(wake, "refused", lambda name, run, *log: pids.append(run.pid))  # as when the wait ran out
     ask(chat(home), waiting(new_id()))
     [pid] = pids
-    deadline = time.monotonic() + 10
-    while not process_state(pid).startswith("Z") and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert process_state(pid).startswith("Z")
+    assert exited(pid)
     versions = iter([__version__, "99.0.0"])
     monkeypatch.setattr(wake, "installed", lambda: next(versions))
     monkeypatch.setattr(wake, "listen", lambda path, stop, transport=None: None)
