@@ -588,6 +588,7 @@ def wirkspace(words, options, transport):
         raise Failure("invalid_input", f"{problem} called {words[0]}; nothing changed",
                       f"You reach {listed}. Choose one by name or ID: wirk wirkspace NAME", 2)
     write_private(choice_path(service.url, binding), matches[0]["id"])
+    Service.used = matches[0]["id"]  # the chat's resume record waits there from now on
     before = named(mine[0]) if mine else previous and short(previous)
     return said(f"Now working in {named(matches[0])}, " + (f"previously {before}" if before else "none before"),
                 {"wirkspace": matches[0], "previous": previous}, options)
