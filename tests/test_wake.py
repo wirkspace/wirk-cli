@@ -19,7 +19,7 @@ from wirk_cli import __version__, client, wake
 
 STARTED = "Sat Oct 24 10:00:00 2026"
 LATER = "Sat Oct 24 11:30:00 2026"
-IDS = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
+IDS = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "GROK_SESSION_ID")
 SIGN_IN_REFUSAL = "Failed to authenticate: OAuth session expired and could not be refreshed\n"
 
 
@@ -104,12 +104,17 @@ def signed_in(binding):
     write_token(path, "wirk_" + "c" * 43)
 
 
+def grok_on_path(fakes):
+    """A grok on PATH: the fake harness, started by the listener the way the fake claude is."""
+    (fakes.bin / "grok").write_text((fakes.bin / "claude").read_text())
+    (fakes.bin / "grok").chmod(0o755)
+
+
 def in_a_chat(monkeypatch, fakes, tmp_path, *, harness="claude", own=None, launcher=None, args=None,
               chain=("/bin/zsh",), outer=None):
     """This test's CLI runs under CHAIN of programs, nearest first, then HARNESS (pid 900) in TMP/work, then OUTER."""
     own = own or new_id()
-    variable = "CLAUDE_CODE_SESSION_ID" if harness == "claude" else "CODEX_THREAD_ID"
-    monkeypatch.setenv(variable, own)
+    monkeypatch.setenv(wake.IDS[harness], own)
     if launcher:
         monkeypatch.setenv("CODEX_THREAD_ID" if harness == "claude" else "CLAUDE_CODE_SESSION_ID", launcher)
     program = str(fakes.bin / harness)
@@ -232,6 +237,37 @@ def test_a_shared_app_server_gets_no_record(run, home, monkeypatch, fakes, tmp_p
     assert client.actor_path(URL, own).exists() and not the_record(home, own).exists()
 
 
+def test_a_grok_chat_enrols_with_a_resume_record_and_its_home(run, home, monkeypatch, fakes, tmp_path):
+    grok_on_path(fakes)
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok-home"))
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness="grok")
+    assert run(["login"], enrolling)[0] == 0
+    record = record_of(the_record(home, own))
+    assert (record["harness"], record["id"], record["cwd"], record["pid"], record["program"], record["env"]) == (
+        "grok", own, str(work), 900, str(fakes.bin / "grok"), {"GROK_HOME": str(tmp_path / "grok-home")})
+
+
+def test_a_grok_chat_started_from_a_claude_chat_records_its_launcher(run, home, monkeypatch, fakes, tmp_path):
+    grok_on_path(fakes)
+    launcher = new_id()
+    signed_in(launcher)  # the Claude Code chat that started it is signed in
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path, harness="grok", launcher=launcher)
+    assert run(["login"], enrolling)[0] == 0
+    record = record_of(the_record(home, f"{launcher},{own}"))
+    assert (record["harness"], record["id"], record["pid"]) == ("grok", own, 900)
+    assert record["env"] == {"CLAUDE_CODE_SESSION_ID": launcher}
+
+
+def test_a_grok_lane_inside_a_claude_chat_gets_no_record(run, home, monkeypatch, fakes, tmp_path):
+    """Guard: the nearest harness is the Claude Code chat's process, whose session is not the lane's, so no record."""
+    root, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    signed_in(root)
+    lane = new_id()
+    monkeypatch.setenv("GROK_SESSION_ID", lane)
+    assert run(["login"], enrolling)[0] == 0
+    assert client.actor_path(URL, f"{root},{lane}").exists() and not the_record(home, f"{root},{lane}").exists()
+
+
 def test_a_planted_variable_never_reaches_the_record(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "harness-config"))
@@ -342,6 +378,21 @@ def test_a_new_process_without_an_inbox_clears_the_recorded_one(run, home, monke
     assert (record["pid"], record["inbox"]) == (900, None)
 
 
+@pytest.mark.parametrize("before", ["none", "another"])
+def test_choosing_a_wirkspace_is_where_the_listener_waits(run, home, monkeypatch, fakes, tmp_path, before):
+    own, work = in_a_chat(monkeypatch, fakes, tmp_path)
+    chosen, other = wirkspace_id(), wirkspace_id()
+    path = chat(home, session=own, pid=900, wirkspace=other if before == "another" else None)
+    choices = [{"key": key, "name": f"{key[4:12]} {name}"} for key, name in ((chosen, "Sales"), (other, "Support"))]
+    several = envelope("Error choose_wirkspace", ok=False, status=422, errors=[
+        {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces", "choices": choices}])
+    assert run(["wirkspace", "Sales"], lambda request: several)[0] == 0  # asked without one, as it always is
+    assert record_of(path)["wirkspace"] == chosen
+    write_token(path, json.dumps({**record_of(path), "wirkspace": other}))  # a later command named the other one
+    assert run(["wirkspace"], lambda request: several)[0] == 0  # shows the choice, names none
+    assert record_of(path)["wirkspace"] == other  # only choosing moves the wait
+
+
 def test_a_failed_command_leaves_the_record(run, home, monkeypatch, fakes, tmp_path):
     own, work = in_a_chat(monkeypatch, fakes, tmp_path)
     path = chat(home, session=own, pid=900, last=1000)
@@ -407,6 +458,49 @@ def test_a_thread_chat_resumes_with_exec_resume(home, fakes):
     [started] = fakes.runs()
     assert started["program"] == str(fakes.bin / "codex")
     assert started["args"] == ["exec", "resume", record_of(path)["id"], prompt()]
+
+
+def test_a_grok_chat_resumes_with_grok_resume_grants_and_the_fixed_prompt(home, fakes):
+    grok_on_path(fakes)
+    space = wirkspace_id()
+    path = chat(home, harness="grok", wirkspace=space)
+    message = new_id()
+    ask(path, waiting(message))
+    record = record_of(path)
+    [started] = fakes.runs()
+    assert started["program"] == str(fakes.bin / "grok") and started["cwd"] == record["cwd"]
+    assert started["args"] == ["--resume", record["id"], "-p", prompt(f" workspace_id={space}"), "--permission-mode",
+                               "dontAsk", "--allow", "Bash(wirk *)", "--allow", "mcp__wirk__*", "--deny", "Edit"]
+    assert message not in "".join(started["args"])
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "grok"])
+def test_a_record_whose_session_is_not_a_uuid_resumes_nothing(home, fakes, harness):
+    grok_on_path(fakes)
+    path = chat(home, harness=harness, program=str(fakes.bin / harness))
+    write_token(path, json.dumps({**record_of(path), "id": "-" * 32 + "dead"}))  # would reach the harness as an option
+    ask(path, waiting(new_id()))
+    assert fakes.runs() == []
+
+
+def test_a_listener_started_from_a_chat_never_passes_that_chats_ids_along(home, fakes, monkeypatch):
+    for name in IDS:
+        monkeypatch.setenv(name, new_id())
+    launcher = new_id()
+    ask(chat(home, env={"CODEX_THREAD_ID": launcher}), waiting(new_id()))  # a Claude Code chat a Codex thread started
+    env = fakes.runs()[0]["env"]
+    assert env.get("CODEX_THREAD_ID") == launcher and not {"CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} & set(env)
+
+
+def test_a_listener_started_from_a_chat_never_points_a_resumed_chat_at_its_own_session_store(home, fakes, monkeypatch,
+                                                                                               tmp_path):
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / "listener" / name))
+    grok_on_path(fakes)
+    ask(chat(home, harness="grok", env={"GROK_HOME": str(tmp_path / "chat")}), waiting(new_id()))
+    env = fakes.runs()[0]["env"]
+    assert env.get("GROK_HOME") == str(tmp_path / "chat") and not {"CLAUDE_CONFIG_DIR", "CODEX_HOME"} & set(env)
+    assert env["WIRK_CONFIG_DIR"] == os.environ["WIRK_CONFIG_DIR"]  # WIRK's own folder stays as the listener has it
 
 
 def test_the_fallback_program_comes_from_absolute_path_entries_only(home, fakes, monkeypatch, tmp_path):
@@ -627,6 +721,27 @@ def test_a_sign_in_failure_counts_its_message_as_woken(run, home, monkeypatch, f
     a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)  # the hold clears
     ask(path, waiting(message))
     assert len(fakes.runs()) == 1 and state()["failed"]["claude"]["count"] == 1
+
+
+def test_a_grok_sign_in_failure_holds_grok_until_a_grok_command(run, home, monkeypatch, fakes, tmp_path):
+    grok_on_path(fakes)
+    fakes.write("says", "Error: Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n")
+    fakes.write("exit", "1")
+    first, second, claude = chat(home, harness="grok"), chat(home, harness="grok"), chat(home)
+    ask(first, waiting(new_id()))
+    assert state()["failed"]["grok"]["count"] == 1
+    fakes.write("ps-args", "")
+    ask(second, waiting(new_id()))
+    assert len(fakes.runs()) == 1  # held: no grok wake until a grok command succeeds
+    fakes.write("exit", "0")
+    ask(claude, waiting(new_id()))
+    assert len(fakes.runs()) == 2  # another harness is not held
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)  # a claude command does not clear it
+    ask(second, waiting(new_id()))
+    assert len(fakes.runs()) == 2
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home, harness="grok")
+    ask(second, waiting(new_id()))
+    assert len(fakes.runs()) == 3
 
 
 def test_a_lifted_hold_is_not_stamped_again(run, home, monkeypatch, fakes, tmp_path):

@@ -70,7 +70,8 @@ def run(home, capsys):
 @pytest.fixture(autouse=True)
 def outside_any_chat(monkeypatch):
     """Tests run outside an agent chat unless they set one: the IDs of the chat running them never reach them."""
-    for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"):
+    for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET",
+                 "CLAUDE_CODE_MESSAGING_TOKEN"):
         monkeypatch.delenv(name, raising=False)  # nor the inbox of the chat running them: no test can reach a real chat
     monkeypatch.setenv("WIRK_NO_UPDATE", "1")  # nothing in the suite updates an install; test_update.py turns it on
 
@@ -150,7 +151,8 @@ def fakes(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("PATH", f"{found.bin}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("HOME", str(root / "home"))
     monkeypatch.setenv("XDG_STATE_HOME", str(root / "state"))
-    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME"):  # a harness's own files are the temporary home's, never the real
+    # a harness's own files are the temporary home's, never the real
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(wake, "SYSTEM", "darwin")
     return found
