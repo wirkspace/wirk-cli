@@ -94,6 +94,18 @@ def test_the_card_is_left_to_wirks_mcp_server_where_it_is_registered():
     assert commands(settings(user_home() / ".codex" / "hooks.json"), "SessionStart") == [hooks.command("start codex")]
 
 
+def test_the_card_follows_the_mcp_server_at_every_login():
+    set_up(".claude", ".agents")
+    claude, codex = user_home() / ".claude" / "settings.json", user_home() / ".codex" / "hooks.json"
+    write(claude, handlers(hooks.command("start claude card"), hooks.command("end claude")))
+    write(user_home() / ".claude.json", {"mcpServers": {"wirk": {"command": "wirk-mcp"}}})  # registered after the first login
+    write(codex, handlers(hooks.command("start codex"), hooks.command("end codex")))
+    (user_home() / ".codex" / "config.toml").write_text('[mcp_servers.wirk]\ncommand = "wirk-mcp"\nenabled = false\n')
+    hooks.install()
+    assert commands(settings(claude), "SessionStart") == [hooks.command("start claude")]
+    assert commands(settings(codex), "SessionStart") == [hooks.command("start codex card")]  # a turned-off server carries nothing
+
+
 def test_a_harness_without_wirks_skill_gets_nothing():
     (user_home() / ".codex").mkdir(parents=True)  # Codex is here, but WIRK was not set up for it
     set_up(".claude")
@@ -119,14 +131,14 @@ def test_a_rerun_changes_nothing_and_says_nothing(capsys):
     assert (user_home() / ".claude" / "settings.json").read_bytes() == before and capsys.readouterr() == ("", "")
 
 
-def test_only_wirks_own_command_is_rewritten_and_only_for_a_new_interpreter():
+def test_wirks_own_exact_command_is_brought_up_to_date_where_it_is():
     set_up(".agents")
     path = user_home() / ".codex" / "hooks.json"
     old = "[ -x /old/python ] && /old/python -I -m wirk_cli.hooks end codex || true"
-    write(path, handlers(hooks.command("start codex"), old, "theirs.sh", old))
+    write(path, handlers(hooks.command("start codex card"), old, "theirs.sh", old))
     hooks.install()
     config = settings(path)
-    assert commands(config, "SessionStart") == [hooks.command("start codex")]  # current, so as it was
+    assert commands(config, "SessionStart") == [hooks.command("start codex card")]  # current, so as it was
     assert commands(config, "SessionEnd") == [hooks.command("end codex"), "theirs.sh", hooks.command("end codex")]
 
 
@@ -149,13 +161,14 @@ def test_a_hook_naming_the_marker_that_wirk_did_not_write_exactly_stays_as_it_is
     ('{\n  "hooks": []\n}\n', "is not a hooks file wirk can edit"),
     ('{"hooks": {}}\n', "is laid out in a way wirk cannot keep exactly"),
     ('{\n  "env": {},\n  "env": {}\n}\n', "is laid out in a way wirk cannot keep exactly"),  # a duplicate key
-], ids=["not json", "not hooks", "one line", "duplicate key"])
+    ('{\r\n  "model": "x"\r\n}\r\n', "is laid out in a way wirk cannot keep exactly"),
+], ids=["not json", "not hooks", "one line", "duplicate key", "crlf"])
 def test_a_file_wirk_cannot_edit_exactly_is_left_alone(capsys, text, why):
     set_up(".claude")
     path = user_home() / ".claude" / "settings.json"
-    path.write_text(text)
+    path.write_bytes(text.encode())
     hooks.install()
-    assert path.read_text() == text
+    assert path.read_bytes() == text.encode()
     assert capsys.readouterr().err == f"Session hooks not added to Claude Code: ~/.claude/settings.json {why}; nothing changed.\n"
 
 
@@ -175,6 +188,19 @@ def test_a_read_only_hard_linked_or_dangling_file_is_left_alone(capsys):
     hooks.install()
     assert not (user_home() / "dotfiles").exists()
     assert "settings.json is a link to a missing file; nothing changed." in capsys.readouterr().err
+
+
+def test_a_pipe_or_folder_where_the_file_goes_is_refused_without_waiting(capsys):
+    set_up(".claude")
+    path = user_home() / ".claude" / "settings.json"
+    for make in (os.mkfifo, os.mkdir):
+        make(path)
+        login = threading.Thread(target=hooks.install, daemon=True)
+        login.start()
+        login.join(5)  # a pipe nobody writes to would block a read, inside the lock, for ever
+        assert not login.is_alive()
+        assert "settings.json is not a regular file; nothing changed." in capsys.readouterr().err
+        os.rmdir(path) if path.is_dir() else path.unlink()
 
 
 def test_the_files_own_layout_is_kept():
