@@ -660,11 +660,13 @@ def listening(on, monkeypatch, versions):
     found = iter(versions)
 
     def installed():
+        wake.read += 1
         version = next(found, "99.0.0")
         if isinstance(version, Exception):
             raise version
-        return __version__ if version is None else version
+        return {None: __version__, "half": None}.get(version, version)
     monkeypatch.setattr(wake, "installed", installed)
+    monkeypatch.setattr(wake, "read", 0, raising=False)
     monkeypatch.setattr(wake, "SCAN", 0.01)
     return wake
 
@@ -695,8 +697,8 @@ def test_the_listener_never_restarts_while_an_update_holds_the_lock(on, started,
 
 def test_a_half_installed_package_never_stops_the_listener(on, started, monkeypatch):
     from importlib.metadata import PackageNotFoundError
-    wake = listening(on, monkeypatch, [PackageNotFoundError("wirk"), PackageNotFoundError("wirk")])
-    assert wake.main() == 75
+    wake = listening(on, monkeypatch, [PackageNotFoundError("wirk"), "half"])  # mid-swap, metadata may read as None
+    assert wake.main() == 75 and wake.read == 3  # the restart comes only with a version that reads whole
 
 
 def test_the_listener_reaps_the_check_it_started(on, monkeypatch):

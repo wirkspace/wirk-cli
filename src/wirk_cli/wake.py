@@ -524,7 +524,7 @@ def main(transport=None) -> int:
             while live(directory):
                 with locked(directory) as free:  # a restart under systemd would also end the update it started
                     try:
-                        newer = free and installed() != __version__
+                        newer = free and installed() not in (None, __version__)
                     except Exception:  # half installed by an update from another directory: look again next pass
                         newer = False
                 if newer:
