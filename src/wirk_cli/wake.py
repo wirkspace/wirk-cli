@@ -220,7 +220,7 @@ def state():
             data = json.loads(read_private(path))
         except (OSError, ValueError, Failure):  # lost or broken: at most one more wake per chat
             data = {}
-        data = {"wakes": [], "woken": {}, "delivered": {}, "failed": {}, **data}
+        data = {"wakes_by_chat": {}, "woken": {}, "delivered": {}, "failed": {}, **data}
         before = json.dumps(data)
         yield data
         if json.dumps(data) != before:
@@ -292,7 +292,11 @@ def wake(path: Path, found: dict, message: str) -> None:
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
-        data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
+        data["wakes_by_chat"] = {other: kept for other, theirs in data["wakes_by_chat"].items()
+                                 if (kept := [t for t in theirs if now - t < HOUR])}
+        if all(now - t >= HOUR for t in data.get("wakes", [])):  # 0.4.34's shared count, spent; it starts one again
+            data.pop("wakes", None)
+        times = data["wakes_by_chat"].get(chat, [])
         up = alive(found)
         door = name == "claude" and up
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
@@ -304,15 +308,15 @@ def wake(path: Path, found: dict, message: str) -> None:
             why = f"the chat is open and {name} has no way in while it runs; woken once it stops"
         elif not door and any(found["id"] in line for line in arguments()):
             why = "the chat runs in a process its record does not name; woken once that stops"
-        elif len(data["wakes"]) >= CAP:
-            why = f"{CAP} wakes this hour already"
+        elif len(times) >= CAP:
+            why = f"this chat was woken {len(times)} times this hour already"
         else:
             why = None
         if why:
             note(path, f"no wake: {why}", message)
             return
         done[chat] = message
-        data["wakes"].append(now)
+        data["wakes_by_chat"][chat] = times + [now]
         started = None if door else resume(path, found)
     if door:
         failure = deliver(found)
@@ -320,13 +324,19 @@ def wake(path: Path, found: dict, message: str) -> None:
             with state() as data:  # nothing reached the chat: the next round may try, unless a newer one claimed it
                 if data["delivered"].get(chat) == message:
                     del data["delivered"][chat]
-                data["wakes"] = [t for t in data["wakes"] if t != now]
+                taken_back(data, chat, now)
         note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox", message)  # after the undo
     if started and refused(name, *started):
         with state() as data:
-            data["wakes"] = [t for t in data["wakes"] if t != now]  # its message counts as woken; the cap does not
+            taken_back(data, chat, now)  # its message counts as woken; the cap does not
             failure = data["failed"].setdefault(name, {"count": 0, "told": 0})
             failure.update(count=failure["count"] + 1, at=now)
+
+
+def taken_back(data: dict, chat: str, now: float) -> None:
+    """A wake that reached nothing does not count against its chat's cap; nothing to take when the file was lost."""
+    if now in (times := data["wakes_by_chat"].get(chat, [])):
+        times.remove(now)
 
 
 def held(data: dict, name: str) -> bool:
