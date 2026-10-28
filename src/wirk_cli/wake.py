@@ -288,8 +288,8 @@ def ask(path: Path, transport=None) -> bool:
 def wake(path: Path, found: dict, message: str) -> None:
     """Wake the chat for MESSAGE once, under the cap, decided under the state lock so one session is woken once: an open
     Claude Code chat (its recorded process alive) gets the prompt in its inbox, outside the lock; any other chat is
-    resumed, only when it is not running and its harness is not held after a sign-in failure. Every outcome, a wake
-    that does not happen included, is noted in the chat's .wake.log."""
+    resumed, only when it is not running and its harness is not held after a sign-in failure. A delivery and each wake
+    held back are noted in the chat's .wake.log, where a resumed run writes its own output."""
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
