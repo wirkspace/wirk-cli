@@ -23,7 +23,7 @@ import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from . import __version__
+from . import __version__, update
 from .client import UUID, Failure, Service, actor_binding, actor_path, chosen, config_dir, launcher, read_private, \
     read_token, saved_url
 from .update import locked
@@ -511,16 +511,24 @@ def installed() -> str:
 
 
 def main(transport=None) -> int:
-    """The job: one wait per admitted chat, rescanned every minute; exits 75 for a new version, 0 when its directory or
-    last token is gone (after removing itself) or another listener holds this directory."""
+    """The job: one wait per admitted chat, rescanned every minute, and the hourly update check, so an idle machine
+    stays current; exits 75 for a new version once no update holds its lock, 0 when its directory or last token is gone
+    (after removing itself) or another listener holds this directory."""
     directory, waits = config_dir(), {}
     if live(directory):  # checked first: the lock would make the directory again
         with locked(directory, name="listener.lock") as mine:
             if not mine:
                 return 0
             while live(directory):
-                if installed() != __version__:
+                with locked(directory) as free:  # a restart under systemd would also end the update it started
+                    try:
+                        newer = free and installed() != __version__
+                    except Exception:  # half installed by an update from another directory: look again next pass
+                        newer = False
+                if newer:
                     return 75
+                if checking := update.after(show=False):  # its notice is for a person's next command
+                    RUNS.append(checking)
                 wanted = admitted(directory)
                 for path in list(waits):
                     if path not in wanted:

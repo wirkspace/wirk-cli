@@ -648,3 +648,66 @@ def test_two_checks_under_one_home_each_write_their_own_temporary_file(on, tmp_p
     assert update.refresh_skill(github()) == [] and other[1] == []
     assert path.read_text() == skill("0.4.29") and [p.name for p in path.parent.iterdir()] == ["SKILL.md"]
 
+
+# The hourly check, in the listener: an idle machine updates with no command run
+
+
+def listening(on, monkeypatch, versions):
+    """The listener of ON's directory, its passes a moment apart, the installed version read from VERSIONS in turn."""
+    from wirk_cli import __version__, wake
+    on.mkdir(exist_ok=True)
+    (on / "agent-token").write_text("wirk_" + "0" * 32)
+    found = iter(versions)
+
+    def installed():
+        version = next(found, "99.0.0")
+        if isinstance(version, Exception):
+            raise version
+        return __version__ if version is None else version
+    monkeypatch.setattr(wake, "installed", installed)
+    monkeypatch.setattr(wake, "SCAN", 0.01)
+    return wake
+
+
+def test_an_idle_listener_starts_the_hourly_check_and_leaves_the_notice_to_commands(on, started, monkeypatch, capsys):
+    wake = listening(on, monkeypatch, [None, None, None])
+    (on / "update.json").write_text(json.dumps({"notice": "wirk 0.4.27 is out"}))
+    assert wake.main() == 75
+    [(argv, how)] = started  # once in three passes: the hour is shared with commands
+    assert argv == update.CHILD and how["start_new_session"] and how["cwd"] == on
+    assert "0.4.27" not in capsys.readouterr().err and "shown" not in state(on)
+
+
+def test_the_listener_never_restarts_while_an_update_holds_the_lock(on, started, monkeypatch):
+    wake = listening(on, monkeypatch, [])  # a new version from the first pass
+    holder = os.open(on / "update.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    import fcntl
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    result = []
+    listener = threading.Thread(target=lambda: result.append(wake.main()))
+    listener.start()
+    time.sleep(0.3)
+    assert listener.is_alive() and result == []  # many passes, none of them a restart under a running update
+    os.close(holder)
+    listener.join(timeout=5)
+    assert result == [75]
+
+
+def test_a_half_installed_package_never_stops_the_listener(on, started, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+    wake = listening(on, monkeypatch, [PackageNotFoundError("wirk"), PackageNotFoundError("wirk")])
+    assert wake.main() == 75
+
+
+def test_the_listener_reaps_the_check_it_started(on, monkeypatch):
+    wake = listening(on, monkeypatch, [None, None, None])
+    monkeypatch.setattr(update, "CHILD", [sys.executable, "-c", "pass"])
+    spawned, real = [], update.after
+    monkeypatch.setattr(update, "after", lambda show=True: spawned.append(real(show)) or spawned[-1])
+    assert wake.main() == 75
+    assert spawned[0] is not None and spawned[0].returncode is not None and spawned[0] not in wake.RUNS
+
+
+def test_wirk_no_update_keeps_the_listener_from_checking(on, started, monkeypatch):
+    monkeypatch.setenv("WIRK_NO_UPDATE", "1")
+    assert listening(on, monkeypatch, [None]).main() == 75 and started == []
