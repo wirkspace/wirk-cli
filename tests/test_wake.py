@@ -100,6 +100,18 @@ def write_state(data):
     write_token(wake.state_dir() / "wake.json", json.dumps(data))
 
 
+def name_of(path):
+    return path.name.removesuffix(".wake")
+
+
+def wakes_of(path):
+    """The times this chat was woken in the last hour, as the cap counts them."""
+    return state().get("wakes_by_chat", {}).get(name_of(path), [])
+
+
+HELD_BY_THE_CAP = "no wake: this chat was woken 10 times this hour already"
+
+
 def signed_in(binding):
     """A chat of BINDING with a token kept here."""
     path = client.actor_path(URL, binding)
@@ -573,7 +585,7 @@ def test_losing_the_state_file_wakes_at_most_once_per_chat(home, fakes):
     assert len(fakes.runs()) == 2
 
 
-def test_ten_wakes_an_hour_per_user_across_configuration_directories(home, fakes, tmp_path, monkeypatch):
+def test_every_chat_gets_its_own_ten_wakes_an_hour_across_configuration_directories(home, fakes, tmp_path, monkeypatch):
     other = tmp_path / "other-config"
     other.mkdir(mode=0o700)
     paths = [chat(home) for _ in range(6)]
@@ -581,18 +593,68 @@ def test_ten_wakes_an_hour_per_user_across_configuration_directories(home, fakes
     paths += [chat(other) for _ in range(5)]
     for path in paths:
         ask(path, waiting(new_id()))
-    assert len(fakes.runs()) == 10 and len(state()["wakes"]) == 10
+    assert len(fakes.runs()) == 11 and all(len(wakes_of(path)) == 1 for path in paths)
+    assert "wakes" not in state()  # the shared list of 0.4.34 and before is never written again
 
 
-def test_a_held_back_wake_follows_when_the_hour_allows(home, fakes):
+def woken_ten_times(path, fakes):
+    """Ten messages, each woken by its own resume that has ended before the next."""
+    for _ in range(10):
+        ask(path, waiting(new_id()))
+        fakes.write("ps-args", "")
+
+
+def test_one_busy_chat_never_spends_another_chats_wakes(home, fakes):
+    busy, quiet = chat(home), chat(home)
+    woken_ten_times(busy, fakes)
+    ask(busy, waiting(new_id()))
+    assert len(fakes.runs()) == 10 and outcomes(busy)[-1] == HELD_BY_THE_CAP
+    ask(quiet, waiting(new_id()))
+    assert len(fakes.runs()) == 11 and len(wakes_of(quiet)) == 1
+
+
+def test_one_session_in_two_configuration_directories_has_one_count(home, fakes, tmp_path, monkeypatch):
+    session = new_id()
+    first = chat(home, session=session)
+    other = tmp_path / "other-config"
+    other.mkdir(mode=0o700)
+    monkeypatch.setenv("WIRK_CONFIG_DIR", str(other))
+    second = chat(other, session=session)
+    woken_ten_times(first, fakes)
+    ask(second, waiting(new_id()))
+    assert len(fakes.runs()) == 10 and outcomes(second) == [HELD_BY_THE_CAP]
+
+
+def test_a_held_back_wake_follows_when_the_chats_hour_allows(home, fakes):
     path, message = chat(home), new_id()
-    write_state({"wakes": [time.time() - 3500] * 10})
+    write_state({"wakes_by_chat": {name_of(path): [time.time() - 3500] * 10}})
     ask(path, waiting(message))
     assert fakes.runs() == [] and state().get("woken", {}) == {}  # held back, not recorded
-    assert outcomes(path) == ["no wake: 10 wakes this hour already"]
-    write_state({"wakes": [time.time() - 3700] * 10})
+    assert outcomes(path) == [HELD_BY_THE_CAP]
+    write_state({"wakes_by_chat": {name_of(path): [time.time() - 3700] * 10}})
     ask(path, waiting(message))
-    assert len(fakes.runs()) == 1 and len(state()["wakes"]) == 1
+    assert len(fakes.runs()) == 1 and len(wakes_of(path)) == 1
+
+
+def test_a_chat_with_no_wake_in_the_hour_leaves_the_count(home, fakes):
+    path = chat(home)
+    write_state({"wakes_by_chat": {"gone": [time.time() - 3700], "emptied": []}})
+    ask(path, waiting(new_id()))
+    assert list(state()["wakes_by_chat"]) == [name_of(path)]
+
+
+@pytest.mark.parametrize("old", [{"wakes": [1.0] * 10},
+                                 {"wakes": [1.0] * 10, "woken": {"another": "m1"}, "delivered": {"open": "m2"},
+                                  "failed": {"codex": {"count": 1, "told": 1, "at": 1.0, "ran": 2.0}}}])
+def test_the_shared_list_of_0_4_34_neither_caps_a_chat_nor_is_wiped(home, fakes, old):
+    """An older listener still sharing the file keeps its own list; a dict there would stop it from waking anyone."""
+    old = {**old, "wakes": [time.time() - 60] * 10}
+    write_state(old)
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert len(fakes.runs()) == 1 and len(wakes_of(path)) == 1
+    after = state()
+    assert after["woken"].pop(name_of(path)) and all(after[key] == value for key, value in old.items())
 
 
 class Rounds:
@@ -711,10 +773,26 @@ def test_a_sign_in_failure_counts_its_message_as_woken(run, home, monkeypatch, f
     fakes.write("exit", "1")
     path, message = chat(home), new_id()
     ask(path, waiting(message))
-    assert state()["woken"] == {path.name.removesuffix(".wake"): message} and state()["wakes"] == []
+    assert state()["woken"] == {path.name.removesuffix(".wake"): message} and wakes_of(path) == []
     a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)  # the hold clears
     ask(path, waiting(message))
     assert len(fakes.runs()) == 1 and state()["failed"]["claude"]["count"] == 1
+
+
+def test_a_sign_in_failure_is_not_counted_against_the_chats_cap(run, home, monkeypatch, fakes, tmp_path):
+    path = chat(home)
+    write_state({"wakes_by_chat": {name_of(path): [time.time() - 60] * 9}})
+    fakes.write("says", SIGN_IN_REFUSAL)
+    fakes.write("exit", "1")
+    ask(path, waiting(new_id()))  # refused: its message counts as woken, the wake does not
+    for name in ("says", "exit", "ps-args"):
+        fakes.write(name, "")
+    a_command_in_a_chat(run, monkeypatch, fakes, tmp_path, home)  # the hold clears
+    ask(path, waiting(new_id()))  # the tenth
+    fakes.write("ps-args", "")
+    ask(path, waiting(new_id()))
+    last = path.with_name(path.name + ".log").read_text().splitlines()[-1]  # the log holds the runs' output too
+    assert len(fakes.runs()) == 2 and HELD_BY_THE_CAP in last
 
 
 def test_a_grok_sign_in_failure_holds_grok_until_a_grok_command(run, home, monkeypatch, fakes, tmp_path):
@@ -758,8 +836,9 @@ def test_the_state_files_are_private(home, fakes):
 def test_any_other_failure_counts_against_the_cap(home, fakes):
     fakes.write("says", "something else went wrong\n")
     fakes.write("exit", "1")
-    ask(chat(home), waiting(new_id()))
-    assert len(state()["wakes"]) == 1 and not state().get("failed")
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert len(wakes_of(path)) == 1 and not state().get("failed")
 
 
 def test_the_next_command_prints_one_failed_wake_line_once(run, fakes):
@@ -862,7 +941,7 @@ def test_an_open_chat_gets_one_line_in_its_inbox_and_no_second_process(home, fak
     assert sent == line(prompt(f" workspace_id={space}")) and message.encode() not in sent
     assert fakes.runs() == [] and record_of(path) == record
     assert state()["delivered"] == {path.name.removesuffix(".wake"): message} and state()["woken"] == {}
-    assert len(state()["wakes"]) == 1 and outcomes(path) == ["sent into the open chat's inbox"]
+    assert len(wakes_of(path)) == 1 and outcomes(path) == ["sent into the open chat's inbox"]
     assert "inbox" not in record and (fakes.root / "lsof-calls").read_text() == f"lsof -a -p {os.getpid()} -U -Fn\n"
 
 
@@ -899,7 +978,7 @@ def test_no_line_unless_claude_code_lists_the_session_idle_or_busy_at_its_proces
         fakes.write("agents", "Claude Code is updating")
     ask(path, waiting(new_id()))
     assert inbox.lines() == [] and fakes.runs() == []
-    assert state().get("delivered", {}) == {} and state()["wakes"] == []  # undone: the next round may try again
+    assert state().get("delivered", {}) == {} and wakes_of(path) == []  # undone: the next round may try again
     [noted] = outcomes(path)
     reason = {"waiting on its person": ", waiting", "lookup fails": "CalledProcessError", "not json": "JSONDecodeError"}
     assert noted.startswith("not delivered: ") and reason.get(listed, "") in noted
@@ -913,7 +992,7 @@ def test_no_line_when_the_listening_process_is_not_the_chats(home, fakes):
         fakes.agents((record_of(path)["id"], 4242, "idle"))
         fakes.sockets(4242, other.path)
         ask(path, waiting(new_id()))
-        assert other.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+        assert other.lines() == [] and fakes.runs() == [] and wakes_of(path) == []
         assert outcomes(path) == [f"not delivered: the inbox's listener is process {os.getpid()}, not 4242"]
     finally:
         other.close()
@@ -930,7 +1009,7 @@ def test_no_line_unless_the_process_holds_exactly_one_inbox_socket(home, fakes, 
         paths = {"none": [], "only other names": [os.path.join(elsewhere, "ide.sock")], "two": [inbox.path, mine]}
         fakes.sockets(os.getpid(), *paths.get(held, [mine]))
         ask(path, waiting(new_id()))
-        assert inbox.lines() == [] and fakes.runs() == [] and state()["wakes"] == []
+        assert inbox.lines() == [] and fakes.runs() == [] and wakes_of(path) == []
         [noted] = outcomes(path)
         expected = {"none": "0 inbox sockets", "only other names": "0 inbox sockets", "two": "2 inbox sockets",
                     "gone": "FileNotFoundError", "a regular file": "Error"}[held]  # its name differs by system
@@ -1083,11 +1162,22 @@ def test_a_delivered_message_still_resumes_the_chat_once_it_stops(home, fakes, i
     assert len(inbox.lines()) == 1 and len(fakes.runs()) == 1
 
 
-def test_an_open_chat_counts_against_the_hourly_cap(home, fakes, inbox):
-    write_state({"wakes": [time.time() - 60] * 10})
+def test_an_open_chat_counts_against_its_own_hourly_cap(home, fakes, inbox):
     path = open_chat(home, fakes, inbox)
+    write_state({"wakes_by_chat": {name_of(path): [time.time() - 60] * 10}})
     ask(path, waiting(new_id()))
-    assert inbox.lines() == [] and fakes.runs() == [] and outcomes(path) == ["no wake: 10 wakes this hour already"]
+    assert inbox.lines() == [] and fakes.runs() == [] and outcomes(path) == [HELD_BY_THE_CAP]
+
+
+def test_a_delivery_that_reached_nothing_is_not_counted(home, fakes, inbox):
+    path = open_chat(home, fakes, inbox)
+    write_state({"wakes_by_chat": {name_of(path): [time.time() - 60] * 9}})
+    fakes.agents()  # not listed: nothing is sent, and the wake is taken back
+    ask(path, waiting(new_id()))
+    fakes.agents((record_of(path)["id"], os.getpid(), "idle"))
+    ask(path, waiting(new_id()))  # the tenth
+    ask(path, waiting(new_id()))
+    assert len(inbox.lines()) == 1 and outcomes(path)[-1] == HELD_BY_THE_CAP
 
 
 def test_an_undo_never_removes_a_newer_claim(home, fakes, inbox):
@@ -1116,7 +1206,7 @@ def test_a_note_that_cannot_be_written_never_keeps_a_failed_claim(home, fakes, i
         ask(path, waiting(new_id()))
     except OSError:  # the note is refused; the listener's round goes on
         pass
-    assert state().get("delivered", {}) == {} and state()["wakes"] == []
+    assert state().get("delivered", {}) == {} and wakes_of(path) == []
 
 
 def test_the_lookup_sees_the_chats_session_store_never_the_listeners_own(home, fakes, inbox, monkeypatch):
