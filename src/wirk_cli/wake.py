@@ -292,9 +292,9 @@ def wake(path: Path, found: dict, message: str) -> None:
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
-        data["wakes_by_chat"] = {other: kept for other, times in data["wakes_by_chat"].items()
-                                 if (kept := [t for t in times if now - t < HOUR])}
-        hour = data["wakes_by_chat"].get(chat, [])
+        data["wakes_by_chat"] = {other: kept for other, theirs in data["wakes_by_chat"].items()
+                                 if (kept := [t for t in theirs if now - t < HOUR])}
+        times = data["wakes_by_chat"].get(chat, [])
         up = alive(found)
         door = name == "claude" and up
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
@@ -306,15 +306,15 @@ def wake(path: Path, found: dict, message: str) -> None:
             why = f"the chat is open and {name} has no way in while it runs; woken once it stops"
         elif not door and any(found["id"] in line for line in arguments()):
             why = "the chat runs in a process its record does not name; woken once that stops"
-        elif len(hour) >= CAP:
-            why = f"this chat was woken {len(hour)} times this hour already"
+        elif len(times) >= CAP:
+            why = f"this chat was woken {len(times)} times this hour already"
         else:
             why = None
         if why:
             note(path, f"no wake: {why}", message)
             return
         done[chat] = message
-        data["wakes_by_chat"][chat] = hour + [now]
+        data["wakes_by_chat"][chat] = times + [now]
         started = None if door else resume(path, found)
     if door:
         failure = deliver(found)
