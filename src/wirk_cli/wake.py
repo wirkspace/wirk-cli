@@ -28,7 +28,7 @@ from .client import UUID, Failure, Service, actor_binding, actor_path, chosen, c
     read_token, saved_url
 from .update import locked
 
-SYSTEM, PROC = sys.platform, Path("/proc")
+SYSTEM, PROC, LSOF = sys.platform, Path("/proc"), "/usr/sbin/lsof"  # lsof by its path: the job's PATH is a login's
 IDS = {"claude": "CLAUDE_CODE_SESSION_ID", "codex": "CODEX_THREAD_ID", "grok": "GROK_SESSION_ID"}  # each harness's chat
 HOMES = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "grok": "GROK_HOME"}  # where each keeps its sessions
 REFUSALS = {"claude": ("Failed to authenticate", "Please run /login", "Invalid API key"),
@@ -73,9 +73,24 @@ def arguments() -> list[str]:
 def directory_of(pid: int) -> str:
     if SYSTEM == "linux":
         return os.readlink(PROC / str(pid) / "cwd")
-    listed = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True,
+    listed = subprocess.run([LSOF, "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True,
                             timeout=10).stdout
     return next(line[1:] for line in listed.splitlines() if line.startswith("n"))
+
+
+def sockets(pid: int) -> list[str]:
+    """The paths of the Unix sockets process PID itself has bound under Claude Code's name for a session's inbox,
+    <pid>.sock, as the kernel reports them: lsof on macOS, the process's own /proc entries on Linux (listening sockets
+    only, in its network namespace). Never what the chat or its record says."""
+    if SYSTEM == "linux":
+        own = {os.readlink(link) for link in (PROC / str(pid) / "fd").iterdir() if link.is_symlink()}
+        rows = [line.split(None, 7) for line in (PROC / str(pid) / "net" / "unix").read_text().splitlines()[1:]]
+        paths = [row[7] for row in rows if len(row) == 8 and f"socket:[{row[6]}]" in own and int(row[3], 16) & 0x10000]
+    else:
+        listed = subprocess.run([LSOF, "-a", "-p", str(pid), "-U", "-Fn"], capture_output=True, text=True,
+                                timeout=LOOKUP).stdout  # a listening socket and the connections it accepted share a path
+        paths = [line[1:] for line in listed.splitlines() if line.startswith("n/")]
+    return list(dict.fromkeys(path for path in paths if os.path.basename(path) == f"{pid}.sock"))
 
 
 def harness() -> dict | None:
@@ -136,11 +151,6 @@ def save(path: Path, data) -> None:
         raise
 
 
-def inbox(name: str) -> str | None:
-    """The cross-session inbox socket a Claude Code session exports to its own commands; a thread chat has none."""
-    return os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET") or None if name == "claude" else None
-
-
 def record(url: str, binding: str) -> None:
     """Beside a chat's token, how to resume it: only for a chat that owns its harness process."""
     try:
@@ -157,7 +167,7 @@ def record(url: str, binding: str) -> None:
         path = wake_path(url, binding)
         kept = json.loads(read_private(path))["wirkspace"] if path.exists() else None  # a login names none
         save(path, {**found, "cwd": directory_of(found["pid"]), "id": mine[0], "env": env, "url": url,
-                    "wirkspace": chosen(url, binding) or kept, "last": int(time.time()), "inbox": inbox(name)})
+                    "wirkspace": chosen(url, binding) or kept, "last": int(time.time())})
     except Exception:  # a wake is extra: enrolment stands without it
         pass
 
@@ -183,17 +193,14 @@ def after(code: int) -> None:
 
 
 def refresh(path: Path, used: str | None) -> str:
-    """The time of the command, the wirkspace it named or chose (wirk wirkspace NAME) and, when it runs in the chat's
-    own process tree, that process and its inbox; gives the chat's harness."""
+    """The time of the command, the wirkspace it named or chose (wirk wirkspace NAME) and, when it runs in another
+    process of the chat, that one; gives the chat's harness."""
     old = json.loads(read_private(path))
     new = {**old, "last": int(time.time()), "wirkspace": used or old["wirkspace"]}
     found = harness()
-    if found and found["harness"] == old["harness"]:
-        moved = (found["pid"], found["started"]) != (old["pid"], old["started"])
-        if (moved or found["harness"] == "claude") and owns(found, old["id"]):  # a thread's check reads every process
-            new.update(found, inbox=inbox(found["harness"]))  # the inbox always comes with the process it belongs to
-            if moved:
-                new["cwd"] = directory_of(found["pid"])
+    if found and found["harness"] == old["harness"] and (found["pid"], found["started"]) != (old["pid"], old["started"]) \
+            and owns(found, old["id"]):  # a thread's check reads every process: only when the process moved
+        new.update(found, cwd=directory_of(found["pid"]))
     if new != old:
         save(path, new)
     return old["harness"]
@@ -279,13 +286,13 @@ def ask(path: Path, transport=None) -> bool:
 
 def wake(path: Path, found: dict, message: str) -> None:
     """Wake the chat for MESSAGE once, under the cap, decided under the state lock so one session is woken once: an open
-    Claude Code chat (its recorded process alive, with an inbox) gets the prompt in its inbox, outside the lock; any
-    other chat is resumed, only when it is not running and its harness is not held after a sign-in failure."""
+    Claude Code chat (its recorded process alive) gets the prompt in its inbox, outside the lock; any other chat is
+    resumed, only when it is not running and its harness is not held after a sign-in failure."""
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
-        door = bool(found.get("inbox")) and alive(found)
+        door = name == "claude" and alive(found)
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
         if done.get(chat) == message or not door and (held(data, name) or running(found)):
             return
@@ -317,10 +324,11 @@ def held(data: dict, name: str) -> bool:
 
 
 def deliver(found: dict) -> str | None:
-    """The fixed prompt into the open chat's own inbox, the Unix socket Claude Code binds for each session and exports
-    to its commands as CLAUDE_CODE_MESSAGING_SOCKET: Claude Code starts a turn in an idle session and gives a busy one
-    the message between tool calls. Only when `claude agents --json`, run with the chat's own session store, lists the
-    chat's session, idle or busy, at the recorded process and nowhere else, and the kernel names that process as the
+    """The fixed prompt into the open chat's own inbox, the Unix socket Claude Code binds for each session (and exports
+    to its commands as CLAUDE_CODE_MESSAGING_SOCKET, which the listener never reads): Claude Code starts a turn in an
+    idle session and gives a busy one the message between tool calls. Only when `claude agents --json`, run with the
+    chat's own session store, lists the chat's session, idle or busy, at the recorded process and nowhere else; that
+    process holds exactly one socket under the inbox's name (sockets()); and the kernel names that process as the
     socket's listener. The line is a stream-json user message, the form Claude Code's own debug log gives as its
     example; it is not on a public page. Claude Code records the sender's PID as verified only when the sender
     half-closes and waits for it to close the socket. Nothing tells the listener what the chat did with the line.
@@ -334,9 +342,11 @@ def deliver(found: dict) -> str | None:
         if mine not in ([(found["id"], found["pid"], "idle")], [(found["id"], found["pid"], "busy")]):
             return "listed " + (", ".join(f"{session} at process {pid}, {status}" for session, pid, status in mine)
                                 or "nowhere")
+        if len(held := sockets(found["pid"])) != 1:
+            return f"process {found['pid']} holds {len(held)} inbox sockets"
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(2)
-            connection.connect(found["inbox"])
+            connection.connect(held[0])
             if (peer := listener(connection)) != found["pid"]:
                 return f"the inbox's listener is process {peer}, not {found['pid']}"
             line = {"type": "user", "message": {"role": "user", "content": prompt(found)}}
