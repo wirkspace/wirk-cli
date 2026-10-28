@@ -112,6 +112,9 @@ There is no telemetry. People keep a separate token of their own for their own d
 ### 0.4.32
 
 - The listener wakes an open Claude Code chat too, through the chat's own cross-session inbox, instead of leaving it until it stops (see Waking a chat).
+- Grok: each Grok session signs in to WIRK as its own agent, the listener resumes a stopped Grok session, the installer sets Grok up like Claude Code and Codex (its rules file included), and the hourly skill refresh keeps Grok's copy current.
+- The listener waits for a chat in the wirkspace it chose with `wirk wirkspace NAME`.
+- The privacy scan reads a branch's own commits on pull requests, and every public commit on main and tags.
 
 ### 0.4.31
 
