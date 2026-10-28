@@ -26,7 +26,6 @@ from pathlib import Path
 from . import __version__, update
 from .client import UUID, Failure, Service, actor_binding, actor_path, chosen, config_dir, launcher, read_private, \
     read_token, saved_url
-from .update import locked
 
 SYSTEM, PROC = sys.platform, Path("/proc")
 IDS = {"claude": "CLAUDE_CODE_SESSION_ID", "codex": "CODEX_THREAD_ID", "grok": "GROK_SESSION_ID"}  # each harness's chat
@@ -210,7 +209,7 @@ def state_dir() -> Path:
 def state():
     """wake.json under wake.lock: every listener of this user, in every configuration directory, shares it."""
     directory = state_dir()
-    with locked(directory, wait=True, name="wake.lock"):
+    with update.locked(directory, wait=True, name="wake.lock"):
         path = directory / "wake.json"
         try:
             data = json.loads(read_private(path))
@@ -518,11 +517,11 @@ def main(transport=None) -> int:
     (after removing itself) or another listener holds this directory."""
     directory, waits = config_dir(), {}
     if live(directory):  # checked first: the lock would make the directory again
-        with locked(directory, name="listener.lock") as mine:
+        with update.locked(directory, name="listener.lock") as mine:
             if not mine:
                 return 0
             while live(directory):
-                with locked(directory) as free:  # a restart under systemd would also end the update it started
+                with update.locked(directory) as free:  # a restart under systemd would also end the update it started
                     try:
                         newer = free and installed() not in (None, __version__)
                     except Exception:  # half installed by an update from another directory: look again next pass
