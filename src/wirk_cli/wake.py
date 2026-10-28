@@ -83,7 +83,10 @@ def sockets(pid: int) -> list[str]:
     <pid>.sock, as the kernel reports them: lsof on macOS, the process's own /proc entries on Linux (listening sockets
     only, in its network namespace). Never what the chat or its record says."""
     if SYSTEM == "linux":
-        own = {os.readlink(link) for link in (PROC / str(pid) / "fd").iterdir() if link.is_symlink()}
+        own = set()
+        for link in (PROC / str(pid) / "fd").iterdir():
+            with suppress(OSError):  # a descriptor closed since the listing
+                own.add(os.readlink(link))
         rows = [line.split(None, 7) for line in (PROC / str(pid) / "net" / "unix").read_text().splitlines()[1:]]
         paths = [row[7] for row in rows if len(row) == 8 and f"socket:[{row[6]}]" in own and int(row[3], 16) & 0x10000]
     else:

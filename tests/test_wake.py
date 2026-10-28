@@ -962,8 +962,16 @@ def test_on_linux_the_inbox_comes_from_the_processs_own_proc_entries(home, fakes
     pid, proc = os.getpid(), tmp_path / "proc"
     (proc / str(pid) / "fd").mkdir(parents=True)
     (proc / str(pid) / "net").mkdir()
-    for fd, target in {"3": "socket:[100]", "4": "socket:[101]", "5": "socket:[102]", "6": "pipe:[7]"}.items():
+    for fd, target in {"3": "socket:[100]", "4": "socket:[101]", "5": "socket:[102]", "6": "pipe:[7]",
+                       "7": "socket:[103]"}.items():
         (proc / str(pid) / "fd" / fd).symlink_to(target)
+    real = os.readlink
+
+    def readlink(link):
+        if str(link).endswith("/fd/7"):  # closed between the listing and the look
+            raise FileNotFoundError(link)
+        return real(link)
+    monkeypatch.setattr(wake.os, "readlink", readlink)
     rows = [("100", "00010000", inbox.path), ("101", "00000000", inbox.path), ("102", "00010000", f"@{pid}.sock"),
             ("999", "00010000", f"/tmp/not-its/{pid}.sock")]  # 999: in the table, not among its descriptors
     (proc / str(pid) / "net" / "unix").write_text(
