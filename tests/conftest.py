@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 import httpx
 import pytest
@@ -43,6 +44,28 @@ class Fake:
 def write_token(path, value):
     path.write_text(value)
     path.chmod(0o600)
+
+
+def process_state(pid):
+    """What the system's ps says of PID, asked without subprocess, whose next start would reap it on its own."""
+    read, write = os.pipe()
+    asked = os.posix_spawn("/bin/ps", ["ps", "-o", "stat=", "-p", str(pid)], dict(os.environ),
+                           file_actions=[(os.POSIX_SPAWN_DUP2, write, 1)])
+    os.close(write)
+    with os.fdopen(read) as out:
+        text = out.read().strip()
+    os.waitpid(asked, 0)
+    return text
+
+
+def exited(pid):
+    """Whether PID exits within 10 s and stays unreaped, a zombie (Z) to ps, until its parent reaps it."""
+    deadline = time.monotonic() + 10
+    while not process_state(pid).startswith("Z"):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 @pytest.fixture

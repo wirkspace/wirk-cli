@@ -618,7 +618,7 @@ COMMANDS = {"status": status, "query": query, "write": write, "review": review, 
 def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     code = run(argv, transport)
-    update.after(argv[0] if argv and not argv[0].startswith("-") else "")
+    update.after(show=argv[:1] != ["login"])  # the installer's own login never shows a notice it just made stale
     wake.after(code)
     return code
 

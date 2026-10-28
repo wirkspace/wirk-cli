@@ -774,7 +774,7 @@ def test_login_installs_the_listener_once_on_macos_and_linux(fresh, capsys, fake
         label = path.stem
         assert plistlib.loads(first) == {
             "Label": label, "ProgramArguments": [sys.executable, "-I", "-m", "wirk_cli.wake"],
-            "EnvironmentVariables": {"WIRK_CONFIG_DIR": where, "PATH": search}, "RunAtLoad": True,
+            "EnvironmentVariables": {"WIRK_CONFIG_DIR": where, "PATH": search, "WIRK_NO_UPDATE": "1"}, "RunAtLoad": True,
             "KeepAlive": {"SuccessfulExit": False}}
         installed = [f"launchctl print gui/{os.getuid()}/{label}", f"launchctl bootstrap gui/{os.getuid()} {path}"]
         again = [f"launchctl print gui/{os.getuid()}/{label}"]
@@ -782,6 +782,7 @@ def test_login_installs_the_listener_once_on_macos_and_linux(fresh, capsys, fake
         text = first.decode()
         assert f'ExecStart="{sys.executable}" -I -m wirk_cli.wake\n' in text and "Restart=on-failure\n" in text
         assert f'Environment="WIRK_CONFIG_DIR={where}"\n' in text and f'Environment="PATH={search}"\n' in text
+        assert 'Environment="WIRK_NO_UPDATE=1"\n' in text  # the suite's own: an install that turned updates off
         assert "WantedBy=default.target\n" in text
         installed = ["systemctl --user daemon-reload", f"systemctl --user enable {path.name}",
                      f"systemctl --user restart {path.name}"]
@@ -789,6 +790,15 @@ def test_login_installs_the_listener_once_on_macos_and_linux(fresh, capsys, fake
     assert fakes.calls() == installed
     assert login([], without_web_sign_in(logged_in), capsys)[0] == 0
     assert path.read_bytes() == first and fakes.calls() == installed + again  # unchanged: not written, not reloaded
+
+
+@pytest.mark.parametrize("system", ["darwin", "linux"])
+def test_a_job_carries_wirk_no_update_only_when_login_had_it(fresh, capsys, fakes, monkeypatch, system):
+    monkeypatch.setattr(wake, "SYSTEM", system)
+    monkeypatch.delenv("WIRK_NO_UPDATE")
+    login([], without_web_sign_in(logged_in), capsys)
+    text = job_file(fresh, system).read_text()
+    assert "WIRK_NO_UPDATE" not in text and "WIRK_CONFIG_DIR" in text
 
 
 def test_two_spellings_of_one_directory_install_one_job(fresh, capsys, fakes, monkeypatch, tmp_path):
