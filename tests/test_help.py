@@ -91,9 +91,13 @@ PRIVATE = ["/Us" "ers/", r"/home/[a-z]", r"\b(?:wsp|item|change|proposal|link|ac
 
 
 def history(root: Path) -> str:
-    """Each commit's author and message; the files themselves are scanned one by one."""
-    return subprocess.run(["git", "-C", str(root), "log", "--all", "--format=%an %ae%n%B"],
-                          capture_output=True, text=True, check=True).stdout
+    """Each commit's author and message. On a branch, its own commits (those origin/main lacks), so another branch's
+    messages never fail it; on main or at a tag, every public commit, so a push of several, a merge or a skipped run
+    leaves none unread. A checkout without origin/main fails. The files themselves are scanned one by one."""
+    def log(*revisions):
+        return subprocess.run(["git", "-C", str(root), "log", "--format=%an %ae%n%B", *revisions],
+                              capture_output=True, text=True, check=True).stdout
+    return log("origin/main..HEAD") or log("--all")
 
 
 def tracked_text():
@@ -124,16 +128,83 @@ def test_the_email_guard_lets_github_noreply_authors_through():
     assert re.search(email, "A Person <someone@" "corp.test>")  # in pieces, so the scan of this file passes
 
 
-def test_the_history_scan_reads_authors_and_messages(tmp_path):
+def git(root, *words):
+    return subprocess.run(["git", "-C", str(root), "-c", "user.name=A Person", "-c",
+                           "user.email=1+someone@users.noreply.github.com", *words],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def commits(root, *messages):
+    for message in messages:
+        git(root, "commit", "-q", "--allow-empty", "-m", message)
+
+
+def messages(root):
+    return sorted(line for line in history(root).splitlines() if line and not line.startswith("A Person"))
+
+
+@pytest.fixture
+def origin(tmp_path):
+    """The public repository, one commit on main."""
+    git(tmp_path, "init", "-q", "-b", "main", "origin")
+    commits(tmp_path / "origin", "Earlier on main")
+    return tmp_path / "origin"
+
+
+def checkout(origin, *options):
+    """What a CI run checks out: everything (fetch-depth 0), unless OPTIONS narrow it."""
+    subprocess.run(["git", "clone", "-q", *options, f"file://{origin}", str(origin.parent / "ci")], check=True,
+                   capture_output=True)
+    return origin.parent / "ci"
+
+
+def test_the_history_scan_reads_authors_and_messages(origin):
     """The files are scanned above; the history adds who wrote each commit and what it says, not diffs full of decorators."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / "t.py").write_text("@pytest.fixture\ndef home():\n    pass\n")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "t.py"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=A Person", "-c", "user.email=1+someone@users.noreply.github.com",
-                    "commit", "-q", "-m", "Add a test"], check=True)
-    text = history(tmp_path)
+    (origin / "t.py").write_text("@pytest.fixture\ndef home():\n    pass\n")
+    git(origin, "add", "t.py")
+    commits(origin, "Add a test")
+    text = history(checkout(origin))
     assert "Add a test" in text and "@pytest.fixture" not in text
     assert not [pattern for pattern in PRIVATE if re.search(pattern, text)]
+
+
+def test_a_branch_reads_only_its_own_commits_and_main_reads_every_public_one(origin):
+    """Another branch's messages never fail this one."""
+    for branch, message in (("elsewhere", "Elsewhere"), ("mine", "Mine")):
+        git(origin, "checkout", "-q", "-b", branch, "main")
+        commits(origin, message)
+    ci = checkout(origin)
+    assert messages(ci) == ["Mine"]
+    git(ci, "checkout", "-q", "main")
+    assert messages(ci) == ["Earlier on main", "Elsewhere", "Mine"]
+
+
+def test_a_push_of_several_commits_to_main_reads_each(origin):
+    commits(origin, "One", "Two", "Three")
+    assert messages(checkout(origin)) == ["Earlier on main", "One", "Three", "Two"]
+
+
+def test_a_merge_on_main_reads_the_branch_it_brings_in(origin):
+    git(origin, "checkout", "-q", "-b", "side")
+    commits(origin, "Side")
+    git(origin, "checkout", "-q", "main")
+    git(origin, "merge", "-q", "--no-ff", "-m", "Merge side", "side")
+    assert "Side" in messages(checkout(origin))
+
+
+def test_a_tag_build_reads_the_commits_before_the_tag(origin):
+    commits(origin, "Fix", "Release 9.9.9")
+    git(origin, "tag", "v9.9.9")
+    ci = checkout(origin)
+    git(ci, "checkout", "-q", "v9.9.9")
+    assert "Fix" in messages(ci)
+
+
+def test_a_checkout_without_main_fails_the_scan_instead_of_passing(origin):
+    git(origin, "checkout", "-q", "-b", "pr")
+    commits(origin, "Leak", "Tidy")
+    with pytest.raises(subprocess.CalledProcessError):
+        history(checkout(origin, "--depth", "1", "--branch", "pr", "--single-branch"))
 
 
 def test_version_prints_the_version(capsys):
