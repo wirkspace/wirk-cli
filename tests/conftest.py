@@ -103,7 +103,10 @@ FAKE_PROGRAMS = {
     # ps answers from files a test writes: the process table, or every process's arguments.
     "ps": '[ -f "$WAKE_FAKES/ps-fails" ] && exit 1\n'
           'case "$*" in *args=*) cat "$WAKE_FAKES/ps-args" ;; *) cat "$WAKE_FAKES/ps" ;; esac 2>/dev/null\nexit 0\n',
-    "lsof": 'echo "lsof $*" >> "$WAKE_FAKES/lsof-calls"\ncat "$WAKE_FAKES/lsof-$3" 2>/dev/null\nexit 0\n',  # -a -p PID
+    # lsof answers the two questions the listener asks, from a file per process: its directory, or its Unix sockets.
+    "lsof": 'echo "lsof $*" >> "$WAKE_FAKES/lsof-calls"\ncase "$*" in\n'
+            '  "-a -p $3 -d cwd -Fn") cat "$WAKE_FAKES/lsof-$3" 2>/dev/null ;;\n'
+            '  "-a -p $3 -U -Fn") cat "$WAKE_FAKES/lsof-unix-$3" 2>/dev/null ;;\n  *) exit 9 ;;\nesac\nexit 0\n',
     "launchctl": 'echo "launchctl $*" >> "$WAKE_FAKES/calls"\n[ -f "$WAKE_FAKES/jobs-fail" ] && exit 5\n'
                  'case "$1" in print) [ -f "$WAKE_FAKES/loaded" ] ;; bootstrap) touch "$WAKE_FAKES/loaded" ;;\n'
                  '  bootout) rm -f "$WAKE_FAKES/loaded" ;; esac\n',
@@ -146,6 +149,11 @@ class Fakes:
     def cwd(self, pid, directory):
         self.write(f"lsof-{pid}", f"p{pid}\nfcwd\nn{directory}\n")
 
+    def sockets(self, pid, *paths):
+        """The Unix sockets lsof names for PID: an anonymous one, then each path given (a bound socket's)."""
+        self.write(f"lsof-unix-{pid}", f"p{pid}\nf0\ntunix\nn->0x1\n"
+                   + "".join(f"f{n}\ntunix\nn{path}\n" for n, path in enumerate(paths, 7)))
+
     def calls(self):
         path = self.root / "calls"
         return path.read_text().splitlines() if path.exists() else []
@@ -180,4 +188,6 @@ def fakes(tmp_path_factory, monkeypatch):
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(wake, "SYSTEM", "darwin")
+    monkeypatch.setattr(wake, "LSOF", str(found.bin / "lsof"))  # by path, as the listener runs it: never the real one
+    monkeypatch.setattr(wake, "PROC", root / "proc")  # nor the real /proc
     return found
