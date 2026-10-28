@@ -1056,6 +1056,15 @@ def test_one_wake_decision_reads_the_process_table_once(home, fakes, monkeypatch
     assert len(fakes.runs()) == 1 and len(read) == 1
 
 
+def test_a_resumed_run_can_write_its_log_but_never_read_it(home, fakes):
+    """Its output goes into the chat's .wake.log, whose earlier lines are the listener's."""
+    (fakes.bin / "claude").write_text(f"#!{sys.executable}\nimport fcntl, os\n"
+                                      "print(fcntl.fcntl(1, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY)\n")
+    path = chat(home)
+    ask(path, waiting(new_id()))
+    assert path.with_name(path.name + ".log").read_text() == "True\n"
+
+
 def test_a_held_harness_says_so(home, fakes):
     write_state({"failed": {"claude": {"count": 1, "told": 1, "at": time.time()}}})
     path = chat(home)

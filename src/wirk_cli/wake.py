@@ -419,19 +419,20 @@ def resume(path: Path, found: dict):
         os.close(descriptor)
 
 
-def opened(path: Path) -> tuple[Path, int]:
-    """The chat's .wake.log, open to append and never through a link; past 1 MB it first keeps its last half."""
+def opened(path: Path, access: int = os.O_WRONLY) -> tuple[Path, int]:
+    """The chat's .wake.log, open to append, never through a link and write only unless ACCESS says more (a resumed
+    run's output never reads it); past 1 MB it first keeps its last half."""
     log = path.with_name(path.name + ".log")
     if log.exists() and log.stat().st_size > LOG:
         save(log, log.read_bytes()[-LOG // 2:].decode(errors="replace"))
-    return log, os.open(log, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    return log, os.open(log, access | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
 
 
 def note(path: Path, outcome: str, message: str = "") -> None:
     """One line in the chat's .wake.log on what became of a wake for MESSAGE, unless the last line already says it: a
     message nobody marks seen is asked about every minute."""
     said = outcome + (f" (message {message.rsplit('_', 1)[-1][:8]})" if message else "")
-    _, descriptor = opened(path)
+    _, descriptor = opened(path, os.O_RDWR)
     try:
         end = os.fstat(descriptor).st_size
         if os.pread(descriptor, 1024, max(0, end - 1024)).decode(errors="replace").endswith(f" wirk: {said}\n"):
