@@ -278,7 +278,10 @@ def ask(path: Path, transport=None) -> bool:
     answer = service.post("/v2/query", {"fields": {"inbox": "me"}, "wait": 60, "limit": 1, "format": "json", **place},
                           resend=False)
     if not answer["ok"]:
-        return answer["errors"][0]["code"] not in ("unauthenticated", "choose_wirkspace")
+        if (code := answer["errors"][0]["code"]) not in ("unauthenticated", "choose_wirkspace"):
+            return True  # the network or the service: asked again next round
+        note(path, f"no wake: the service refused this chat's inbox wait ({code}); asked again after its next command")
+        return False
     if message := (answer.get("notifications") or {}).get("wake"):
         wake(path, found, message)
     return True
@@ -287,17 +290,28 @@ def ask(path: Path, transport=None) -> bool:
 def wake(path: Path, found: dict, message: str) -> None:
     """Wake the chat for MESSAGE once, under the cap, decided under the state lock so one session is woken once: an open
     Claude Code chat (its recorded process alive) gets the prompt in its inbox, outside the lock; any other chat is
-    resumed, only when it is not running and its harness is not held after a sign-in failure."""
+    resumed, only when it is not running and its harness is not held after a sign-in failure. Every outcome, a wake
+    that does not happen included, is noted in the chat's .wake.log."""
     chat, name = path.name.removesuffix(".wake"), found["harness"]
     with state() as data:
         now = time.time()
         data["wakes"] = [t for t in data["wakes"] if now - t < HOUR]
         door = name == "claude" and alive(found)
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
-        if done.get(chat) == message or not door and (held(data, name) or running(found)):
-            return
-        if len(data["wakes"]) >= CAP:
-            note(path, f"no wake: {CAP} wakes this hour already")
+        if done.get(chat) == message:
+            why = "already woken for it"
+        elif not door and held(data, name):
+            why = f"{name} is held after a sign-in failure until one of its chats runs a command"
+        elif not door and alive(found):
+            why = f"the chat is open and {name} has no way in while it runs; woken once it stops"
+        elif not door and running(found):
+            why = "the chat runs in a process its record does not name; woken once that stops"
+        elif len(data["wakes"]) >= CAP:
+            why = f"{CAP} wakes this hour already"
+        else:
+            why = None
+        if why:
+            note(path, f"no wake: {why}", message)
             return
         done[chat] = message
         data["wakes"].append(now)
@@ -309,7 +323,7 @@ def wake(path: Path, found: dict, message: str) -> None:
                 if data["delivered"].get(chat) == message:
                     del data["delivered"][chat]
                 data["wakes"] = [t for t in data["wakes"] if t != now]
-        note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox")  # after the undo
+        note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox", message)  # after the undo
     if started and refused(name, *started):
         with state() as data:
             data["wakes"] = [t for t in data["wakes"] if t != now]  # its message counts as woken; the cap does not
@@ -386,6 +400,7 @@ def resume(path: Path, found: dict):
     tools: (process, log, offset)."""
     name, cwd = found["harness"], found["cwd"]
     if not UUID.fullmatch(found["id"]):  # never a session that could pass for an option
+        note(path, "could not resume: the record's session is not a UUID")
         return None
     program, env = located(found)
     argv = ([program, "--resume", found["id"], "-p", prompt(found), *GRANTS[name]] if name in GRANTS
@@ -410,14 +425,19 @@ def opened(path: Path) -> tuple[Path, int]:
     log = path.with_name(path.name + ".log")
     if log.exists() and log.stat().st_size > LOG:
         save(log, log.read_bytes()[-LOG // 2:].decode(errors="replace"))
-    return log, os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    return log, os.open(log, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
 
 
-def note(path: Path, outcome: str) -> None:
-    """One line in the chat's .wake.log on what became of a wake."""
+def note(path: Path, outcome: str, message: str = "") -> None:
+    """One line in the chat's .wake.log on what became of a wake for MESSAGE, unless the last line already says it: a
+    message nobody marks seen is asked about every minute."""
+    said = outcome + (f" (message {message.rsplit('_', 1)[-1][:8]})" if message else "")
     _, descriptor = opened(path)
     try:
-        os.write(descriptor, f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} wirk: {outcome}\n".encode())
+        end = os.fstat(descriptor).st_size
+        if os.pread(descriptor, 1024, max(0, end - 1024)).decode(errors="replace").endswith(f" wirk: {said}\n"):
+            return
+        os.write(descriptor, f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} wirk: {said}\n".encode())
     finally:
         os.close(descriptor)
 
