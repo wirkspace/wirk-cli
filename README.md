@@ -115,6 +115,11 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.33
+
+- `wirk login` adds session hooks to Claude Code and Codex where WIRK's skill is set up (see Session hooks). At start, a chat signed in as itself gets its status, and the method card is added where WIRK's MCP server isn't registered. At end, held work with no hand-back gets one message on its board; nothing is released. Grok runs the end hook as its own, and its rules file carries the method card.
+- `wirk write --help`: a reservation lapses to vacant:G after two hours with no call from its holder; `replace:G` stays the reviewer's or administrator's takeover. The example completion names evidence a reviewer can check.
+
 ### 0.4.32
 
 - The listener wakes an open Claude Code chat too, through the chat's own cross-session inbox, instead of leaving it until it stops (see Waking a chat).

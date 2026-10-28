@@ -16,7 +16,7 @@ from wirk_cli import hooks
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-LATEST = "0.4.32"
+LATEST = "0.4.33"
 GROK_RULE_FILE = ("WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool).\n\n"
                   + hooks.CARD + "\n" + hooks.TRUST + "\n").encode()  # Grok's model never sees MCP instructions
 
