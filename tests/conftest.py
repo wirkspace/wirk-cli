@@ -70,8 +70,9 @@ def run(home, capsys):
 @pytest.fixture(autouse=True)
 def outside_any_chat(monkeypatch):
     """Tests run outside an agent chat unless they set one: the IDs of the chat running them never reach them."""
-    for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"):
-        monkeypatch.delenv(name, raising=False)
+    for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET",
+                 "CLAUDE_CODE_MESSAGING_TOKEN"):
+        monkeypatch.delenv(name, raising=False)  # nor the inbox of the chat running them: no test can reach a real chat
     monkeypatch.setenv("WIRK_NO_UPDATE", "1")  # nothing in the suite updates an install; test_update.py turns it on
 
 
@@ -85,9 +86,14 @@ FAKE_PROGRAMS = {
                  '  bootout) rm -f "$WAKE_FAKES/loaded" ;; esac\n',
     "systemctl": 'echo "systemctl $*" >> "$WAKE_FAKES/calls"\n[ -f "$WAKE_FAKES/jobs-fail" ] && exit 5\nexit 0\n',
 }
-# A harness that keeps what it was started with, shows itself to ps by its arguments, says what a test gave it and
+# A harness that answers `agents --json` with the sessions a test lists (after a delay a test may set, keeping the
+# environment it was asked in and running what a test says happens meanwhile), and otherwise
+# keeps what it was started with, shows itself to ps by its arguments, says what a test gave it and
 # exits with the code a test gave it.
-HARNESS = ('mkdir -p "$WAKE_FAKES/runs"; run="$WAKE_FAKES/runs/$(printf %04d "$(ls "$WAKE_FAKES/runs" | wc -l)")"\n'
+HARNESS = ('if [ "$1" = agents ]; then env > "$WAKE_FAKES/agents-env"; sh "$WAKE_FAKES/agents-meanwhile" 2>/dev/null\n'
+           '  sleep "$(cat "$WAKE_FAKES/agents-delay" 2>/dev/null || echo 0)"\n'
+           '  cat "$WAKE_FAKES/agents" 2>/dev/null; exit "$(cat "$WAKE_FAKES/agents-exit" 2>/dev/null || echo 0)"; fi\n'
+           'mkdir -p "$WAKE_FAKES/runs"; run="$WAKE_FAKES/runs/$(printf %04d "$(ls "$WAKE_FAKES/runs" | wc -l)")"\n'
            'mkdir "$run"; echo "$0" > "$run/program"; pwd > "$run/cwd"\n'
            'printf "%s\\n" "$@" > "$run/args"; env > "$run/env"; echo "$$ $0 $*" >> "$WAKE_FAKES/ps-args"\n'
            'cat "$WAKE_FAKES/says" 2>/dev/null; exit "$(cat "$WAKE_FAKES/exit" 2>/dev/null || echo 0)"\n')
@@ -108,6 +114,11 @@ class Fakes:
 
     def args(self, *rows):
         self.write("ps-args", "".join(f"{pid} {args}\n" for pid, args in rows))
+
+    def agents(self, *rows):
+        """The sessions Claude Code lists, as rows of (session ID, pid, status)."""
+        self.write("agents", json.dumps([{"pid": pid, "cwd": "/", "kind": "interactive", "startedAt": 0, "sessionId": session,
+                                          "name": "chat", "status": status} for session, pid, status in rows]))
 
     def cwd(self, pid, directory):
         self.write(f"lsof-{pid}", f"p{pid}\nfcwd\nn{directory}\n")
