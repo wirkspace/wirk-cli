@@ -162,18 +162,17 @@ def signed_in(person: bool = False, actor_id: str | None = None) -> tuple[str, s
     return url, token
 
 
-def choice_path(url: str, binding: str) -> Path:
+def choice_path(token: Path) -> Path:
     """The wirkspace a chat chose with wirk wirkspace NAME: its ID alone, beside the chat's own token."""
-    return actor_path(url, binding).with_suffix(".wirkspace")
+    return token.with_suffix(".wirkspace")
 
 
-def chosen(url: str, binding: str | None) -> str | None:
-    if binding:
-        try:
-            return read_private(choice_path(url, binding)) or None
-        except FileNotFoundError:
-            pass
-    return None
+def chosen(token: Path) -> str | None:
+    """The wirkspace the chat whose token is TOKEN chose, or None."""
+    try:
+        return read_private(choice_path(token)) or None
+    except FileNotFoundError:
+        return None
 
 
 def file_digest(stream) -> tuple[int, str]:
@@ -192,8 +191,6 @@ def digest(token: str) -> str:
 
 class Service:
     """One HTTP client for one address; follows no redirect and resends identical bytes once when no answer came."""
-
-    used = None  # the workspace_id the last ok answer's request carried, for the chat's resume record
 
     def __init__(self, url: str, token: str, transport=None, wirkspace: str | None = None):
         """`wirkspace` is the chat's choice: sent with every body that names none (a show revoke takes the link alone)."""
@@ -222,10 +219,7 @@ class Service:
             try:
                 answer = self.http.post(self.url + route, json=body, timeout=httpx.Timeout(60 + body.get("wait", 0), connect=10),
                                         headers={"Authorization": f"Bearer {self._token}", **(headers or {})})
-                data = self.envelope(answer, route, lost if uncertain else None)
-                if data["ok"] and body.get("workspace_id"):
-                    Service.used = body["workspace_id"]
-                return data
+                return self.envelope(answer, route, lost if uncertain else None)
             except httpx.TransportError as error:
                 failure = error
         sent = not isinstance(failure, (httpx.ConnectError, httpx.ConnectTimeout))
