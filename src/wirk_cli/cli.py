@@ -131,7 +131,8 @@ def confirm(phrase: str, purpose: str) -> None:
 def connect(transport, person: bool = False, actor_id: str | None = None) -> Service:
     """The connection every command uses; in an agent chat it carries the wirkspace the chat chose."""
     url, token = signed_in(person, actor_id)
-    return Service(url, token, transport, None if person else chosen(url, actor_binding(actor_id)))
+    binding = None if person else actor_binding(actor_id)
+    return Service(url, token, transport, chosen(actor_path(url, binding)) if binding else None)
 
 
 def fmt(options: dict) -> str:
@@ -587,8 +588,7 @@ def wirkspace(words, options, transport):
         problem = f"{len(matches)} wirkspaces you reach are" if matches else "no wirkspace you reach is"
         raise Failure("invalid_input", f"{problem} called {words[0]}; nothing changed",
                       f"You reach {listed}. Choose one by name or ID: wirk wirkspace NAME", 2)
-    write_private(choice_path(service.url, binding), matches[0]["id"])
-    Service.used = matches[0]["id"]  # the chat's resume record waits there from now on
+    write_private(choice_path(actor_path(service.url, binding)), matches[0]["id"])  # the listener waits there from now on
     before = named(mine[0]) if mine else previous and short(previous)
     return said(f"Now working in {named(matches[0])}, " + (f"previously {before}" if before else "none before"),
                 {"wirkspace": matches[0], "previous": previous}, options)
