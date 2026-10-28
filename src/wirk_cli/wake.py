@@ -297,9 +297,9 @@ def wake(path: Path, found: dict, message: str) -> None:
         up = alive(found)
         door = name == "claude" and up
         done = data["delivered" if door else "woken"]  # a delivery never stands in for a later resume
-        if done.get(chat) == message:
-            why = "already woken for it"
-        elif not door and held(data, name):
+        if done.get(chat) == message:  # the line or run its wake left says so
+            return
+        if not door and held(data, name):
             why = f"{name} is held after a sign-in failure until one of its chats runs a command"
         elif not door and up:
             why = f"the chat is open and {name} has no way in while it runs; woken once it stops"

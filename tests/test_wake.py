@@ -1039,11 +1039,14 @@ def test_an_open_chat_of_another_harness_is_left_alone_and_says_so(home, fakes):
                                                      "runs; woken once it stops"]
 
 
-def test_a_message_already_woken_for_is_noted_once(home, fakes):
-    path, message = chat(home), new_id()
-    for _ in range(4):
-        ask(path, waiting(message))
-    assert len(fakes.runs()) == 1 and outcomes(path).count("no wake: already woken for it") == 1
+def test_a_message_already_woken_for_adds_no_line(home, fakes, inbox):
+    """A message nobody marks seen is asked about every minute: what its wake left in the log already says it."""
+    stopped, opened, message = chat(home), open_chat(home, fakes, inbox), new_id()
+    for _ in range(3):
+        ask(stopped, waiting(message))
+        ask(opened, waiting(message))
+    assert len(fakes.runs()) == 1 and outcomes(stopped) == []
+    assert len(inbox.lines()) == 1 and outcomes(opened) == ["sent into the open chat's inbox"]
 
 
 def test_one_wake_decision_reads_the_process_table_once(home, fakes, monkeypatch):
