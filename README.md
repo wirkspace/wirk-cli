@@ -113,6 +113,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.34
+
 - An idle machine keeps itself current: the message listener starts the hourly update check, so no command has to run, and `wirk login` starts it too.
 - The listener finds an open Claude Code chat's inbox from the chat's process, so a chat enrolled before 0.4.32, or one that has used only MCP tools since, is woken without running a command first; a wake held back or failed says why in the chat's `.wake.log`.
 - Waking a chat: the service wakes a chat for every message addressed to it by default, from a person or any agent. People and your own agents, and off, stay as choices on the account page.
