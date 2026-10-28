@@ -1000,6 +1000,17 @@ def test_an_undo_after_the_state_file_is_lost_keeps_no_claim(home, fakes, inbox)
     assert state().get("delivered", {}) == {}
 
 
+def test_a_note_that_cannot_be_written_never_keeps_a_failed_claim(home, fakes, inbox):
+    path = open_chat(home, fakes, inbox)
+    fakes.agents()  # not listed: nothing is sent
+    path.with_name(path.name + ".log").symlink_to(os.path.join(inbox.directory, "elsewhere"))  # a link planted at the log
+    try:
+        ask(path, waiting(new_id()))
+    except OSError:  # the note is refused; the listener's round goes on
+        pass
+    assert state().get("delivered", {}) == {} and state()["wakes"] == []
+
+
 def test_the_lookup_sees_the_chats_session_store_never_the_listeners_own(home, fakes, inbox, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/listener/own")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", new_id())
