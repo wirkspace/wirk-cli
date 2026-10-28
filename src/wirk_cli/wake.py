@@ -297,12 +297,12 @@ def wake(path: Path, found: dict, message: str) -> None:
         started = None if door else resume(path, found)
     if door:
         failure = deliver(found)
-        note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox")
         if failure:
             with state() as data:  # nothing reached the chat: the next round may try, unless a newer one claimed it
                 if data["delivered"].get(chat) == message:
                     del data["delivered"][chat]
                 data["wakes"] = [t for t in data["wakes"] if t != now]
+        note(path, f"not delivered: {failure}" if failure else "sent into the open chat's inbox")  # after the undo
     if started and refused(name, *started):
         with state() as data:
             data["wakes"] = [t for t in data["wakes"] if t != now]  # its message counts as woken; the cap does not

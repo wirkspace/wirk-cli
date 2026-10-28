@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "install.sh"
-LATEST = "0.4.31"
+LATEST = "0.4.32"
 GROK_RULE_FILE = b"WIRK: when your work is tracked in WIRK, start with `wirk status` (or the wirk_status tool).\n"
 
 
@@ -377,10 +377,12 @@ def test_a_rerun_upgrades_in_place_to_the_latest_release(tmp_path):
     assert install(tmp_path, base, "--url", URL).returncode == 0
     assert not kept.parent.exists()  # nothing uses them any more
     assert versions(tmp_path) == [LATEST, LATEST]
-    publish(tmp_path, "0.4.31")
+    head, patch = LATEST.rsplit(".", 1)
+    later = f"{head}.{int(patch) + 1}"  # the next release, whatever LATEST is
+    publish(tmp_path, later)
     again = install(tmp_path, base, "--url", URL)
     assert again.returncode == 0, again.stdout + again.stderr
-    assert versions(tmp_path) == ["0.4.31", "0.4.31"]
+    assert versions(tmp_path) == [later, later]
     assert "wirk/wheels" not in (tmp_path / "tools" / "wirk" / "uv-receipt.toml").read_text()
 
 
