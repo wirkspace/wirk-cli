@@ -86,10 +86,12 @@ FAKE_PROGRAMS = {
                  '  bootout) rm -f "$WAKE_FAKES/loaded" ;; esac\n',
     "systemctl": 'echo "systemctl $*" >> "$WAKE_FAKES/calls"\n[ -f "$WAKE_FAKES/jobs-fail" ] && exit 5\nexit 0\n',
 }
-# A harness that answers `agents --json` with the sessions a test lists (after a delay a test may set), and otherwise
+# A harness that answers `agents --json` with the sessions a test lists (after a delay a test may set, keeping the
+# environment it was asked in), and otherwise
 # keeps what it was started with, shows itself to ps by its arguments, says what a test gave it and
 # exits with the code a test gave it.
-HARNESS = ('if [ "$1" = agents ]; then sleep "$(cat "$WAKE_FAKES/agents-delay" 2>/dev/null || echo 0)"\n'
+HARNESS = ('if [ "$1" = agents ]; then env > "$WAKE_FAKES/agents-env"\n'
+           '  sleep "$(cat "$WAKE_FAKES/agents-delay" 2>/dev/null || echo 0)"\n'
            '  cat "$WAKE_FAKES/agents" 2>/dev/null; exit "$(cat "$WAKE_FAKES/agents-exit" 2>/dev/null || echo 0)"; fi\n'
            'mkdir -p "$WAKE_FAKES/runs"; run="$WAKE_FAKES/runs/$(printf %04d "$(ls "$WAKE_FAKES/runs" | wc -l)")"\n'
            'mkdir "$run"; echo "$0" > "$run/program"; pwd > "$run/cwd"\n'

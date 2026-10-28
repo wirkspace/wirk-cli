@@ -970,6 +970,14 @@ def test_an_open_chat_counts_against_the_hourly_cap(home, fakes, inbox):
     assert inbox.lines() == [] and fakes.runs() == []
 
 
+def test_the_lookup_sees_the_chats_session_store_never_the_listeners_own(home, fakes, inbox, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/listener/own")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", new_id())
+    ask(open_chat(home, fakes, inbox, env={"CLAUDE_CONFIG_DIR": "/the/chats"}), waiting(new_id()))
+    env = dict(entry.split("=", 1) for entry in (fakes.root / "agents-env").read_text().splitlines() if "=" in entry)
+    assert env.get("CLAUDE_CONFIG_DIR") == "/the/chats" and "CLAUDE_CODE_SESSION_ID" not in env
+
+
 def test_no_wake_value_means_no_line(home, fakes, inbox):
     ask(open_chat(home, fakes, inbox), waiting(None))
     assert inbox.lines() == []
