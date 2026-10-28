@@ -76,7 +76,7 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
-reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
@@ -111,7 +111,7 @@ Change one item at the revision you read: N is the rN on its card, its fetch or 
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
-reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
   write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
   write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner

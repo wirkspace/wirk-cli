@@ -516,7 +516,7 @@ RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace"""
 
-RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it."""
 
 RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
