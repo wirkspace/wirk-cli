@@ -452,16 +452,18 @@ def install() -> None:
         path, name = job()
         directory = str(config_dir().resolve())
         search = os.pathsep.join(dict.fromkeys(e for e in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(e)))
+        environment = {"WIRK_CONFIG_DIR": directory, "PATH": search}
+        if os.environ.get("WIRK_NO_UPDATE"):  # an install that turned updates off keeps its listener from updating it
+            environment["WIRK_NO_UPDATE"] = os.environ["WIRK_NO_UPDATE"]
         if SYSTEM == "darwin":
             import plistlib
-            text = plistlib.dumps({"Label": name, "ProgramArguments": CHILD,
-                                   "EnvironmentVariables": {"WIRK_CONFIG_DIR": directory, "PATH": search},
+            text = plistlib.dumps({"Label": name, "ProgramArguments": CHILD, "EnvironmentVariables": environment,
                                    "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}).decode()
         else:
             text = (f"[Unit]\nDescription=WIRK listener\n\n[Service]\n"
                     f"ExecStart={quoted(CHILD[0]).replace('$', '$$')} {' '.join(CHILD[1:])}\n"
-                    f"Environment={quoted('WIRK_CONFIG_DIR=' + directory)}\nEnvironment={quoted('PATH=' + search)}\n"
-                    "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n")
+                    + "".join(f"Environment={quoted(f'{key}={value}')}\n" for key, value in environment.items())
+                    + "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n")
         changed = not path.exists() or path.read_text() != text
         if changed:
             path.parent.mkdir(parents=True, exist_ok=True)
