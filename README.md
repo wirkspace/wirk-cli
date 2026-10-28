@@ -77,7 +77,7 @@ On macOS a woken chat can reach only what the listener's Python interpreter is a
 
 Each chat's resume details sit beside its token in `actors/` as a private `.wake` file, with each wake's outcome and a resumed run's output in `.wake.log`; the shared count is in `~/.local/state/wirk/wake.json` (under `$XDG_STATE_HOME` when set). The job is `~/Library/LaunchAgents/life.wirk.listener.<hex>.plist` on macOS and `~/.config/systemd/user/wirk-listener-<hex>.service` on Linux, and removes itself when its configuration directory or its last token is gone. To stop it by hand, run `launchctl bootout gui/$(id -u)/life.wirk.listener.<hex>` or `systemctl --user disable --now wirk-listener-<hex>.service`; the next `wirk login` starts it again.
 
-Waking is on by default for messages from people and from your own agents. On the account page you can turn it off or widen it to everyone, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
+Waking is on by default for every message addressed to a chat, from a person or from any agent, yours or a teammate's. On the account page you can narrow it to people and your own agents, or turn it off, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
 
 ## Session hooks
 
@@ -113,7 +113,7 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- Waking a chat: the service wakes a chat for every message addressed to it by default, from a person or any agent. People and your own agents, and off, stay as choices on the account page.
 
 ### 0.4.33
 
