@@ -39,6 +39,11 @@ HAND_BACK = re.compile(r"(DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED)\b")
 PYTHON, MARKER, DEADLINE = sys.executable, "wirk_cli.hooks", 5.0
 OURS = re.compile(r"\[ -x (.+) \] && \1 -I -m " + re.escape(MARKER) + r" \w+ \w+(?: card)? \|\| true")
 EVENTS = {"start": "SessionStart", "end": "SessionEnd"}
+WRITES = "mcp__wirk__wirk_write|Bash"
+SIZE = re.compile(r"^\s*Size:", re.M)
+NUDGE = ("Before filing: more than one change? Load the wirk skill's Method section and cut this into Size: S tickets "
+         "under one parent (Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on, one to three "
+         "criteria). One change? Add Size: S.")
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 
 
@@ -52,6 +57,7 @@ class Row(NamedTuple):
 
 # Ported from kata's table: only the harnesses WIRK installs into. Grok runs Claude Code's hooks file as its own, so
 # Claude Code's row covers it; its hooks cannot add context, so it gets the card from the rules file install.sh writes.
+# Only Claude Code's PreToolUse payload is known here, so only it gets the write hook.
 ROWS = {
     "claude": Row("CLAUDE_CONFIG_DIR", ".claude", "settings.json", (".claude",), ""),
     "codex": Row("CODEX_HOME", ".codex", "hooks.json", (".agents",), "trust them in Codex with /hooks"),
@@ -93,7 +99,7 @@ def merge(config: dict, name: str, card: bool) -> bool:
     hooks, changed = config.setdefault("hooks", {}), False
     if not isinstance(hooks, dict):
         raise ValueError
-    for hook, event in EVENTS.items():
+    for hook, event in (EVENTS | ({"write": "PreToolUse"} if name == "claude" else {})).items():
         groups = hooks.setdefault(event, [])
         wanted = command(f"{hook} {name} card" if card and hook == "start" else f"{hook} {name}")
         if not isinstance(groups, list):
@@ -101,7 +107,8 @@ def merge(config: dict, name: str, card: bool) -> bool:
         marked = [handler for group in groups if isinstance(group, dict) and isinstance(group.get("hooks"), list)
                   for handler in group["hooks"] if isinstance(handler, dict) and MARKER in str(handler.get("command"))]
         if not marked:
-            groups.append({"hooks": [{"type": "command", "command": wanted}]})  # last, so other groups keep their place
+            group = {"matcher": WRITES} if hook == "write" else {}
+            groups.append({**group, "hooks": [{"type": "command", "command": wanted}]})  # last, so other groups keep their place
             changed = True
         for handler in marked:
             if OURS.fullmatch(str(handler["command"])) and handler["command"] != wanted:
@@ -296,13 +303,51 @@ def flag(name: str, transport=None) -> None:
             service.post("/v2/write", {"request_id": request_id, **message}, uncertain=request_id)
 
 
+# ------------------------------------------------------------------ before a write, in Claude Code
+
+
+def new_work(command: str) -> str | None:
+    """The body of the work `wirk write new` in COMMAND would create; None when it is no such command or in any doubt."""
+    words = shlex.split(command)
+    for at, word in enumerate(words):
+        if Path(word).name == "wirk" and words[at + 1:at + 3] == ["write", "new"]:
+            rest = []
+            for word in words[at + 3:]:
+                if word in ("&&", "||", ";", "|"):
+                    break
+                rest.append(word)
+            break
+    else:
+        return None
+    if "--request" in rest:
+        return None
+    work = any(word == "--criterion" or word.startswith("owner=") for word in rest) and "kind=record" not in rest
+    body = "\n".join(rest)
+    if "--body-file" in rest:
+        body += "\n" + Path(rest[rest.index("--body-file") + 1]).read_text()  # unreadable: doubt
+    return body if work else None
+
+
+def nudge(payload: dict) -> None:
+    """Before an agent files work with no Size: line, say how to cut it. Silent for anything else and in any doubt; it
+    never refuses, and asks the service nothing."""
+    tool, given = payload.get("tool_name"), payload.get("tool_input")
+    if tool == "Bash":
+        bodies = [new_work(given["command"])]
+    else:
+        bodies = [(op["data"].get("body") or "") if op.get("op") == "item.create" and op["data"].get("work") is not None
+                  else None for op in given["operations"]] if tool == "mcp__wirk__wirk_write" else []
+    if any(body is not None and not SIZE.search(body) for body in bodies):
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": NUDGE}}))
+
+
 def read() -> dict:
     payload = json.loads(sys.stdin.read() or "{}")
     return payload if isinstance(payload, dict) else {}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:
-    """python -m wirk_cli.hooks start|end|flag HARNESS [card]: what the harness runs; always exits 0, never blocks it."""
+    """python -m wirk_cli.hooks start|end|write|flag HARNESS [card]: what the harness runs; always exits 0, never blocks it."""
     try:
         hook, name, *more = sys.argv[1:] if argv is None else argv
         name = "grok" if os.environ.get("GROK_HOOK_EVENT") else name  # Grok runs Claude Code's hooks as its own
@@ -310,7 +355,9 @@ def main(argv: list[str] | None = None, transport=None) -> int:
             flag(name, transport)
         elif hook == "end":
             end(name, read())
-        elif name != "grok":  # Grok's hooks cannot add context
+        elif hook == "write" and name == "claude":  # Grok's name was set above, so its run of this hook ends here
+            nudge(read())
+        elif hook == "start" and name != "grok":  # Grok's hooks cannot add context
             start(name, read(), "card" in more, transport)
     except Exception:
         pass
