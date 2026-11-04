@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlencode
 
-from . import __version__, context, grammar, update, wake
+from . import __version__, context, grammar, hooks, update, wake
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
     chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
     write_private
@@ -341,6 +341,7 @@ def login(words, options, transport):
     code = sign_in(words, options, transport)
     if code == 0 and not options.get("--person"):
         wake.install()  # the listener for this configuration directory; it says one line when it cannot start
+        hooks.install()  # session hooks for each harness set up for WIRK here; one line when it adds any
     return code
 
 
@@ -587,6 +588,7 @@ def wirkspace(words, options, transport):
         raise Failure("invalid_input", f"{problem} called {words[0]}; nothing changed",
                       f"You reach {listed}. Choose one by name or ID: wirk wirkspace NAME", 2)
     write_private(choice_path(service.url, binding), matches[0]["id"])
+    Service.used = matches[0]["id"]  # the chat's resume record waits there from now on
     before = named(mine[0]) if mine else previous and short(previous)
     return said(f"Now working in {named(matches[0])}, " + (f"previously {before}" if before else "none before"),
                 {"wirkspace": matches[0], "previous": previous}, options)
@@ -616,7 +618,7 @@ COMMANDS = {"status": status, "query": query, "write": write, "review": review, 
 def main(argv: list[str] | None = None, transport=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     code = run(argv, transport)
-    update.after(argv[0] if argv and not argv[0].startswith("-") else "")
+    update.after(show=argv[:1] != ["login"])  # the installer's own login never shows a notice it just made stale
     wake.after(code)
     return code
 

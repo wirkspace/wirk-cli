@@ -10,7 +10,9 @@ One command, on macOS or Linux:
 curl -fsSL https://wirk.life/install | sh
 ```
 
-It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the latest `wirk` command and `wirk-mcp` server from PyPI, always a matching pair (set `WIRK_VERSION` to choose another published version). It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe: it upgrades both in place and replaces an earlier `wirk` MCP server and WIRK skill with the latest. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+It installs [uv](https://docs.astral.sh/uv/) if you have none (it asks first), then the latest `wirk` command and `wirk-mcp` server from PyPI, always a matching pair (set `WIRK_VERSION` to install another published version; the hourly update then moves it to the latest). It registers the MCP server with Claude Code and Codex when they are installed, offers them the WIRK skill, and runs `wirk login`. It never uses sudo. Running it again is safe: it upgrades both in place and replaces an earlier `wirk` MCP server and WIRK skill with the latest. `sh install.sh --dry-run` prints every step without doing any; `--yes` answers its questions; `--url URL` logs in to another service.
+
+If `grok mcp add` fails (an organization policy, or an unreadable `~/.grok/config.toml`), the install stops there: run it again and answer no for Grok.
 
 `wirk login` makes a token for this machine, keeps it in `~/.config/wirk` (readable only by you) and opens your browser on WIRK's approval: one click approves it. The machine is named by the computer's own name (macOS's Computer Name, else its hostname), on the approval page and on your account page. With no browser here (SSH, a container) it prints a link to open in a browser on any computer. A login lasts until you revoke the machine on your account page or it goes 90 days unused; then run `wirk login --new`. Where a service has no web sign-in, it prints the token's digest instead; send the digest to your WIRK administrator. The default service is `https://api.wirk.life`.
 
@@ -20,7 +22,7 @@ If you reach several wirkspaces, `wirk wirkspace Sales` chooses one for the agen
 
 By hand: `uv tool install wirk` (or the wheel attached to a [release](https://github.com/wirkspace/wirk-cli/releases)), then `wirk login`. For agents, also [wirk-mcp](https://github.com/wirkspace/wirk-mcp) and the skill ([wirk-skill](https://github.com/wirkspace/wirk-skill)).
 
-`wirk` keeps itself current. At most once an hour, after a command has answered, a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks, never delays or interrupts a command, and never runs during `wirk login`. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
+`wirk` keeps itself current. At most once an hour, after a command has answered or on a pass of the message listener (see Waking a chat), a background process asks PyPI for the latest release and installs it in place: with uv for a `uv tool` install (and the `wirk-mcp` tool beside it), with pip in a virtual environment (`pipx`'s included; where `wirk-mcp` shares the environment it upgrades `wirk-mcp`, which brings its matching `wirk`). It always installs from pypi.org, whatever index the environment or a configuration file names. It never asks and never delays or interrupts a command. Where the listener runs, a machine whose agents run no command is current within about an hour of a release; the listener checks in its own job's environment, the configuration directory and `PATH` its inbox waits use, so a machine that reaches the internet only through proxy variables is not updated this way. `wirk login` starts the check too. An install it cannot upgrade, such as one outside a virtual environment, prints one line a day on standard error with the command to run, after any command but `wirk login`. While a background update holds its lock, other commands skip that line until it is free. A release that changes how agents sign in may then ask each chat for `wirk login` once.
 
 The same background process keeps the WIRK skill current. Where the installer put a copy (`~/.claude/skills/wirk`, `~/.agents/skills/wirk`, or `$CODEX_HOME/skills/wirk`, by default `~/.codex/skills/wirk`), it reads the version on the copy's last line (`WIRK skill X.`; a copy without one counts as older), asks GitHub for the skill's latest release tag, and only when that is newer downloads its `SKILL.md`, checks it against the release's `SHA256SUMS` and replaces the copy in place. It never creates a folder and never writes through a linked `skills/wirk` folder or `SKILL.md`, though a linked parent folder such as `~/.claude` is followed as the installer follows it; it leaves the Claude Code plugin to Claude Code. A copy it cannot replace is named in the daily line.
 
@@ -35,7 +37,7 @@ wirk status 'fix the webhook retries'          who you are, your wirk, what need
 wirk query about='webhook retries'             what matters for these words
 wirk query status=open kind=work owner=me      a list with filters
 wirk write new 'What I did' --body-file note.md --link related_to:5c1e7a90
-wirk write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+wirk write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
 wirk write new 'Q3 plan' kind=context level=initiative --propose --reason 'Agreed in planning'
 ```
 
@@ -63,17 +65,25 @@ Replace the sample IDs with IDs from `wirk status` and `wirk query`. Omit `works
 
 Run `wirk show --file view.json --no-open` for a link without opening a browser, or `wirk show --file view.json` to open it. Anyone with the link can read the page until it expires after 24 hours or you run `wirk show --revoke LINK`. A service without views configured returns `views_unavailable`.
 
-## Waking a stopped chat
+## Waking a chat
 
-`wirk login` in an agent chat also starts a small listener on this machine, one per configuration directory, at every sign-in to your computer. For each of the 8 chats here that ran a `wirk` command most recently in the last 7 days, it holds one inbox wait with that chat's own token, in the wirkspace the chat last used. When a message addressed to the chat arrives and the chat is not running, the listener resumes it once in its harness (`claude --resume`, allowed only WIRK's own tools, or `codex exec resume`) in its own directory, with one fixed prompt that says a message is waiting and carries none of it. At most 10 chats an hour are woken per user on this machine. Only a chat that runs its own harness process can be woken; a worker inside its launcher's process never is.
+`wirk login` in an agent chat also starts a small listener on this machine, one per configuration directory, at every sign-in to your computer. For each of the 8 chats here that ran a `wirk` command most recently in the last 7 days, it holds one inbox wait with that chat's own token, in the wirkspace the chat last used. When a message addressed to a stopped chat arrives, the listener resumes it once in its harness (`claude --resume`, allowed only WIRK's own tools, or `codex exec resume`) in its own directory, with one fixed prompt that says a message is waiting and carries none of it. Each chat is woken at most 10 times an hour, so one busy chat never uses up another's wakes; there is no limit across chats. Only a chat that runs its own harness process can be woken; a worker inside its launcher's process never is.
+
+An open Claude Code chat, in a terminal, the desktop app or a held-open headless run, is never resumed. Instead the listener writes the same prompt into the chat's own cross-session inbox, which it finds from the chat's process through the system (Claude Code 2.1.224 or later), only when Claude Code lists the chat's session idle or busy at the process the chat's last `wirk` command ran in. So a chat enrolled by an earlier `wirk`, or one that has used only WIRK's MCP tools since, is reached too. An idle chat starts a turn; a busy one reads it between tool calls, never interrupting one. The chat's permissions and `crossSessionInbound` setting apply: a chat that bypasses permission prompts, or is in plan mode with bypass available, holds the prompt for approval unless the setting is `accept`; the desktop app and `-p` runs drop a held prompt after five minutes, and a headless run reports it as a `peer_message_hold` event on its output. If a future Claude Code changes the line's format, or the name of the inbox, nobody is told, and the chat is woken only once it stops. Codex and Grok chats are woken only when stopped. The chat's `.wake.log` gets one line for each delivery into an open chat, sent or failed, and one saying why for each wake that does not happen: the hourly cap, a harness held after a sign-in failure, an open or elsewhere-running chat that only a resume could reach, a resume that cannot start, or the service refusing the chat's wait. A resumed run writes its own output there. Nothing is added for a message the chat was already woken for, or for a round that fails on the network or on reading processes, which is tried again a minute later.
 
 A wake needs the harness signed in for command-line use on this machine. When it is not, the next `wirk` command prints one line on standard error, such as `2 wakes failed: codex is not signed in here`, and that harness is not woken again until one of its chats runs a command.
 
 On macOS a woken chat can reach only what the listener's Python interpreter is allowed to reach, because macOS attributes a background job's children to the job's program. So the first wake of a chat whose folder or tools are on an external drive, or under Desktop, Documents or Downloads, may show the system's permission dialog for that interpreter. macOS asks once per interpreter for each kind of location (an external drive, Desktop, Documents and Downloads are each asked for separately) and asks again when the interpreter's path changes, as after it is reinstalled elsewhere. Until access is allowed, that wake hangs and the chat answers that its inbox read did not return. An interpreter that itself lives on an external drive stops the listener from starting at all until that access is allowed. A later command in the chat re-arms the listener as before.
 
-Each chat's resume details sit beside its token in `actors/` as a private `.wake` file, with the resumed run's output in `.wake.log`; the shared count is in `~/.local/state/wirk/wake.json` (under `$XDG_STATE_HOME` when set). The job is `~/Library/LaunchAgents/life.wirk.listener.<hex>.plist` on macOS and `~/.config/systemd/user/wirk-listener-<hex>.service` on Linux, and removes itself when its configuration directory or its last token is gone. To stop it by hand, run `launchctl bootout gui/$(id -u)/life.wirk.listener.<hex>` or `systemctl --user disable --now wirk-listener-<hex>.service`; the next `wirk login` starts it again.
+Each chat's resume details sit beside its token in `actors/` as a private `.wake` file, with each wake's outcome and a resumed run's output in `.wake.log`; each chat's wakes of the last hour are counted in `~/.local/state/wirk/wake.json` (under `$XDG_STATE_HOME` when set), shared by every listener of this user. The job is `~/Library/LaunchAgents/life.wirk.listener.<hex>.plist` on macOS and `~/.config/systemd/user/wirk-listener-<hex>.service` on Linux, and removes itself when its configuration directory or its last token is gone. To stop it by hand, run `launchctl bootout gui/$(id -u)/life.wirk.listener.<hex>` or `systemctl --user disable --now wirk-listener-<hex>.service`; the next `wirk login` starts it again.
 
-Waking is on by default for messages from people and from your own agents. On the account page you can turn it off or widen it to everyone, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
+Waking is on by default for every message addressed to a chat, from a person or from any agent, yours or a teammate's. On the account page you can narrow it to people and your own agents, or turn it off, and an administrator can turn it off for a person or for the whole account; the listener follows the change without a restart.
+
+## Session hooks
+
+`wirk login` also adds two hooks to Claude Code (`~/.claude/settings.json`, or under `$CLAUDE_CONFIG_DIR`) and Codex (`~/.codex/hooks.json`, or under `$CODEX_HOME`) when WIRK's skill is set up for them, and says what it added. At session start, a chat signed in as its own agent gets a short `wirk status`, and one that is not is told to run `wirk login`. The [method](https://wirk.life/docs/method) card is added too, where WIRK's MCP server is not registered for that harness. At session end, a background process checks, as that chat's agent, the work it reserved and still holds. Each such item with no DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED post on its board since it was reserved gets one message there, addressed to whoever holds its parent, else to the agent's person. Nothing is released. Codex runs new hooks only after you trust them with `/hooks`. Grok runs Claude Code's session-end hook as its own and gets the card from the rules file the installer writes (`~/.grok/rules/wirk.md`); once any hooks exist, Grok asks you to trust each folder you open except your home.
+
+To turn a hook off, put `#` before its command. `wirk login` leaves alone any hook whose command names `wirk_cli.hooks` but which it did not write exactly. It rewrites its own command only when wirk's interpreter has moved, and otherwise writes nothing. Deleting the hooks is not enough, because the next login adds them back. It never edits a file that is read-only, has other hard links, or links to a missing file, nor one it could not write back byte for byte apart from its own lines (another indentation, or a duplicate key); the login says so instead.
 
 ## For people
 
@@ -90,11 +100,11 @@ Agents never run them; an agent decides proposals with its own token, as itself.
 
 ## What leaves your machine
 
-- The requests you or your agents make, and their content.
+- The requests you or your agents make, and their content, each naming the client as `wirk/<version>`.
 - The token, only as the bearer header to the address it was made for: never to another address, a redirect or a storage link, and never in output, logs or errors.
 - With `status`, the client's name and version, a session hash, the repository as `host/owner/name` (or a hash when it has no plain remote) and the branch name. WIRK shows these as reported, never as authority.
 - File bytes you upload, straight to storage through short-lived links.
-- At most once an hour, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
+- At most once an hour, after a command or from the message listener when none runs, a request to pypi.org for the latest version of `wirk` (and `wirk-mcp` when it is installed beside it), carrying nothing but the package name; the upgrade then downloads from PyPI through uv or pip.
 - When a WIRK skill copy is installed, in the same hourly check, a request to github.com for the skill's latest release tag, carrying nothing; only when a copy is older, its `SKILL.md` and `SHA256SUMS`.
 
 There is no telemetry. People keep a separate token of their own for their own decisions and administration; agents never use it.
@@ -103,11 +113,35 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
-- Nothing yet.
+- The listener's cap is per chat: each chat is woken at most 10 times an hour, so one busy chat never uses up another's wakes; there is no limit across chats. Before, 10 wakes an hour were shared by every chat of the user on the machine.
+
+### 0.4.34
+
+- An idle machine keeps itself current: the message listener starts the hourly update check, so no command has to run, and `wirk login` starts it too.
+- The listener finds an open Claude Code chat's inbox from the chat's process, so a chat enrolled before 0.4.32, or one that has used only MCP tools since, is woken without running a command first; a wake held back or failed says why in the chat's `.wake.log`.
+- Waking a chat: the service wakes a chat for every message addressed to it by default, from a person or any agent. People and your own agents, and off, stay as choices on the account page.
+
+### 0.4.33
+
+- `wirk login` adds session hooks to Claude Code and Codex where WIRK's skill is set up (see Session hooks). At start, a chat signed in as itself gets its status, and the method card is added where WIRK's MCP server isn't registered. At end, held work with no hand-back gets one message on its board; nothing is released. Grok runs the end hook as its own, and its rules file carries the method card.
+- `wirk write --help`: a reservation lapses to vacant:G after two hours with no call from its holder; `replace:G` stays the reviewer's or administrator's takeover. The example completion names evidence a reviewer can check.
+
+### 0.4.32
+
+- The listener wakes an open Claude Code chat too, through the chat's own cross-session inbox, instead of leaving it until it stops (see Waking a chat).
+- Grok: each Grok session signs in to WIRK as its own agent, the listener resumes a stopped Grok session, the installer sets Grok up like Claude Code and Codex (its rules file included), and the hourly skill refresh keeps Grok's copy current.
+- The listener waits for a chat in the wirkspace it chose with `wirk wirkspace NAME`.
+- The privacy scan reads a branch's own commits on pull requests, and every public commit on main and tags.
+
+### 0.4.31
+
+- `wirk write new` and `wirk write edit` take `kind=record owner=X` to set a record's owner (`data.owner`, `patch.owner`); without `kind=record`, `owner=` still makes work.
+- A chat enrolled before 0.4.30 gets its resume record on its next successful command, so the listener can wake it.
+- Every request names the client, `User-Agent: wirk/<version>`, so the service can refuse writes from a `wirk` older than its minimum; reads stay open.
 
 ### 0.4.30
 
-- `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a stopped chat).
+- `wirk login` in an agent chat starts a listener that resumes the chat when a message for it arrives while it is stopped (see Waking a chat).
 
 ### 0.4.29
 
@@ -249,7 +283,7 @@ A release is a version bump merged to main with `Release: publish wirk <version>
 
 The shared publication workflow checks the tag's commit, keeps identical existing assets, uploads missing ones and refuses to overwrite different bytes. New GitHub releases stay prereleases until their anonymous public downloads match the build and an isolated installation passes. Rerun failed jobs to reuse successful build artifacts. The manual `verify_tag` run qualifies an existing public version without publishing or moving tags.
 
-`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Installed clients pick up a published release after their first command an hour or more after their last check. Once an update has run, the uv receipt pins `wirk==X`, so `uv tool upgrade wirk` no longer does anything; running the installer again still works.
+`wirk-mcp` and `wirk-skill` publish in lockstep with this package: their tag `vX` waits up to ten minutes for this repository's `vX` release and fails without it. Release `wirk` `vX` first, as a version-only bump when nothing else changed. Installed clients pick up a published release within about an hour where their message listener runs, and otherwise after their first command an hour or more after their last check. Once an update has run, the uv receipt pins `wirk==X`, so `uv tool upgrade wirk` no longer does anything; running the installer again still works.
 
 ## License
 

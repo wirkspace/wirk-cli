@@ -14,7 +14,7 @@ Start with: wirk status
   query inbox=me                       messages for you, until you mark them seen
   review ID@N accept --reason 'Why'    decide a proposal; reject and defer work the same way
   write new 'Title' --link related_to:ID          a record; add kind=work for a task
-  write edit ID@N status=completed --evidence 'tests pass'  complete it; N is the rN you read
+  write edit ID@N status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'  complete it; N is the rN you read
   write link ID@N contributes_to PARENT@N          link two items
   write message --on ID --body 'Ready'            a message on an item's board; --to ID addresses someone
   write seen ID                        mark messages seen once you have read them
@@ -72,11 +72,11 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write new 'What I did' --body-file note.md --link related_to:5c1e7a90     a record linked to wirk
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
-  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
-reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
@@ -85,11 +85,11 @@ KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an 
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
 request body and owner at the top of what query returns. Context (kind=context) is the organization and its
 initiatives. A change to it applies directly when you may make it; for requires_review, propose with --propose --reason.
---body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record
-is the default; data.work makes work. --link TYPE is related_to, contributes_to, requires or works_at (a person record
-to a company record). --evidence: passing tests, a link, file path or file attached with --upload. Results list IDs. A
-stored refusal keeps its request_id; correct with a new ID. After an uncertain result, run the command its hint prints;
-any retry uses the identical body and request_id.
+--body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record is
+the default; data.work makes work. owner=X with kind=record makes X the record's owner. --link TYPE is related_to,
+contributes_to, requires or works_at (a person record to a company record). --evidence: passing tests, a link, file path
+or file attached with --upload. Results list IDs. A stored refusal keeps its request_id; correct with a new ID. After an
+uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
@@ -107,18 +107,18 @@ expect: each edited, archived or linked-from item's rN; contributes_to also need
 Change one item at the revision you read: N is the rN on its card, its fetch or your last receipt.
 
   write edit 5c1e7a90@3 status=in_progress owner=me     claim it
-  write edit 5c1e7a90@4 status=completed --evidence 'tests/test_retry.py passes'
+  write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
   write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
-reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason, when a person asks).
+reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
   write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
   write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner
 
 KEY=VALUE: owner (me or an ID) and the wirkspace's fields (status=open; a comma list for several).
 The owner is owner=me here, work.owner_id in a request body and owner at the top of what query returns.
-An owner turns a record into work and the receipt says so (record → work); a status alone on a record is refused.
+owner=X makes a record work (record → work); with kind=record, X is the record's owner. A status alone is refused.
 --body replaces the whole body; add progress as a message instead: wirk write message --on ID --body TEXT.
 --evidence is a completion's note: the tests that pass, a link, a file path, or a file attached with --upload.
 --propose needs --reason. A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.

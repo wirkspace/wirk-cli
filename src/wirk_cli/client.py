@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import __version__
 from .grammar import command
 
 DEFAULT_URL = "https://api.wirk.life"
@@ -119,13 +120,18 @@ def new_token(path: Path) -> str:
     return token
 
 
+UUID = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")  # a chat's ID, never a lookalike like "--…dead"
+
+
 def actor_binding(thread_id: str | None = None) -> str | None:
     """The agent chat this process serves, so it signs in as itself: Codex's thread (as MCP's request names it, else
-    the environment's) and Claude Code's session, each a UUID, joined. A worker one chat starts carries an ID its
-    launcher lacks, so it never acts as its launcher. None outside any chat: the machine's shared identity."""
+    the environment's), Claude Code's session and Grok's session, each a UUID, joined in that order. A worker one chat
+    starts carries an ID its launcher lacks, so it never acts as its launcher. None outside any chat: the machine's
+    shared identity."""
     def valid(value: str | None) -> str | None:
-        return value.lower() if value and re.fullmatch(r"[0-9a-fA-F-]{36}", value) else None
-    ids = (valid(thread_id) or valid(os.environ.get("CODEX_THREAD_ID")), valid(os.environ.get("CLAUDE_CODE_SESSION_ID")))
+        return value.lower() if value and UUID.fullmatch(value) else None
+    ids = (valid(thread_id) or valid(os.environ.get("CODEX_THREAD_ID")),
+           valid(os.environ.get("CLAUDE_CODE_SESSION_ID")), valid(os.environ.get("GROK_SESSION_ID")))
     return ",".join(i for i in ids if i) or None
 
 
@@ -198,7 +204,8 @@ class Service:
         """Made on first use, so a Service that is only compared (as the MCP server's cache does) opens nothing."""
         if self._http is None:
             import httpx
-            self._http = httpx.Client(transport=self._transport, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
+            self._http = httpx.Client(transport=self._transport, follow_redirects=False, timeout=httpx.Timeout(60, connect=10),
+                                      headers={"User-Agent": f"wirk/{__version__}"})  # the service refuses writes from an old wirk
         return self._http
 
     def same(self, other: "Service") -> bool:

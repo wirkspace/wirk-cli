@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from wirk_cli import cli
+from wirk_cli import __version__, cli
 
 URL = os.environ.get("WIRK_TEST_URL")
 ADMIN = os.environ.get("WIRK_TEST_ADMIN_TOKEN_FILE")
@@ -29,10 +29,13 @@ def no_browser(monkeypatch):
     monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
 
 
+def as_admin():
+    """The scratch administrator's headers, naming this wirk because the service refuses writes from an old one."""
+    return {"Authorization": f"Bearer {Path(ADMIN).read_text().strip()}", "User-Agent": f"wirk/{__version__}"}
+
+
 def admin(body):
-    token = Path(ADMIN).read_text().strip()
-    answer = httpx.post(f"{URL}/v2/admin", json={**body, "format": "json"},
-                        headers={"Authorization": f"Bearer {token}"}, timeout=30).json()
+    answer = httpx.post(f"{URL}/v2/admin", json={**body, "format": "json"}, headers=as_admin(), timeout=30).json()
     assert answer["ok"], answer
     return answer
 
