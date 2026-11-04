@@ -190,7 +190,7 @@ Only this command changes the choice. A workspace_id=ID on a command, or in a --
   wirkspace                            which wirkspace this chat works in
   wirkspace Sales                      work in Sales from now on, in this chat only
 
-The choice belongs to one agent chat (Codex or Claude Code); outside one, add workspace_id=ID to each command.
+The choice belongs to one agent chat (Codex, Claude Code or Grok); outside one, add workspace_id=ID to each command.
 A Claude Code Agent-tool helper shares its chat's identity, so its wirk wirkspace moves its launcher's choice too.""",
         "upload": """usage: wirk upload PATH [--description TEXT] [--request-id ID] [--json]
 
@@ -212,7 +212,7 @@ With no browser here (SSH, a container) it prints a link to open in a browser on
 --person then asks for the code it shows and signs in only you. To connect your agents for status,
 query and write, run wirk login separately. A login lasts until you revoke the machine on your
 account page or it goes 90 days unused; then run login --new for a new machine token.
-In an agent chat (Codex or Claude Code), the chat runs wirk login once and signs in as itself under
+In an agent chat (Codex, Claude Code or Grok), the chat runs wirk login once and signs in as itself under
 this machine's approval, with no browser. --new is only ever for the machine.
 Where a service has no web sign-in, it prints the token's digest instead (safe to share; the token stays
 here) for your WIRK administrator to register. The token is only ever sent to its address.
