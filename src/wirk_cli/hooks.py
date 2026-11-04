@@ -1,6 +1,7 @@
-"""Session hooks: the method card when an agent's session starts, and a flag when it ends holding work.
+"""Session hooks: the method card when an agent's session starts, a flag when it ends holding work, and in Claude Code a
+refusal, once, of work filed with no Size: line.
 
-wirk login adds two hooks to each harness that is set up for WIRK here (it has WIRK's skill), and leaves alone any the
+wirk login adds its hooks to each harness that is set up for WIRK here (it has WIRK's skill), and leaves alone any the
 person edited. Session start prints the card where WIRK's MCP server does not carry it, and status when the chat signed in
 as itself. Session end hands over to a detached process that, as the session's own agent, posts one message on the board
 of each item it reserved and still holds with no hand-back. It never releases anything. The table of harnesses is ported
@@ -8,6 +9,7 @@ from kata (MIT, Copyright (c) 2026 Wes McKinney) and the paths of kit's agenthoo
 Software LLC); see NOTICE.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -15,6 +17,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import tomllib
 from pathlib import Path
@@ -40,10 +43,14 @@ PYTHON, MARKER, DEADLINE = sys.executable, "wirk_cli.hooks", 5.0
 OURS = re.compile(r"\[ -x (.+) \] && \1 -I -m " + re.escape(MARKER) + r" \w+ \w+(?: card)? \|\| true")
 EVENTS = {"start": "SessionStart", "end": "SessionEnd"}
 WRITES = "mcp__wirk__wirk_write|Bash"
-SIZE = re.compile(r"^\s*Size:", re.M)
-NUDGE = ("Before filing: more than one change? Load the wirk skill's Method section and cut this into Size: S tickets "
-         "under one parent (Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on, one to three "
-         "criteria). One change? Add Size: S.")
+NUDGE = ("Not filed yet. More than one change? Load the wirk skill's Method section and cut this into Size: S tickets "
+         "under one parent (Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on, The change, one to "
+         "three criteria). One change? Add Size: S. Not code, or already right as is? Run the same call again unchanged "
+         "and it files.")
+# A segment of a shell command that begins `wirk write new`, after any VAR=value words and a path ending /wirk.
+NEW = re.compile(r"(?:^|&&|\|\||[;|\n])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+new\b(.*)", re.S)
+BODY_FILE = re.compile(r"--body-file[ =]['\"]?([^\s'\"]+)")
+SMALL = 1 << 16
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 
 
@@ -108,7 +115,7 @@ def merge(config: dict, name: str, card: bool) -> bool:
                   for handler in group["hooks"] if isinstance(handler, dict) and MARKER in str(handler.get("command"))]
         if not marked:
             group = {"matcher": WRITES} if hook == "write" else {}
-            groups.append({**group, "hooks": [{"type": "command", "command": wanted}]})  # last, so other groups keep their place
+            groups.append({**group, "hooks": [{"type": "command", "command": wanted, **({"timeout": 2} if hook == "write" else {})}]})  # last, so other groups keep their place
             changed = True
         for handler in marked:
             if OURS.fullmatch(str(handler["command"])) and handler["command"] != wanted:
@@ -150,7 +157,7 @@ def shown(path: Path) -> str:
 
 
 def install() -> None:
-    """For each harness set up for WIRK here, its two hooks; one line when any were written, and one for each file left
+    """For each harness set up for WIRK here, its hooks; one line when any were written, and one for each file left
     alone. Never changes the login's answer."""
     if os.name != "posix":
         return
@@ -306,39 +313,85 @@ def flag(name: str, transport=None) -> None:
 # ------------------------------------------------------------------ before a write, in Claude Code
 
 
-def new_work(command: str) -> str | None:
-    """The body of the work `wirk write new` in COMMAND would create; None when it is no such command or in any doubt."""
-    words = shlex.split(command)
-    for at, word in enumerate(words):
-        if Path(word).name == "wirk" and words[at + 1:at + 3] == ["write", "new"]:
-            rest = []
-            for word in words[at + 3:]:
-                if word in ("&&", "||", ";", "|"):
-                    break
-                rest.append(word)
-            break
-    else:
-        return None
-    if "--request" in rest:
-        return None
-    work = any(word == "--criterion" or word.startswith("owner=") for word in rest) and "kind=record" not in rest
-    body = "\n".join(rest)
-    if "--body-file" in rest:
-        body += "\n" + Path(rest[rest.index("--body-file") + 1]).read_text()  # unreadable: doubt
-    return body if work else None
+def sized_text(text: str) -> bool:
+    """Whether a Size: line is anywhere in TEXT (a heredoc, a body file written earlier in the command), or in a small
+    regular file named by --body-file. An unreadable file is no evidence either way: True."""
+    if "Size:" in text:
+        return True
+    for name in BODY_FILE.findall(text):
+        try:
+            path = Path(name).expanduser()
+            if name != "-" and path.is_file() and path.stat().st_size <= SMALL and "Size:" in path.read_text():
+                return True
+        except (OSError, ValueError):
+            return True
+    return False
+
+
+def unsized(text: str) -> bool:
+    """Whether TEXT is a shell command that files work, and has no Size: line."""
+    found = NEW.search(text)
+    if not found or "kind=record" in found.group(1):
+        return False
+    rest = found.group(1)
+    return bool(re.search(r"--criterion|\bowner=|\bkind=work\b", rest)) and not sized_text(text)
+
+
+def operations(given) -> list:
+    """The create operations in an MCP call, however nested; an unreadable call has none."""
+    if isinstance(given, str):
+        try:
+            given = json.loads(given)
+        except ValueError:
+            return []
+    if isinstance(given, dict):
+        return [given] if given.get("op") == "item.create" else operations(given.get("operations", []))
+    return [op for item in given for op in operations(item)] if isinstance(given, list) else []
+
+
+def mcp_unsized(given: dict) -> bool:
+    for op in operations(given):
+        data = op.get("data")
+        if isinstance(data, dict) and data.get("work") is not None and "Size:" not in str(data.get("body") or ""):
+            return True
+    return False
+
+
+def once(payload: dict, call) -> bool:
+    """True the first time this session makes this call and False for its identical retry, which clears the record.
+    False too when the record cannot be kept: a doubt allows the call."""
+    session = payload.get("session_id")
+    if not isinstance(session, str):
+        return False
+    mark = hashlib.sha256(json.dumps(call, sort_keys=True).encode()).hexdigest()
+    path = Path(tempfile.gettempdir()) / f"wirk-pre-write-{os.getuid()}-{hashlib.sha256(session.encode()).hexdigest()[:16]}"
+    try:
+        if path.read_text() == mark:
+            path.unlink()
+            return False
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    try:
+        path.write_text(mark)
+    except OSError:
+        return False
+    return True
 
 
 def nudge(payload: dict) -> None:
-    """Before an agent files work with no Size: line, say how to cut it. Silent for anything else and in any doubt; it
-    never refuses, and asks the service nothing."""
+    """Refuse, once, work about to be filed with no Size: line, saying how to cut it; the identical retry files. Silent
+    for anything else and in any doubt; it asks the service nothing."""
     tool, given = payload.get("tool_name"), payload.get("tool_input")
     if tool == "Bash":
-        bodies = [new_work(given["command"])]
+        command = given["command"]
+        match = "wirk" in command and unsized(command)
     else:
-        bodies = [(op["data"].get("body") or "") if op.get("op") == "item.create" and op["data"].get("work") is not None
-                  else None for op in given["operations"]] if tool == "mcp__wirk__wirk_write" else []
-    if any(body is not None and not SIZE.search(body) for body in bodies):
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": NUDGE}}))
+        match = tool == "mcp__wirk__wirk_write" and mcp_unsized(given)
+    if match and once(payload, [tool, given]):
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": NUDGE}}))
 
 
 def read() -> dict:
