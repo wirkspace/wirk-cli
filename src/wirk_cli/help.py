@@ -80,6 +80,8 @@ reservation=occupied starts; occupied:G guards any edit; vacant:G releases; repl
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
+  Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE).
+  Ticket body: Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on; plus one to three criteria.
 
 KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
 fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
