@@ -613,8 +613,33 @@ def test_a_retry_of_a_different_call_or_session_is_refused_again(monkeypatch, ca
     refused(capsys.readouterr().out)
 
 
+def test_parallel_filings_and_a_reworded_description_do_not_trap_the_agent(monkeypatch, capsys):
+    one, two = bash("wirk write new A owner=me")[1], bash("wirk write new B owner=me")[1]
+    refused(pre(monkeypatch, capsys, "Bash", one))
+    refused(pre(monkeypatch, capsys, "Bash", two))  # a second filing in flight does not erase the first's mark
+    assert pre(monkeypatch, capsys, "Bash", {**one, "description": "Run it again"}) == ""
+    assert pre(monkeypatch, capsys, "Bash", {**two, "description": "File B"}) == ""
+    ops = create(work={}, body="x")["operations"] + create(work={})["operations"]
+    refused(pre(monkeypatch, capsys, MCP, {"operations": ops, "request_id": "a"}))
+    assert pre(monkeypatch, capsys, MCP, {"request_id": "b", "operations": ops}) == ""
+
+
+def test_a_state_file_that_is_not_a_plain_file_never_holds_a_call(monkeypatch, capsys, tmp_path):
+    command = "wirk write new A owner=me"
+    refused(pre(monkeypatch, capsys, *bash(command)))
+    (mark,) = (tmp_path / f"wirk-pre-write-{os.getuid()}").glob("*/*")
+    mark.unlink()
+    os.mkfifo(mark)  # opening it would wait for ever
+    assert pre(monkeypatch, capsys, *bash(command)) == ""
+
+
+def test_a_command_substitution_is_a_filing_too(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("ID=$(wirk write new Do owner=me --body x | head -1)")))
+
+
 def test_a_record_that_cannot_be_kept_never_refuses(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(hooks.tempfile, "gettempdir", lambda: str(tmp_path / "missing"))
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(hooks.tempfile, "gettempdir", lambda: str(tmp_path / "file"))  # a folder cannot go inside a file
     assert pre(monkeypatch, capsys, *bash("wirk write new A owner=me")) == ""
 
 

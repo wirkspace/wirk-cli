@@ -48,7 +48,7 @@ NUDGE = ("Not filed yet. More than one change? Load the wirk skill's Method sect
          "three criteria). One change? Add Size: S. Not code, or already right as is? Run the same call again unchanged "
          "and it files.")
 # A segment of a shell command that begins `wirk write new`, after any VAR=value words and a path ending /wirk.
-NEW = re.compile(r"(?:^|&&|\|\||[;|\n])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+new\b(.*)", re.S)
+NEW = re.compile(r"(?:^|&&|\|\||[;|\n(`])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+new\b(.*)", re.S)
 BODY_FILE = re.compile(r"--body-file[ =]['\"]?([^\s'\"]+)")
 SMALL = 1 << 16
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
@@ -331,10 +331,8 @@ def sized_text(text: str) -> bool:
 def unsized(text: str) -> bool:
     """Whether TEXT is a shell command that files work, and has no Size: line."""
     found = NEW.search(text)
-    if not found or "kind=record" in found.group(1):
-        return False
-    rest = found.group(1)
-    return bool(re.search(r"--criterion|\bowner=|\bkind=work\b", rest)) and not sized_text(text)
+    return bool(found and "kind=record" not in found[1] and re.search(r"--criterion|\bowner=|\bkind=work\b", found[1])
+                and not sized_text(text))
 
 
 def operations(given) -> list:
@@ -357,39 +355,39 @@ def mcp_unsized(given: dict) -> bool:
     return False
 
 
-def once(payload: dict, call) -> bool:
-    """True the first time this session makes this call and False for its identical retry, which clears the record.
-    False too when the record cannot be kept: a doubt allows the call."""
-    session = payload.get("session_id")
+def once(session, call: str) -> bool:
+    """True the first time SESSION makes CALL: it leaves a file named for the call in a folder of the session's own. The
+    identical retry finds the file, removes it and gets False, as does any doubt (a file that is not a plain file, one
+    that cannot be made), so no call is ever held for good and parallel filings never share a mark."""
     if not isinstance(session, str):
         return False
-    mark = hashlib.sha256(json.dumps(call, sort_keys=True).encode()).hexdigest()
-    path = Path(tempfile.gettempdir()) / f"wirk-pre-write-{os.getuid()}-{hashlib.sha256(session.encode()).hexdigest()[:16]}"
+    place = Path(tempfile.gettempdir()) / f"wirk-pre-write-{os.getuid()}" / hashlib.sha256(session.encode()).hexdigest()[:16]
+    mark = place / hashlib.sha256(call.encode()).hexdigest()
     try:
-        if path.read_text() == mark:
-            path.unlink()
-            return False
-    except FileNotFoundError:
-        pass
+        place.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            found = stat.S_ISREG(mark.lstat().st_mode)
+        except FileNotFoundError:
+            os.close(os.open(mark, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600))
+            return True
+        if found:
+            mark.unlink()
+        return False
     except OSError:
         return False
-    try:
-        path.write_text(mark)
-    except OSError:
-        return False
-    return True
 
 
 def nudge(payload: dict) -> None:
     """Refuse, once, work about to be filed with no Size: line, saying how to cut it; the identical retry files. Silent
     for anything else and in any doubt; it asks the service nothing."""
     tool, given = payload.get("tool_name"), payload.get("tool_input")
-    if tool == "Bash":
-        command = given["command"]
-        match = "wirk" in command and unsized(command)
+    if tool == "Bash":  # the call is its command: a retry may reword the description
+        call = given["command"]
+        match = "wirk" in call and unsized(call)
     else:
+        call = json.dumps(operations(given), sort_keys=True)
         match = tool == "mcp__wirk__wirk_write" and mcp_unsized(given)
-    if match and once(payload, [tool, given]):
+    if match and once(payload.get("session_id"), call):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                  "permissionDecisionReason": NUDGE}}))
 
