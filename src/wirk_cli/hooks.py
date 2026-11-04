@@ -1,6 +1,7 @@
-"""Session hooks: the method card when an agent's session starts, and a flag when it ends holding work.
+"""Session hooks: the method card when an agent's session starts, a flag when it ends holding work, and in Claude Code a
+refusal, once, of work filed with no Size: line.
 
-wirk login adds two hooks to each harness that is set up for WIRK here (it has WIRK's skill), and leaves alone any the
+wirk login adds its hooks to each harness that is set up for WIRK here (it has WIRK's skill), and leaves alone any the
 person edited. Session start prints the card where WIRK's MCP server does not carry it, and status when the chat signed in
 as itself. Session end hands over to a detached process that, as the session's own agent, posts one message on the board
 of each item it reserved and still holds with no hand-back. It never releases anything. The table of harnesses is ported
@@ -8,6 +9,7 @@ from kata (MIT, Copyright (c) 2026 Wes McKinney) and the paths of kit's agenthoo
 Software LLC); see NOTICE.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -15,6 +17,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import tomllib
 from pathlib import Path
@@ -39,6 +42,15 @@ HAND_BACK = re.compile(r"(DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED)\b")
 PYTHON, MARKER, DEADLINE = sys.executable, "wirk_cli.hooks", 5.0
 OURS = re.compile(r"\[ -x (.+) \] && \1 -I -m " + re.escape(MARKER) + r" \w+ \w+(?: card)? \|\| true")
 EVENTS = {"start": "SessionStart", "end": "SessionEnd"}
+WRITES = "mcp__wirk__wirk_write|Bash"
+NUDGE = ("Not filed yet. More than one change? Load the wirk skill's Method section and cut this into Size: S tickets "
+         "under one parent (Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on, The change, one to "
+         "three criteria). One change? Add Size: S. Not code, or already right as is? Run the same call again unchanged "
+         "and it files.")
+# A segment of a shell command that begins `wirk write new`, after any VAR=value words and a path ending /wirk.
+NEW = re.compile(r"(?:^|&&|\|\||[;|\n(`])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+new\b(.*)", re.S)
+BODY_FILE = re.compile(r"--body-file[ =]['\"]?([^\s'\"]+)")
+SMALL = 1 << 16
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 
 
@@ -52,6 +64,7 @@ class Row(NamedTuple):
 
 # Ported from kata's table: only the harnesses WIRK installs into. Grok runs Claude Code's hooks file as its own, so
 # Claude Code's row covers it; its hooks cannot add context, so it gets the card from the rules file install.sh writes.
+# Only Claude Code's PreToolUse payload is known here, so only it gets the write hook.
 ROWS = {
     "claude": Row("CLAUDE_CONFIG_DIR", ".claude", "settings.json", (".claude",), ""),
     "codex": Row("CODEX_HOME", ".codex", "hooks.json", (".agents",), "trust them in Codex with /hooks"),
@@ -93,7 +106,7 @@ def merge(config: dict, name: str, card: bool) -> bool:
     hooks, changed = config.setdefault("hooks", {}), False
     if not isinstance(hooks, dict):
         raise ValueError
-    for hook, event in EVENTS.items():
+    for hook, event in (EVENTS | ({"write": "PreToolUse"} if name == "claude" else {})).items():
         groups = hooks.setdefault(event, [])
         wanted = command(f"{hook} {name} card" if card and hook == "start" else f"{hook} {name}")
         if not isinstance(groups, list):
@@ -101,7 +114,8 @@ def merge(config: dict, name: str, card: bool) -> bool:
         marked = [handler for group in groups if isinstance(group, dict) and isinstance(group.get("hooks"), list)
                   for handler in group["hooks"] if isinstance(handler, dict) and MARKER in str(handler.get("command"))]
         if not marked:
-            groups.append({"hooks": [{"type": "command", "command": wanted}]})  # last, so other groups keep their place
+            group = {"matcher": WRITES} if hook == "write" else {}
+            groups.append({**group, "hooks": [{"type": "command", "command": wanted, **({"timeout": 2} if hook == "write" else {})}]})  # last, so other groups keep their place
             changed = True
         for handler in marked:
             if OURS.fullmatch(str(handler["command"])) and handler["command"] != wanted:
@@ -143,7 +157,7 @@ def shown(path: Path) -> str:
 
 
 def install() -> None:
-    """For each harness set up for WIRK here, its two hooks; one line when any were written, and one for each file left
+    """For each harness set up for WIRK here, its hooks; one line when any were written, and one for each file left
     alone. Never changes the login's answer."""
     if os.name != "posix":
         return
@@ -296,13 +310,95 @@ def flag(name: str, transport=None) -> None:
             service.post("/v2/write", {"request_id": request_id, **message}, uncertain=request_id)
 
 
+# ------------------------------------------------------------------ before a write, in Claude Code
+
+
+def sized_text(text: str) -> bool:
+    """Whether a Size: line is anywhere in TEXT (a heredoc, a body file written earlier in the command), or in a small
+    regular file named by --body-file. An unreadable file is no evidence either way: True."""
+    if "Size:" in text:
+        return True
+    for name in BODY_FILE.findall(text):
+        try:
+            path = Path(name).expanduser()
+            if name != "-" and path.is_file() and path.stat().st_size <= SMALL and "Size:" in path.read_text():
+                return True
+        except (OSError, ValueError):
+            return True
+    return False
+
+
+def unsized(text: str) -> bool:
+    """Whether TEXT is a shell command that files work, and has no Size: line."""
+    found = NEW.search(text)
+    return bool(found and "kind=record" not in found[1] and re.search(r"--criterion|\bowner=|\bkind=work\b", found[1])
+                and not sized_text(text))
+
+
+def operations(given) -> list:
+    """The create operations in an MCP call, however nested; an unreadable call has none."""
+    if isinstance(given, str):
+        try:
+            given = json.loads(given)
+        except ValueError:
+            return []
+    if isinstance(given, dict):
+        return [given] if given.get("op") == "item.create" else operations(given.get("operations", []))
+    return [op for item in given for op in operations(item)] if isinstance(given, list) else []
+
+
+def mcp_unsized(given: dict) -> bool:
+    for op in operations(given):
+        data = op.get("data")
+        if isinstance(data, dict) and data.get("work") is not None and "Size:" not in str(data.get("body") or ""):
+            return True
+    return False
+
+
+def once(session, call: str) -> bool:
+    """True the first time SESSION makes CALL: it leaves a file named for the call in a folder of the session's own. The
+    identical retry finds the file, removes it and gets False, as does any doubt (a file that is not a plain file, one
+    that cannot be made), so no call is ever held for good and parallel filings never share a mark."""
+    if not isinstance(session, str):
+        return False
+    place = Path(tempfile.gettempdir()) / f"wirk-pre-write-{os.getuid()}" / hashlib.sha256(session.encode()).hexdigest()[:16]
+    mark = place / hashlib.sha256(call.encode()).hexdigest()
+    try:
+        place.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            found = stat.S_ISREG(mark.lstat().st_mode)
+        except FileNotFoundError:
+            os.close(os.open(mark, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600))
+            return True
+        if found:
+            mark.unlink()
+        return False
+    except OSError:
+        return False
+
+
+def nudge(payload: dict) -> None:
+    """Refuse, once, work about to be filed with no Size: line, saying how to cut it; the identical retry files. Silent
+    for anything else and in any doubt; it asks the service nothing."""
+    tool, given = payload.get("tool_name"), payload.get("tool_input")
+    if tool == "Bash":  # the call is its command: a retry may reword the description
+        call = given["command"]
+        match = "wirk" in call and unsized(call)
+    else:
+        call = json.dumps(operations(given), sort_keys=True)
+        match = tool == "mcp__wirk__wirk_write" and mcp_unsized(given)
+    if match and once(payload.get("session_id"), call):
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": NUDGE}}))
+
+
 def read() -> dict:
     payload = json.loads(sys.stdin.read() or "{}")
     return payload if isinstance(payload, dict) else {}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:
-    """python -m wirk_cli.hooks start|end|flag HARNESS [card]: what the harness runs; always exits 0, never blocks it."""
+    """python -m wirk_cli.hooks start|end|write|flag HARNESS [card]: what the harness runs; always exits 0, never blocks it."""
     try:
         hook, name, *more = sys.argv[1:] if argv is None else argv
         name = "grok" if os.environ.get("GROK_HOOK_EVENT") else name  # Grok runs Claude Code's hooks as its own
@@ -310,7 +406,9 @@ def main(argv: list[str] | None = None, transport=None) -> int:
             flag(name, transport)
         elif hook == "end":
             end(name, read())
-        elif name != "grok":  # Grok's hooks cannot add context
+        elif hook == "write" and name == "claude":  # Grok's name was set above, so its run of this hook ends here
+            nudge(read())
+        elif hook == "start" and name != "grok":  # Grok's hooks cannot add context
             start(name, read(), "card" in more, transport)
     except Exception:
         pass
