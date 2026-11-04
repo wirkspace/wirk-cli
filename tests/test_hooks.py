@@ -476,7 +476,7 @@ def test_a_hand_back_from_before_the_reservation_does_not_count(home, monkeypatc
 
 def test_every_wirkspace_is_checked_even_when_the_chat_chose_one(home, monkeypatch):
     own_token()
-    client.write_private(client.choice_path(URL, CHAT), "wsp_a")
+    client.write_private(client.choice_path(client.actor_path(URL, CHAT)), "wsp_a")
     fake = service(spaces=("wsp_a", "wsp_b"))
     writes = flag(fake, monkeypatch, home)
     assert [write["workspace_id"] for write in writes] == ["wsp_a", "wsp_b"]
