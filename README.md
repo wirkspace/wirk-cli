@@ -115,7 +115,15 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.35
+
 - The listener's cap is per chat: each chat is woken at most 10 times an hour, so one busy chat never uses up another's wakes; there is no limit across chats. Before, 10 wakes an hour were shared by every chat of the user on the machine.
+- Claude Code refuses, once, a `wirk write new` of work with no `Size:` line (or the MCP write tool filing unsized work): the refusal says how to cut it into Size: S tickets, or to add `Size:` when it is one change. Run the identical call again and it files. The hook reaches a machine at its next `wirk login`, not through the hourly update. Codex and Grok are unchanged.
+- `wirk write --help` shows the cut and the ticket body shape where agents read the write examples.
+- An upload with no chosen wirkspace says to run `wirk wirkspace NAME` and upload again, not `workspace_id=`, which upload refuses.
+- The installer under `curl | sh` no longer has its host commands read the piped script. A failed host registration is reported and leaves that host out; the other hosts and `wirk login` still run, and the install exits 1 at the end.
 
 ### 0.4.34
 
