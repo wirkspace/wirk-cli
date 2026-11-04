@@ -147,7 +147,8 @@ def test_a_hook_naming_the_marker_that_wirk_did_not_write_exactly_stays_as_it_is
     path = user_home() / ".claude" / "settings.json"
     turned_off = handlers("# " + hooks.command("start claude card"), "# " + hooks.command("end claude"))
     their_own = handlers("mylog.sh --tag wirk_cli.hooks", "true  # wirk_cli.hooks off")
-    for config in (turned_off, their_own):
+    for config, pre in ((turned_off, "# " + hooks.command("write claude")), (their_own, "mylog.sh wirk_cli.hooks")):
+        config["hooks"]["PreToolUse"] = [{"hooks": [{"type": "command", "command": pre}]}]
         write(path, config)
         before = path.read_bytes()
         hooks.install()
@@ -511,3 +512,168 @@ def test_the_ported_tables_notices_ship_with_wirk():
     assert "Copyright (c) 2026 Wes McKinney" in notice and "Permission is hereby granted, free of charge" in notice
     assert "Copyright 2026 Kenn Software LLC" in notice and "Modified:" in notice
     assert 'license-files = ["LICENSE", "NOTICE"]' in (root / "pyproject.toml").read_text()
+
+
+# ------------------------------------------------------------------ before a write: refused once
+
+
+MCP = "mcp__wirk__wirk_write"
+SHAPED = "Why: x\nOwns: a.py\nCheck: pytest\nSize: S\nRuns on: standard"
+
+
+def create(**data):
+    return {"operations": [{"op": "item.create", "data": {"title": "T", **data}}]}
+
+
+@pytest.fixture(autouse=True)
+def own_temp(monkeypatch, tmp_path):
+    monkeypatch.setattr(hooks.tempfile, "gettempdir", lambda: str(tmp_path))
+
+
+def pre(monkeypatch, capsys, tool, tool_input, name="claude"):
+    payload(monkeypatch, hook_event_name="PreToolUse", tool_name=tool, tool_input=tool_input)
+    assert hooks.main(["write", name]) == 0
+    return capsys.readouterr().out
+
+
+def bash(command):
+    return "Bash", {"command": command}
+
+
+def refused(out: str):
+    answer = json.loads(out)["hookSpecificOutput"]
+    assert (answer["hookEventName"], answer["permissionDecision"]) == ("PreToolUse", "deny")
+    assert answer["permissionDecisionReason"] == hooks.NUDGE
+    assert "Method section" in hooks.NUDGE and "Size: S" in hooks.NUDGE and "again unchanged" in hooks.NUDGE
+
+
+FILINGS = [
+    (MCP, create(body="Why: x", work={"owner_id": "me"})),
+    (MCP, create(work={"criteria": [{"text": "c"}]})),
+    (MCP, {"operations": json.dumps(create(work={})["operations"])}),  # the list sent as a string
+    bash("wirk write new 'Do it' owner=me --body 'Why: x'"),
+    bash("cd /w && ~/.local/bin/wirk write new Do --criterion 'It works'"),
+    bash("wirk write new 'Only kind' kind=work --body 'Why: flakes'"),
+    bash("FOO=1 BAR=2 bin/wirk write new Do owner=me\nwirk status"),
+    bash("wirk write new Do owner=me --body \"$(cat <<'EOF'\nWhy: it's the uploader's retry\nEOF\n)\""),  # an apostrophe
+    bash("cat > /t/b.md <<'EOF'\nWhy: x\nEOF\nwirk write new Do owner=me --body-file /t/b.md"),
+    bash("wirk write new Do owner=me --body-file -"),
+]
+
+
+@pytest.mark.parametrize("tool, tool_input", FILINGS)
+def test_filing_work_without_a_size_line_is_refused_once_and_the_identical_retry_files(monkeypatch, capsys, tool, tool_input):
+    refused(pre(monkeypatch, capsys, tool, tool_input))
+    assert pre(monkeypatch, capsys, tool, tool_input) == ""  # the retry passes and clears the record
+    refused(pre(monkeypatch, capsys, tool, tool_input))  # so a third identical call is a new filing
+
+
+@pytest.mark.parametrize("tool, tool_input", [
+    (MCP, create(body=SHAPED, work={})),
+    (MCP, create(body="Why: x")),  # a record
+    (MCP, {"operations": [{"op": "item.edit", "id": ITEM, "patch": {"body": "x"}}]}),
+    (MCP, {"operations": [{"op": "message.send", "data": {"body": "x"}}]}),
+    (MCP, {"operations": "garbled"}),
+    (MCP, "garbled"),
+    bash("wirk write new Do owner=me --body 'Why: x\nSize: S'"),
+    bash("wirk write new Do owner=me --body \"$(cat <<'EOF'\nWhy: x\nSize: S\nEOF\n)\""),
+    bash("cat > /t/b.md <<'EOF'\nSize: S\nEOF\nwirk write new Do owner=me --body-file /t/b.md"),
+    bash("wirk write new Note --body 'Why: x'"),
+    bash("wirk write new Note kind=record owner=bob --body x"),
+    bash("wirk write edit 5c1e7a90@3 owner=me"),
+    bash("wirk write message --to a --body x"),
+    bash("wirk write --request req.json"),
+    bash("grep wirk write new owner=me notes.md"),
+    bash("echo 'wirk write new X owner=me' ; wirk status"),
+    bash("# wirk write new X owner=me"),
+    bash("ls"),
+    ("Bash", {"command": 7}),
+    ("Read", {"file_path": "x"}),
+])
+def test_everything_else_is_left_alone_and_silent(monkeypatch, capsys, tool, tool_input):
+    assert pre(monkeypatch, capsys, tool, tool_input) == ""
+
+
+def test_a_body_file_is_read_only_when_it_is_a_small_regular_file(monkeypatch, capsys, tmp_path):
+    (tmp_path / "t.md").write_text(SHAPED)
+    (tmp_path / "u.md").write_text("Why: x")
+    (tmp_path / "big.md").write_text("Why: x" + " " * hooks.SMALL + "\nSize: S")
+    (tmp_path / "pipe").mkdir()  # not a regular file
+    assert pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / 't.md'}")) == ""
+    for name in ("u.md", "big.md", "pipe", "no.md"):
+        refused(pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / name}")))
+
+
+def test_a_retry_of_a_different_call_or_session_is_refused_again(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("wirk write new A owner=me")))
+    refused(pre(monkeypatch, capsys, *bash("wirk write new B owner=me")))  # not the same call
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": OTHER, "tool_name": "Bash",
+                                                              "tool_input": {"command": "wirk write new B owner=me"}})))
+    hooks.main(["write", "claude"])
+    refused(capsys.readouterr().out)
+
+
+def test_parallel_filings_and_a_reworded_description_do_not_trap_the_agent(monkeypatch, capsys):
+    one, two = bash("wirk write new A owner=me")[1], bash("wirk write new B owner=me")[1]
+    refused(pre(monkeypatch, capsys, "Bash", one))
+    refused(pre(monkeypatch, capsys, "Bash", two))  # a second filing in flight does not erase the first's mark
+    assert pre(monkeypatch, capsys, "Bash", {**one, "description": "Run it again"}) == ""
+    assert pre(monkeypatch, capsys, "Bash", {**two, "description": "File B"}) == ""
+    ops = create(work={}, body="x")["operations"] + create(work={})["operations"]
+    refused(pre(monkeypatch, capsys, MCP, {"operations": ops, "request_id": "a"}))
+    assert pre(monkeypatch, capsys, MCP, {"request_id": "b", "operations": ops}) == ""
+
+
+def test_a_state_file_that_is_not_a_plain_file_never_holds_a_call(monkeypatch, capsys, tmp_path):
+    command = "wirk write new A owner=me"
+    refused(pre(monkeypatch, capsys, *bash(command)))
+    (mark,) = (tmp_path / f"wirk-pre-write-{os.getuid()}").glob("*/*")
+    mark.unlink()
+    os.mkfifo(mark)  # opening it would wait for ever
+    assert pre(monkeypatch, capsys, *bash(command)) == ""
+
+
+def test_a_command_substitution_is_a_filing_too(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("ID=$(wirk write new Do owner=me --body x | head -1)")))
+
+
+def test_a_record_that_cannot_be_kept_never_refuses(monkeypatch, capsys, tmp_path):
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(hooks.tempfile, "gettempdir", lambda: str(tmp_path / "file"))  # a folder cannot go inside a file
+    assert pre(monkeypatch, capsys, *bash("wirk write new A owner=me")) == ""
+
+
+def test_the_hook_needs_no_network_and_no_sign_in(home, monkeypatch, capsys):
+    monkeypatch.setattr(httpx.Client, "send", lambda *a, **k: pytest.fail("network"))
+    refused(pre(monkeypatch, capsys, MCP, create(work={})))
+
+
+def test_grok_running_claude_codes_pre_write_hook_gets_nothing(monkeypatch, capsys):
+    monkeypatch.setenv("GROK_HOOK_EVENT", "PreToolUse")
+    assert pre(monkeypatch, capsys, MCP, create(work={}), name="claude") == ""
+
+
+def test_a_large_command_without_wirk_costs_nothing(monkeypatch, capsys):
+    start = time.perf_counter()
+    assert pre(monkeypatch, capsys, *bash("echo 'a b' " * 100_000)) == ""
+    assert time.perf_counter() - start < 0.5
+
+
+def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_persons(capsys):
+    set_up(".claude", ".agents")
+    (user_home() / ".codex").mkdir()
+    theirs = {"matcher": "Bash", "hooks": [{"type": "command", "command": "mine.sh"}]}
+    claude = user_home() / ".claude" / "settings.json"
+    write(claude, {"hooks": {"PreToolUse": [theirs]}})
+    hooks.install()
+    groups = settings(claude)["hooks"]["PreToolUse"]
+    assert groups[0] == theirs and groups[1] == {"matcher": "mcp__wirk__wirk_write|Bash", "hooks": [
+        {"type": "command", "command": hooks.command("write claude"), "timeout": 2}]}
+    assert "PreToolUse" not in settings(user_home() / ".codex" / "hooks.json")["hooks"]
+    before = claude.read_bytes()
+    hooks.install()
+    assert claude.read_bytes() == before
+    claude.write_text(claude.read_text().replace(hooks.command("write claude"), "# " + hooks.command("write claude")))
+    edited = claude.read_bytes()
+    hooks.install()
+    assert claude.read_bytes() == edited
