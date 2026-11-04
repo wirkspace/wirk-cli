@@ -127,6 +127,7 @@ END
 # the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left. One host
 # that cannot register is reported and left out. Under curl | sh this shell's stdin is the script, so the loop's isn't.
 failed=""
+SKILL=""
 for host in claude codex grok; do
   case "$host" in
     claude) name="Claude Code"; scope="--scope user"; what="the WIRK MCP server and skill" ;;
@@ -150,20 +151,19 @@ for host in claude codex grok; do
   if [ "$was" != "${was% (*disabled*)}" ]; then  # an add would turn back on what the person turned off
     what="the WIRK skill and instructions; its wirk MCP server stays off, as it was"
   elif [ "$was" != "$BIN/wirk-mcp" ]; then
-    gone=""
     if [ -n "$was" ]; then
       note "$name: replacing the wirk MCP server that ran $was"
       # Codex's and Grok's adds replace; if Claude Code's entry stays, its add refuses and that is reported below
-      if [ "$host" = claude ] && attempt claude mcp remove --scope user wirk; then gone=", and its earlier wirk MCP server is gone"; fi
+      if [ "$host" = claude ]; then attempt claude mcp remove --scope user wirk || true; fi
     fi
     # shellcheck disable=SC2086  # $scope is zero or two words on purpose
     if ! attempt "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"; then
-      note "$name was not set up$gone: $host mcp add failed"
+      note "$name was not set up: $host mcp add failed"
       failed="${failed:+$failed, }$name"
       continue
     fi
   fi
-  if [ -z "${SKILL:-}" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
+  if [ -z "$SKILL" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
   if [ "$host" = claude ]; then
     put_skill "$HOME/.claude/skills/wirk"
   elif [ "$host" = grok ]; then
@@ -188,6 +188,6 @@ if [ "$DRY" -eq 1 ]; then
 elif ! "$BIN/wirk" "$@"; then
   printf '\nwirk login did not finish; run it again when you are ready: wirk login\n'
 fi
-# everything else ran; the status says that less was done than was asked
-if [ -n "$failed" ]; then fail "Not set up: $failed. The rest is done: start with wirk status, and run this again once that is fixed."; fi
+# every other step has had its turn; the status says that less was done than was asked
+if [ -n "$failed" ]; then fail "Not set up: $failed. Run this again once that is fixed."; fi
 printf '\nDone. Start with: wirk status\n'

@@ -349,7 +349,7 @@ def test_a_host_whose_add_fails_is_reported_and_the_rest_goes_on(tmp_path, host,
     assert result.returncode == 1
     assert f"{name} was not set up: {host} mcp add failed" in result.stdout
     assert f"{host}: the wirk server could not be saved" in result.stderr  # the host's own reason
-    assert f"Not set up: {name}." in result.stderr
+    assert f"Not set up: {name}. Run this again once that is fixed." in result.stderr
     assert f"\u2713 {name}:" not in result.stdout and "Done. Start with" not in result.stdout
     assert not (tmp_path / "home" / skill).exists()
     assert (tmp_path / "home/.grok/rules/wirk.md").exists() == (host != "grok")
@@ -362,18 +362,23 @@ def test_a_host_whose_add_fails_is_reported_and_the_rest_goes_on(tmp_path, host,
 
 
 @needs_uv
-@pytest.mark.parametrize("refuses, says_gone", [("claude-refuses", True), ("claude-remove-refuses", False)])
-def test_a_failed_replacement_says_whether_the_earlier_server_is_gone(tmp_path, refuses, says_gone):
+@pytest.mark.parametrize("refuses, left", [("claude-refuses", None), ("claude-remove-refuses", "https://old.example/mcp")])
+def test_a_failed_replacement_is_reported_and_the_rest_goes_on(tmp_path, refuses, left):
     base = release(tmp_path)
     (tmp_path / "claude-wirk").write_text("https://old.example/mcp")
     (tmp_path / refuses).write_text("")
     result = install(tmp_path, base, "--url", URL)
     assert result.returncode == 1
-    gone = ", and its earlier wirk MCP server is gone" if says_gone else ""
-    assert f"Claude Code was not set up{gone}: claude mcp add failed" in result.stdout
-    assert registered(tmp_path, "claude") == (None if says_gone else "https://old.example/mcp")
+    assert "Claude Code was not set up: claude mcp add failed" in result.stdout
+    assert registered(tmp_path, "claude") == left
     assert "\u2713 Codex: the WIRK" in result.stdout
     assert_logged_in(result)
+
+
+@needs_uv
+def test_a_skill_variable_in_the_environment_changes_nothing(tmp_path):
+    result = install(tmp_path, release(tmp_path), "--url", URL, SKILL="1")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @needs_uv
