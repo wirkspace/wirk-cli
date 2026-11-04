@@ -32,7 +32,7 @@ def test_main_help_is_the_whole_entry_point(capsys):
 @pytest.mark.parametrize("command", COMMANDS)
 def test_each_command_help_is_short(capsys, command):
     text = help_of(capsys, command)
-    max_lines = {"write": 41, "admin": 35, "query": 26}.get(command, 25)
+    max_lines = {"write": 43, "admin": 35, "query": 26}.get(command, 25)
     assert len(text.rstrip("\n").split("\n")) <= max_lines
     assert "accept|reject|defer" not in text
 
@@ -447,7 +447,7 @@ def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, 
 
 def test_write_help_limits_common_options_to_supported_short_forms(capsys):
     text = help_of(capsys, "write")
-    assert len(text.rstrip("\n").split("\n")) <= 41
+    assert len(text.rstrip("\n").split("\n")) <= 43
     assert ("--link TYPE is related_to, contributes_to, requires or works_at (a person record to a company record)."
             in " ".join(text.split()))
     assert "every form also takes --reason TEXT, --propose" not in text
@@ -568,3 +568,10 @@ def test_write_help_names_archive_restore_and_the_request_wirkspace(capsys):
 def test_review_help_names_workspace_id(capsys):
     assert help_of(capsys, "review").startswith(
         "usage: wirk review ID@N… ACTION --reason TEXT [workspace_id=ID] [--person] [--request-id ID] [--json]\n")
+
+
+def test_write_help_states_the_ticket_shape(capsys):
+    """bf0a8b71: agents that file work read the cut and ticket shape in write help, not only the MCP description."""
+    text = " ".join(help_of(capsys, "write").split())
+    assert "Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE)." in text
+    assert "Ticket body: Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on; plus one to three criteria." in text
