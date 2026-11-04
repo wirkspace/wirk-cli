@@ -284,6 +284,10 @@ def upload(words, options, transport):
     service = connect(transport)  # the wirkspace named here, so an uncertain confirm's retry adds no word upload refuses
     with readable(words[0]) as source:
         answer = store(source, words[0], request_id, retry, service, description, service.wirkspace, fmt(options))
+    if not answer["ok"] and answer["errors"][0]["code"] == "choose_wirkspace":  # upload takes no workspace_id: only a chosen wirkspace works
+        problem = answer["errors"][0]
+        message = problem["message"].partition(" — ")[0] + " — choose one with: wirk wirkspace NAME, then upload again"
+        answer = {**{k: v for k, v in answer.items() if k != "text"}, "errors": [{**problem, "message": message}]}
     return emit(answer, options)
 
 

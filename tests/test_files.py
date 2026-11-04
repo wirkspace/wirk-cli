@@ -173,3 +173,14 @@ def test_store_returns_the_confirmed_answer_prints_nothing_and_names_the_wirkspa
     assert bodies[1] == {"request_id": "w-1/0/0", "confirm": {"filename": "report.pdf", "bytes": 9, "sha256": sha},
                          "workspace_id": "wsp_9", "format": "json"}
     assert found["data"]["upload"]["id"] == "upload_" + "7e" * 16 and capsys.readouterr().out == ""
+
+
+def test_an_upload_with_no_chosen_wirkspace_names_the_command_that_chooses(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    choices = [{"key": "wsp_" + "1" * 32, "name": "11111111 Sales"}, {"key": "wsp_" + "2" * 32, "name": "22222222 Support"}]
+    problem = {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces — add workspace_id:", "choices": choices}
+    answer = lambda r: envelope("Error choose_wirkspace", ok=False, status=422, errors=[problem])
+    code, out, err, fake = run(["upload", "a.txt"], answer)
+    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id" not in out and "11111111 Sales" in out
+    code, out, err, fake = run(["upload", "a.txt", "--json"], answer)
+    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id" not in out and "22222222 Support" in out
