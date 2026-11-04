@@ -109,7 +109,8 @@ def release(tmp_path, *, corrupt=False):
 
 def shims(tmp_path):
     """claude, codex and grok that record their calls and keep a server named wirk the way the real ones do:
-    Claude Code's add refuses an existing user entry and its remove fails when there is none; Codex's and Grok's adds replace."""
+    Claude Code's add refuses an existing user entry and its remove fails when there is none; Codex's and Grok's adds replace.
+    A file left by a test changes one: NAME-reads-stdin, NAME-refuses (its add fails), claude-remove-refuses."""
     shim_dir = tmp_path / "shims"
     shim_dir.mkdir(exist_ok=True)
     for name, label, exists in (("claude", "Command", 'echo "MCP server wirk already exists in user config" >&2; exit 1'),
@@ -117,21 +118,25 @@ def shims(tmp_path):
         shim = shim_dir / name
         shim.write_text(f"""#!/bin/sh
 echo "{name} $*" >> "{tmp_path}/calls"
+if [ -f "{tmp_path}/{name}-reads-stdin" ]; then cat > /dev/null; fi
 state="{tmp_path}/{name}-wirk"
 case "$*" in
   "mcp get wirk")  # a project's own entry (marked by .local-wirk) wins over the user entry, as in Claude Code
     if [ -f .local-wirk ]; then echo "  {label}: $(cat .local-wirk)"; exit 0; fi
     [ -f "$state" ] || exit 1
     case "$(cat "$state")" in http*) echo "  URL: $(cat "$state")" ;; *) echo "  {label}: $(cat "$state")" ;; esac ;;
-  "mcp add"*" wirk -- "*) if [ -f "$state" ]; then {exists}; fi; all="$*"; printf '%s' "${{all##* -- }}" > "$state" ;;
-  "mcp remove"*" wirk") [ -f "$state" ] && rm "$state" && exit 0; exit 1 ;;
+  "mcp add"*" wirk -- "*)
+    if [ -f "{tmp_path}/{name}-refuses" ]; then echo "{name}: the wirk server could not be saved" >&2; exit 1; fi
+    if [ -f "$state" ]; then {exists}; fi; all="$*"; printf '%s' "${{all##* -- }}" > "$state" ;;
+  "mcp remove"*" wirk") [ -f "{tmp_path}/{name}-remove-refuses" ] && exit 1; [ -f "$state" ] && rm "$state" && exit 0; exit 1 ;;
 esac
 exit 0
 """)
         shim.chmod(0o755)
-    grok = shim_dir / "grok"  # its list names the server; its add replaces, unless a test leaves a grok-refuses file
+    grok = shim_dir / "grok"  # its list names the server; its add replaces
     grok.write_text(f"""#!/bin/sh
 echo "grok $*" >> "{tmp_path}/calls"
+if [ -f "{tmp_path}/grok-reads-stdin" ]; then cat > /dev/null; fi
 state="{tmp_path}/grok-wirk"
 case "$*" in
   "mcp list") [ -f "$state" ] && echo "  wirk: $(cat "$state")"; exit 0 ;;
@@ -154,8 +159,9 @@ def registered(tmp_path, host):
 URL = "http://127.0.0.1:9"
 
 
-def install(tmp_path, base, *extra, cwd=None, **env):
-    """Run the installer against the fake index and releases only: uv never reaches the network."""
+def install(tmp_path, base, *extra, cwd=None, shell=None, **env):
+    """Run the installer against the fake index and releases only: uv never reaches the network.
+    With shell (a command as a list) the script arrives on its standard input, as under curl | sh."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     uv = shutil.which("uv")
@@ -164,7 +170,8 @@ def install(tmp_path, base, *extra, cwd=None, **env):
             "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_FIND_LINKS": str(tmp_path / "index"), "UV_NO_INDEX": "1",
             "UV_OFFLINE": "1", "UV_CACHE_DIR": str(tmp_path / "uv-cache"), "UV_PYTHON_PREFERENCE": "only-system",
             "UV_PYTHON": sys.executable}
-    return subprocess.run(["sh", str(SCRIPT), "--yes", *extra], capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
+    command, script = ([shutil.which(shell[0]), *shell[1:], "-s", "--"], SCRIPT.read_text()) if shell else (["sh", str(SCRIPT)], None)
+    return subprocess.run([*command, "--yes", *extra], input=script, capture_output=True, text=True, timeout=300, env=env, cwd=cwd)
 
 
 needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="uv is needed to install the wheels")
@@ -310,13 +317,63 @@ def test_grok_leaves_a_current_entry_alone(tmp_path):
     assert "Grok: replacing" not in result.stdout
 
 
+HOSTS = {"claude": ("Claude Code", ".claude/skills/wirk"), "codex": ("Codex", ".agents/skills/wirk"),
+         "grok": ("Grok", ".grok/skills/wirk")}
+BASH = ["bash", "--posix"]  # reads its script a byte at a time, so a host that reads stdin takes what follows; dash buffers 8K
+
+
+def assert_logged_in(result):
+    assert f"wirk {LATEST} login --url {URL}" in result.stdout, result.stdout + result.stderr
+
+
 @needs_uv
-def test_a_grok_add_that_fails_stops_the_install_like_any_hosts(tmp_path):
+@pytest.mark.parametrize("shell, host", [(BASH, "claude"), (BASH, "codex"), (BASH, "grok"), (["dash"], "grok")])
+def test_a_host_that_reads_stdin_cannot_swallow_the_piped_script(tmp_path, shell, host):
+    if not shutil.which(shell[0]):
+        pytest.skip(f"{shell[0]} is not here")
     base = release(tmp_path)
-    (tmp_path / "grok-refuses").write_text("")
+    (tmp_path / f"{host}-reads-stdin").write_text("")
+    result = install(tmp_path, base, "--url", URL, shell=shell)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert_logged_in(result)
+    assert "Done. Start with: wirk status" in result.stdout
+
+
+@needs_uv
+@pytest.mark.parametrize("host, shell", [("claude", None), ("codex", None), ("grok", None), ("grok", BASH)])
+def test_a_host_whose_add_fails_is_reported_and_the_rest_goes_on(tmp_path, host, shell):
+    base = release(tmp_path)
+    (tmp_path / f"{host}-refuses").write_text("")
+    result = install(tmp_path, base, "--url", URL, shell=shell)
+    name, skill = HOSTS[host]
+    assert result.returncode == 1
+    assert f"{name} was not set up: {host} mcp add failed" in result.stdout
+    assert f"{host}: the wirk server could not be saved" in result.stderr  # the host's own reason
+    assert f"Not set up: {name}." in result.stderr
+    assert f"\u2713 {name}:" not in result.stdout and "Done. Start with" not in result.stdout
+    assert not (tmp_path / "home" / skill).exists()
+    assert (tmp_path / "home/.grok/rules/wirk.md").exists() == (host != "grok")
+    for other, (other_name, other_skill) in HOSTS.items():
+        if other != host:
+            assert f"\u2713 {other_name}: the WIRK" in result.stdout
+            assert registered(tmp_path, other) == f"{tmp_path}/bin/wirk-mcp"
+            assert (tmp_path / "home" / other_skill / "SKILL.md").exists()
+    assert_logged_in(result)
+
+
+@needs_uv
+@pytest.mark.parametrize("refuses, says_gone", [("claude-refuses", True), ("claude-remove-refuses", False)])
+def test_a_failed_replacement_says_whether_the_earlier_server_is_gone(tmp_path, refuses, says_gone):
+    base = release(tmp_path)
+    (tmp_path / "claude-wirk").write_text("https://old.example/mcp")
+    (tmp_path / refuses).write_text("")
     result = install(tmp_path, base, "--url", URL)
-    assert result.returncode != 0
-    assert f"This step failed: grok mcp add wirk -- {tmp_path}/bin/wirk-mcp" in result.stdout + result.stderr
+    assert result.returncode == 1
+    gone = ", and its earlier wirk MCP server is gone" if says_gone else ""
+    assert f"Claude Code was not set up{gone}: claude mcp add failed" in result.stdout
+    assert registered(tmp_path, "claude") == (None if says_gone else "https://old.example/mcp")
+    assert "\u2713 Codex: the WIRK" in result.stdout
+    assert_logged_in(result)
 
 
 @needs_uv

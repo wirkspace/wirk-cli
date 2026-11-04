@@ -36,10 +36,12 @@ ok() { printf '  \342\234\223 %s\n' "$*"; }  # ✓
 note() { printf '  - %s\n' "$*"; }
 fail() { printf '\n%s\n' "$*" >&2; exit 1; }
 
-quietly() {  # run a step without its chatter; show the chatter only if it fails (a dry run shows the command)
+attempt() {  # run a step without its chatter; show the chatter only if it fails (a dry run shows the command)
   if [ "$DRY" -eq 1 ]; then printf '    would run: %s\n' "$*"; return 0; fi
-  "$@" > "$TMP/log" 2>&1 || { cat "$TMP/log" >&2; fail "This step failed: $*"; }
+  "$@" > "$TMP/log" 2>&1 || { cat "$TMP/log" >&2; return 1; }
 }
+
+quietly() { attempt "$@" || fail "This step failed: $*"; }  # a step the install cannot go on without
 
 ask() {  # yes or no from the person at the terminal; --yes and --dry-run say yes, no terminal says no
   if [ "$YES" -eq 1 ] || [ "$DRY" -eq 1 ]; then return 0; fi
@@ -122,7 +124,9 @@ END
   quietly cp "$TMP/wirk.md" "$1"
 }
 
-# the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left
+# the agent hosts on this machine: the MCP server and the WIRK skill, replacing what an earlier install left. One host
+# that cannot register is reported and left out. Under curl | sh this shell's stdin is the script, so the loop's isn't.
+failed=""
 for host in claude codex grok; do
   case "$host" in
     claude) name="Claude Code"; scope="--scope user"; what="the WIRK MCP server and skill" ;;
@@ -139,19 +143,25 @@ for host in claude codex grok; do
   fi
   # from an empty folder, so Claude Code reports its user entry rather than a project's own
   if [ "$host" = grok ]; then  # Grok has no mcp get: its list names each server as "wirk: COMMAND", notes in brackets
-    was=$(cd "$TMP" && grok mcp list < /dev/null 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
+    was=$(cd "$TMP" && grok mcp list 2> /dev/null | sed -n 's/^ *wirk: //p' | head -n 1)
   else
     was=$(cd "$TMP" && "$host" mcp get wirk 2> /dev/null | sed -n -e 's/^ *[Cc]ommand: //p' -e 's/^ *[Uu][Rr][Ll]: //p' | head -n 1)
   fi
   if [ "$was" != "${was% (*disabled*)}" ]; then  # an add would turn back on what the person turned off
     what="the WIRK skill and instructions; its wirk MCP server stays off, as it was"
   elif [ "$was" != "$BIN/wirk-mcp" ]; then
+    gone=""
     if [ -n "$was" ]; then
       note "$name: replacing the wirk MCP server that ran $was"
-      if [ "$host" = claude ]; then quietly claude mcp remove --scope user wirk; fi  # Codex's and Grok's adds replace
+      # Codex's and Grok's adds replace; if Claude Code's entry stays, its add refuses and that is reported below
+      if [ "$host" = claude ] && attempt claude mcp remove --scope user wirk; then gone=", and its earlier wirk MCP server is gone"; fi
     fi
     # shellcheck disable=SC2086  # $scope is zero or two words on purpose
-    quietly "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"
+    if ! attempt "$host" mcp add $scope wirk -- "$BIN/wirk-mcp"; then
+      note "$name was not set up$gone: $host mcp add failed"
+      failed="${failed:+$failed, }$name"
+      continue
+    fi
   fi
   if [ -z "${SKILL:-}" ]; then fetch wirk-skill SKILL.md; SKILL=1; fi
   if [ "$host" = claude ]; then
@@ -167,7 +177,7 @@ for host in claude codex grok; do
     if [ -z "$made" ]; then put_skill "$HOME/.agents/skills/wirk"; fi
   fi
   ok "$name: $what"
-done
+done < /dev/null
 
 # connect this machine
 case ":$PATH:" in *":$BIN:"*) ;; *) note "To type wirk directly, add $BIN to your PATH (uv tool update-shell does it)" ;; esac
@@ -178,4 +188,6 @@ if [ "$DRY" -eq 1 ]; then
 elif ! "$BIN/wirk" "$@"; then
   printf '\nwirk login did not finish; run it again when you are ready: wirk login\n'
 fi
+# everything else ran; the status says that less was done than was asked
+if [ -n "$failed" ]; then fail "Not set up: $failed. The rest is done: start with wirk status, and run this again once that is fixed."; fi
 printf '\nDone. Start with: wirk status\n'
