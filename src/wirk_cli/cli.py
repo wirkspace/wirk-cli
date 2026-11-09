@@ -23,7 +23,8 @@ from .help import HELP, RETIRED
 SWITCH, VALUE, MANY = "switch", "value", "many"
 WRITE = {"--body": VALUE, "--body-file": VALUE, "--criterion": MANY, "--link": MANY, "--upload": MANY,
          "--allow-duplicate-of": MANY, "--title": VALUE, "--evidence": VALUE, "--reason": VALUE, "--propose": SWITCH,
-         "--request-id": VALUE, "--request": VALUE, "--to": VALUE, "--on": VALUE, "--reply-to": VALUE}
+         "--request-id": VALUE, "--request": VALUE, "--to": VALUE, "--on": VALUE, "--reply-to": VALUE,
+         "--prepend-body-file": VALUE}
 MESSAGE_ONLY = {"--to", "--on", "--reply-to"}
 FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "review": {"--reason": VALUE, "--person": SWITCH, "--request-id": VALUE, "--request": VALUE},
@@ -194,8 +195,10 @@ def query(words, options, transport):
     return emit(connect(transport).post("/v2/query", request_body(options, words, lambda: grammar.query_body(words))), options)
 
 
-def shortcut(words: list[str], options: dict) -> dict:
+def shortcut(words: list[str], options: dict, service: Service) -> dict:
     action, rest = (words[0], words[1:]) if words else ("", [])
+    if "--prepend-body-file" in options and (action != "edit" or {"--body", "--body-file"} & set(options)):
+        raise UsageError("--prepend-body-file belongs to write edit ID@N, without --body or --body-file")
     if action in ("archive", "restore"):
         return grammar.write_archive(action, rest, options)
     if "--body" in options and "--body-file" in options:
@@ -205,6 +208,8 @@ def shortcut(words: list[str], options: dict) -> dict:
     if action == "seen":
         return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
+    if "--prepend-body-file" in options and rest:
+        text = prepended(service, rest, options["--prepend-body-file"])
     if options.get("--body-file") == "-" and not text.strip():  # a failed pipeline step must not clear a body
         raise UsageError("standard input was empty: nothing was sent. To clear a body on purpose use --body ''")
     if action == "message":
@@ -217,10 +222,32 @@ def shortcut(words: list[str], options: dict) -> dict:
     return (grammar.write_new if action == "new" else grammar.write_edit)(rest[0], rest[1:], options, text)
 
 
+def prepended(service: Service, words: list[str], path: str) -> str:
+    """The text of PATH, a blank line, then revision N's whole body, fetched; nothing is sent unless all of it came.
+    Revision N never changes, so a retry with the same text sends the identical body."""
+    item, read = grammar.revision(words[0], "--prepend-body-file")
+    block = text_of(path).rstrip()
+    if not block:
+        raise UsageError(f"{path} is empty: nothing was sent")
+    place = grammar.split(words[1:])[1].get("workspace_id")
+    answer = service.post("/v2/query", {"fetch": [{"ref": item, "revision": read}], "depth": "full", "max_bytes": 65536,
+                                        "format": "json", **({"workspace_id": place} if place else {})})
+    if not answer["ok"]:
+        problem = answer["errors"][0]
+        raise Failure(problem["code"], f"{problem['message']}; nothing was sent", problem.get("hint"))
+    results = answer["data"]["results"]
+    body = results[0].get("body") if len(results) == 1 and results[0].get("body_complete") is True else None
+    if body is None:
+        raise UsageError(f"the body of {item}@{read} came back cut or missing (the service reads at most 65,536 bytes): "
+                         "nothing was sent. Write the whole body with --body-file instead")
+    return block + "\n\n" + body if body else block
+
+
 def write(words, options, transport):
+    service = connect(transport)
     body = request_body(options, words, lambda: {"request_id": options.get("--request-id") or new_id("w"),
-                                                 **shortcut(words, options)})
-    return send(connect(transport), "/v2/write", body, options, body.get("request_id", "?"), words=words)
+                                                 **shortcut(words, options, service)})
+    return send(service, "/v2/write", body, options, body.get("request_id", "?"), words=words)
 
 
 def review(words, options, transport):
