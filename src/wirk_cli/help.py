@@ -61,8 +61,8 @@ links_out: the item's own links; links_in: incoming links by_status (at most 5 e
 To see a message's direct replies (20 at a time), query its ID; kind=message linked=ITEM lists board messages.""",
         "write": """usage: wirk write new TITLE [KEY=VALUE…] [--body TEXT | --body-file PATH] [--criterion TEXT]…
                       [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--allow-duplicate-of ID]…
-       wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
-                      [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
+       wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH |
+                      --prepend-body-file PATH] [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
        wirk write link FROM@N TYPE TO[@N]
        wirk write message [--to ID,…] [--on ITEM,…] [--reply-to ID] [--title TEXT] --body TEXT | --body-file PATH
        wirk write seen ID… · archive ID@N --reason TEXT · restore ID@N
@@ -73,13 +73,11 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write new 'Rate-limit the API' owner=me --criterion 'Returns 429' --link contributes_to:2f9b3c4e  under an initiative
   write edit 5c1e7a90@3 status=in_progress                                  N is the rN you read
   write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
-  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+  write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --prepend-body-file claim.md --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
 reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
-Reserve with block.md (CURRENT ASSIGNMENT) above data.results[0].body; a cut body writes nothing (page it, --body-file):
-  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;d=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open("block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)' wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - --request-id RUN-start
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
   Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE).
@@ -94,6 +92,7 @@ the default; data.work makes work. owner=X with kind=record makes X the record's
 contributes_to, requires or works_at (a person record to a company record). --evidence: passing tests, a link, file path
 or file attached with --upload. Results list IDs. A stored refusal keeps its request_id; correct with a new ID. After an
 uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
+--prepend-body-file PATH (edit only): its text, a blank line, then revision N's whole body; a cut body sends nothing.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
@@ -104,21 +103,19 @@ uncertain result, run the command its hint prints; any retry uses the identical 
 Body: {"request_id", "operations": [...], "expect": {ID: N}, "mode": "propose", "reason"}
 expect: each edited, archived or linked-from item's rN; contributes_to also needs the parent work's rN
 (TO@N or --link contributes_to:ID@N), no destination rN for an initiative; otherwise basis_changed.""",
-        "write edit": """usage: wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH]
-                      [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
+        "write edit": """usage: wirk write edit ID@N [KEY=VALUE…] [--title TEXT] [--body TEXT | --body-file PATH |
+                      --prepend-body-file PATH] [--link TYPE:ID[@N]]… [--upload UPLOAD_ID]… [--evidence TEXT]
                       [--reason TEXT] [--propose] [--request-id ID] [--json]
 
 Change one item at the revision you read: N is the rN on its card, its fetch or your last receipt.
 
   write edit 5c1e7a90@3 status=in_progress owner=me     claim it
   write edit 5c1e7a90@4 status=completed --evidence 'pytest: 12 passed; commit 3f9a2c4'
-  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+  write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --prepend-body-file claim.md --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
 reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
-Reserve with block.md (CURRENT ASSIGNMENT) above data.results[0].body; a cut body writes nothing (page it, --body-file):
-  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;d=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open("block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)' wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - --request-id RUN-start
   write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
   write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner
 
@@ -126,6 +123,8 @@ KEY=VALUE: owner (me or an ID) and the wirkspace's fields (status=open; a comma 
 The owner is owner=me here, work.owner_id in a request body and owner at the top of what query returns.
 owner=X makes a record work (record → work); with kind=record, X is the record's owner. A status alone is refused.
 --body replaces the whole body; add progress as a message instead: wirk write message --on ID --body TEXT.
+--prepend-body-file PATH (- reads stdin) puts its text, a blank line, then revision N's whole body; a cut body or a
+failed fetch sends nothing. A retry with the same text and request_id sends the identical body.
 --evidence is a completion's note: the tests that pass, a link, a file path, or a file attached with --upload.
 --propose needs --reason. A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.
 Kind, context and criteria change through wirk write --request (see wirk write --help).""",

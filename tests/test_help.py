@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import envelope
 from wirk_cli import __version__, cli
 
 ROOT = Path(__file__).parent.parent
@@ -512,42 +513,42 @@ def test_help_that_sends_people_to_login_says_one_click(capsys):
     assert "(the token made with\nwirk login --person, one click in your browser)." in help_of(capsys, "admin")
 
 
-RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request-id RUN-start
+RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --prepend-body-file claim.md --request-id RUN-start
   write edit 5c1e7a90@8 reservation=vacant:8 --request-id RUN-release     release it without completing (completing releases it)
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace"""
 
 RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it."""
 
-RESERVE_RECIPE = ("  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;"
-                  'd=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];'
-                  'r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open('
-                  '"block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)\' '
-                  "wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - "
-                  "--request-id RUN-start")
 RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
 RESERVATION_LONG_LINES = {line for line in [*RESERVATION_EXAMPLES.splitlines(), *RESERVATION_GUIDANCE.splitlines(),
-                                           "--propose needs --reason. " + RESERVATION_STALE] if len(line) > 120} | {RESERVE_RECIPE}
+                                           "--propose needs --reason. " + RESERVATION_STALE] if len(line) > 120}
 
 
 @pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
-@pytest.mark.parametrize("index, reservation, revision, reason, request_id", [
-    (0, "occupied", 7, None, "RUN-start"),
-    (1, "vacant:8", 8, None, "RUN-release"),
-    (2, "replace:8", 8, "why, and the run that takes over", "RUN-replace"),
+@pytest.mark.parametrize("index, patch, revision, reason, request_id", [
+    (0, {"reservation": "occupied", "body": "CURRENT ASSIGNMENT — me\n\nWhy: keep me.\n",
+         "fields": {"status": "in_progress"}, "work": {"owner_id": "me"}}, 7, None, "RUN-start"),
+    (1, {"reservation": "vacant:8"}, 8, None, "RUN-release"),
+    (2, {"reservation": "replace:8"}, 8, "why, and the run that takes over", "RUN-replace"),
 ])
-def test_reservation_help_examples_parse(capsys, run, argv, index, reservation, revision, reason, request_id):
+def test_reservation_help_examples_parse(capsys, run, tmp_path, argv, index, patch, revision, reason, request_id):
+    """199d4e95: the reservation example is one write edit that puts claim.md above revision N's whole body."""
     text = help_of(capsys, *argv)
     printed = [line for line in examples(text) if line.startswith("wirk write edit ") and "reservation=" in line]
     assert printed == examples(RESERVATION_EXAMPLES)
-    code, out, err, fake = run(shlex.split(printed[index])[1:])
+    (tmp_path / "claim.md").write_text("CURRENT ASSIGNMENT — me\n")
+    fetch = envelope(data={"results": [{"id": "item_5c1e7a90", "body": "Why: keep me.\n", "body_complete": True}]})
+    code, out, err, fake = run(shlex.split(printed[index])[1:],
+                               lambda request: fetch if request.url.path == "/v2/query" else envelope())
     assert code == 0, (out, err)
-    assert fake.requests[0].url.path == "/v2/write"
-    assert fake.bodies() == [{
+    assert fake.requests[-1].url.path == "/v2/write"
+    assert fake.bodies()[-1] == {
         "request_id": request_id, "format": "text", "expect": {"5c1e7a90": revision},
-        "operations": [{"op": "item.edit", "id": "5c1e7a90", "patch": {"reservation": reservation}}],
+        "operations": [{"op": "item.edit", "id": "5c1e7a90", "patch": patch}],
         **({"reason": reason} if reason is not None else {}),
-    }]
+    }
+    assert "python3" not in text and "Reserve with block.md" not in text and "--prepend-body-file PATH" in text
 
 
 @pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
@@ -581,46 +582,3 @@ def test_write_help_states_the_ticket_shape(capsys):
     text = " ".join(help_of(capsys, "write").split())
     assert "Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE)." in text
     assert "Ticket body: Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on; plus one to three criteria." in text
-
-
-FAKE_WIRK = """#!/bin/sh
-case "$1" in
-  query) cat "$FETCHED" ;;
-  write) printf '%s\\n' "$@" > "$PWD/edit-args"; cat > "$PWD/edit-body" ;;
-esac
-"""
-
-
-def fetched(body, *, complete=True, ok=True):
-    results = [{"id": "item_5c1e7a90", "r": 7, "body": body, "body_complete": complete}] if ok else []
-    return json.dumps({"ok": ok, "errors": [] if ok else [{"code": "no_match"}], "data": {"results": results}})
-
-
-@pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
-@pytest.mark.parametrize("shell", ["/bin/sh", "zsh"])
-@pytest.mark.parametrize("answer, written", [
-    (fetched("Why: keep me.\n\nCheck: still here.\n"),
-     "CURRENT ASSIGNMENT — me, my branch\n\nWhy: keep me.\n\nCheck: still here.\n"),
-    (fetched("Why: cut for the bud…", complete=False), None),
-    (fetched("", ok=False), None),
-], ids=["kept", "cut", "failed"])
-def test_write_help_reserves_with_the_assignment_above_the_whole_body(capsys, tmp_path, argv, shell, answer, written):
-    """190aeef0: the help's one-pipeline recipe keeps the body under the block, and writes nothing from a cut body or a
-    failed fetch (an empty standard input would clear the body)."""
-    text = help_of(capsys, *argv)
-    assert RESERVE_RECIPE in text.split("\n") and "data.results[0].body" in text
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "bin" / "wirk").write_text(FAKE_WIRK)
-    (tmp_path / "bin" / "wirk").chmod(0o755)
-    (tmp_path / "fetched.json").write_text(answer)
-    (tmp_path / "block.md").write_text("CURRENT ASSIGNMENT — me, my branch\n")
-    env = {**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "FETCHED": str(tmp_path / "fetched.json")}
-    done = subprocess.run([shell, "-c", RESERVE_RECIPE], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
-    if written is None:
-        assert done.returncode != 0 and not (tmp_path / "edit-body").exists(), done
-        return
-    assert done.returncode == 0, done
-    assert (tmp_path / "edit-body").read_text() == written
-    assert (tmp_path / "edit-args").read_text().split("\n")[:-1] == [
-        "write", "edit", "5c1e7a90@7", "reservation=occupied", "status=in_progress", "owner=me", "--body-file", "-",
-        "--request-id", "RUN-start"]
