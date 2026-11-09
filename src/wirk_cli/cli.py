@@ -413,6 +413,9 @@ def download(words, options, transport):
 def login(words, options, transport):
     code = sign_in(words, options, transport)
     if code == 0 and not options.get("--person"):
+        if not update.release(Path(sys.prefix)):  # a dev build never repoints this machine's sessions at itself
+            print("Dev install: session hooks and the listener were left as they are")
+            return code
         wake.install()  # the listener for this configuration directory; it says one line when it cannot start
         hooks.install()  # session hooks for each harness set up for WIRK here; one line when it adds any
     return code
