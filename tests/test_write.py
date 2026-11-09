@@ -429,6 +429,28 @@ def test_a_cut_body_or_failed_fetch_sends_nothing(run, tmp_path, answer, said):
     assert [request.url.path for request in fake.requests] == ["/v2/query"]
 
 
+CHOOSE = {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces — add workspace_id:",
+          "choices": [{"key": "wsp_" + "1" * 32, "name": "11111111 Sales"}, {"key": "wsp_" + "2" * 32, "name": "22222222 Support"}],
+          "hint": "query 5c1e7a90 workspace_id=11111111"}
+
+
+def test_a_fetch_refused_choose_wirkspace_lists_the_choices_and_sends_nothing(run, tmp_path):
+    """19c467d3: the service's own refusal, its choices and hint unchanged, as a plain query prints it."""
+    answer = envelope("Error choose_wirkspace", ok=False, status=422, errors=[CHOOSE])
+    code, out, err, fake = prepend(run, tmp_path, "B", answer, "reservation=occupied")
+    assert code == 1 and (out + err).strip() == ("Error choose_wirkspace: you belong to 2 wirkspaces — add workspace_id:\n"
+                                                 "  11111111 Sales\n  22222222 Support\n"
+                                                 "  query 5c1e7a90 workspace_id=11111111\n  nothing was sent"), (out, err)
+    assert [request.url.path for request in fake.requests] == ["/v2/query"]
+
+
+def test_a_fetch_refused_choose_wirkspace_as_json_keeps_the_services_fields(run, tmp_path):
+    answer = envelope("Error choose_wirkspace", ok=False, status=422, errors=[CHOOSE])
+    code, out, err, fake = prepend(run, tmp_path, "B", answer, "reservation=occupied", "--json")
+    assert code == 1 and json.loads(out)["errors"] == [CHOOSE], (out, err)
+    assert [request.url.path for request in fake.requests] == ["/v2/query"]
+
+
 def test_a_fetch_that_gets_no_answer_sends_nothing_and_promises_no_receipt(run, tmp_path):
     import httpx
     def service(request):

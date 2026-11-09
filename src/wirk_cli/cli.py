@@ -145,6 +145,21 @@ def problem_text(answer: dict) -> str:
     return "\n".join(lines + ([f"  {problem['hint']}"] if problem.get("hint") else []))
 
 
+class Unsent(Failure):
+    """A service refusal that stopped a command before it sent anything: the service's answer unchanged, and in text
+    the line that says so."""
+
+    def __init__(self, answer: dict):
+        super().__init__(answer["errors"][0]["code"], answer["errors"][0]["message"])
+        self.answer = answer
+
+    def envelope(self) -> dict:
+        return self.answer
+
+    def text(self) -> str:
+        return problem_text(self.answer) + "\n  nothing was sent"
+
+
 def emit(answer: dict, options: dict) -> int:
     if options.get("--json"):
         if "notifications" in answer:  # messages for you come last, as text ends with them
@@ -234,8 +249,7 @@ def prepended(service: Service, words: list[str], path: str) -> str:
     answer = service.post("/v2/query", {"fetch": [{"ref": item, "revision": read}], "depth": "full", "max_bytes": 65536,
                                         "format": "json", **({"workspace_id": place} if place else {})})
     if not answer["ok"]:
-        problem = answer["errors"][0]
-        raise Failure(problem["code"], f"{problem['message']}; nothing was sent", problem.get("hint"))
+        raise Unsent(answer)
     results = answer["data"]["results"]
     body = results[0].get("body") if len(results) == 1 and results[0].get("body_complete") is True else None
     if body is None:
