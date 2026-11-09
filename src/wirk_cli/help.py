@@ -78,6 +78,8 @@ To see a message's direct replies (20 at a time), query its ID; kind=message lin
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
 reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
+Reserve with block.md (CURRENT ASSIGNMENT) above data.results[0].body; a cut body writes nothing (page it, --body-file):
+  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;d=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open("block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)' wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - --request-id RUN-start
   write new 'Plan' kind=context level=initiative --body-file plan.md
   write new 'Organization' kind=context level=organization --body-file organization.md
   Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE).
@@ -115,6 +117,8 @@ Change one item at the revision you read: N is the rN on its card, its fetch or 
   write edit 5c1e7a90@8 reservation=replace:8 --reason 'why, and the run that takes over' --request-id RUN-replace
 reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it.
+Reserve with block.md (CURRENT ASSIGNMENT) above data.results[0].body; a cut body writes nothing (page it, --body-file):
+  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;d=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open("block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)' wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - --request-id RUN-start
   write edit 5c1e7a90@4 --title 'Retry webhooks twice' --link related_to:2f9b3c4e
   write edit 5c1e7a90@5 owner=                          KEY= clears a field or the owner
 
