@@ -395,7 +395,7 @@ def sign_in(words, options, transport):
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
-        result = approve(asks, listener, "wirk login --person" if person else "wirk login") or int(refused)
+        result = approve(asks, listener, "wirk login --person" if person else "wirk login", say=not binding) or int(refused)
         return enrol(service, actor_path(url, binding), launcher(url, binding)) if result == 0 and binding else result
     finally:
         if listener:
@@ -473,9 +473,10 @@ def show_link(asks: list, listener):
     return None
 
 
-def approve(asks: list, listener, rerun: str) -> int:
+def approve(asks: list, listener, rerun: str, say: bool = True) -> int:
     """Until the person approves: the value their click brings to the listener finishes each login, and polling sees
-    an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call."""
+    an approval finished another way. 10 minutes at a terminal, 100 seconds for an agent's tool call.
+    A chat that enrols next does not `say` the machine's shared identity: only its own is printed."""
     deadline = time.monotonic() + (600 if sys.stdout.isatty() else 100)
     changed = False
     while True:
@@ -484,7 +485,8 @@ def approve(asks: list, listener, rerun: str) -> int:
             if not answer["ok"]:
                 return emit(answer, {})
             if answer["data"]["state"] == "logged_in":
-                print(login_text(service, request), flush=True)  # the service's words end with what to run next
+                if say:
+                    print(login_text(service, request), flush=True)  # the service's words end with what to run next
                 finished = True
             else:
                 waiting.append((service, request, answer))
