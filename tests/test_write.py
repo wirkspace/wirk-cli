@@ -73,6 +73,23 @@ def test_body_file_from_a_file_and_from_standard_input(run, tmp_path, monkeypatc
     assert sent(run, ["write", "new", "T", "--body-file", "-"])["operations"][0]["data"]["body"] == "From stdin."
 
 
+@pytest.mark.parametrize("piped", ["", " \n\t"])
+@pytest.mark.parametrize("argv", [["write", "edit", "5c1e7a90@1", "status=in_progress"], ["write", "new", "T"],
+                                  ["write", "message", "--to", "bob"]])
+def test_empty_standard_input_for_body_file_is_refused_and_nothing_is_sent(run, tmp_path, monkeypatch, argv, piped):
+    (tmp_path / "piped.txt").write_text(piped)
+    monkeypatch.setattr("sys.stdin", open(tmp_path / "piped.txt"))
+    code, out, err, fake = run([*argv, "--body-file", "-"])
+    assert code == 2 and fake.requests == []
+    assert "standard input was empty: nothing was sent. To clear a body on purpose use --body ''" in err
+
+
+def test_an_empty_file_or_empty_body_still_clears_the_body(run, tmp_path):
+    (tmp_path / "empty.md").write_text("")
+    for option in (["--body-file", "empty.md"], ["--body", ""]):
+        assert sent(run, ["write", "edit", "5c1e7a90@1", *option])["operations"][0]["patch"]["body"] == ""
+
+
 def test_upload_and_duplicate_override_on_new(run):
     body = sent(run, ["write", "new", "T", "kind=work", "--upload", "upload_7e8f", "--allow-duplicate-of", "71f0c8ae",
                       "--reason", "It differs: another service"])
