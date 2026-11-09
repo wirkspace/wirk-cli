@@ -410,7 +410,7 @@ def download(words, options, transport):
 def login(words, options, transport):
     code = sign_in(words, options, transport)
     if code == 0 and not options.get("--person"):
-        if update.checkout(Path(sys.prefix)):  # a dev build never repoints this machine's sessions at itself
+        if not update.release(Path(sys.prefix)):  # a dev build never repoints this machine's sessions at itself
             print("Dev install: session hooks and the listener were left as they are")
             return code
         wake.install()  # the listener for this configuration directory; it says one line when it cannot start

@@ -679,14 +679,19 @@ def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_pe
     assert claude.read_bytes() == edited
 
 
-@pytest.mark.parametrize("editable", [True, False])
-def test_a_developers_checkout_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
-                                                                               editable):
+@pytest.mark.parametrize("direct", [{"url": "file:///src", "dir_info": {"editable": True}},  # pip install -e
+                                    {"url": "file:///src", "dir_info": {}},  # pip install . from a checkout
+                                    "no wirk",  # PYTHONPATH=src: the prefix holds no wirk
+                                    None])  # a release: from the index, with no direct_url.json
+def test_a_developers_install_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
+                                                                              direct):
     info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.35.dist-info"
-    info.mkdir(parents=True)
-    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.35\n")
-    if editable:
-        (info / "direct_url.json").write_text(json.dumps({"url": "file:///src", "dir_info": {"editable": True}}))
+    info.parent.mkdir(parents=True)
+    if direct != "no wirk":
+        info.mkdir()
+        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.35\n")
+    if isinstance(direct, dict):
+        (info / "direct_url.json").write_text(json.dumps(direct))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
     set_up(".claude")
     path = user_home() / ".claude" / "settings.json"
@@ -697,7 +702,7 @@ def test_a_developers_checkout_logs_in_but_leaves_hooks_and_the_listener_alone(r
     code, out, err, fake = run(["login"], answer)
     assert code == 0
     dev = "Dev install: session hooks and the listener were left as they are\n"
-    if editable:
+    if direct is not None:
         assert dev in out and "Session hooks added" not in out and path.read_bytes() == before
         assert fakes.calls() == []
     else:

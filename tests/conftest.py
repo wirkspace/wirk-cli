@@ -95,8 +95,8 @@ def run(home, capsys):
 @pytest.fixture(autouse=True)
 def as_a_release(monkeypatch):
     """The suite runs from a developer's checkout; its logins act as a release's unless a test gives another prefix."""
-    checkout, own = update.checkout, Path(sys.prefix)
-    monkeypatch.setattr(update, "checkout", lambda prefix: prefix != own and checkout(prefix))
+    release, own = update.release, Path(sys.prefix)
+    monkeypatch.setattr(update, "release", lambda prefix: prefix == own or release(prefix))
 
 
 @pytest.fixture(autouse=True)

@@ -73,7 +73,7 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
 
 def targets(prefix: Path) -> list:
     """(name, installed version, upgrade command with {} for the version or None, environment) per install."""
-    if checkout(prefix):  # a developer's checkout is never replaced
+    if not release(prefix):  # a developer's install is never replaced
         return []
     found = installed(prefix)
     name = "wirk-mcp" if "wirk-mcp" in found else "wirk"  # wirk-mcp pins its wirk: upgrading it brings the pair
@@ -81,27 +81,30 @@ def targets(prefix: Path) -> list:
         tools = [uv_tool(name, prefix, found[name][0])]
         sibling = prefix.parent / "wirk-mcp"  # the installer's layout: wirk-mcp in a tool of its own
         mcp = installed(sibling).get("wirk-mcp") if name == "wirk" and (sibling / "uv-receipt.toml").exists() else None
-        return tools + ([uv_tool("wirk-mcp", sibling, mcp[0])] if mcp and not mcp[1] else [])
+        return tools + ([uv_tool("wirk-mcp", sibling, mcp[0])] if mcp and mcp[1] else [])
     command = [str(prefix / "bin" / "python"), "-I", "-m", "pip", "install", "--isolated", "--quiet",
                "--disable-pip-version-check", "--index-url", INDEX, name + "=={}"]
     env = {**os.environ, "PIP_CONFIG_FILE": os.devnull}  # devnull: pip reads no config file at all, the venv's included
     return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, env)]
 
 
-def checkout(prefix: Path) -> bool:
-    """Whether wirk or wirk-mcp at PREFIX is a developer's editable checkout rather than a release."""
-    return any(editable for _, editable in installed(prefix).values())
+def release(prefix: Path) -> bool:
+    """Whether PREFIX holds wirk, and it and any wirk-mcp there are releases. Anything else is a developer's: an
+    editable or local install, or source run with PYTHONPATH from an environment without wirk."""
+    found = installed(prefix)
+    return "wirk" in found and all(released for _, released in found.values())
 
 
 def installed(prefix: Path) -> dict:
-    """{name: (version, editable)} for wirk and wirk-mcp in the environment at PREFIX."""
+    """{name: (version, released)} for wirk and wirk-mcp in the environment at PREFIX. A release came from an index
+    or a remote URL: an install from a local folder or file says so in its direct_url.json."""
     from importlib.metadata import distributions
     found = {}
     for dist in distributions(path=[str(path) for path in prefix.glob("lib/python*/site-packages")]):
         name = dist.metadata["Name"]
         if name in ("wirk", "wirk-mcp"):
             direct = json.loads(dist.read_text("direct_url.json") or "{}")
-            found[name] = (dist.version, bool(direct.get("dir_info", {}).get("editable")))
+            found[name] = (dist.version, "dir_info" not in direct and not direct.get("url", "").startswith("file:"))
     return found
 
 
