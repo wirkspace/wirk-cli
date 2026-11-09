@@ -342,19 +342,26 @@ def show(words, options, transport):
 
 
 def upload(words, options, transport):
-    if len(words) != 1:
+    paths, pairs = grammar.split(words)
+    if others := sorted(set(pairs) - {"workspace_id"}):
+        raise UsageError(f"upload takes workspace_id=ID and no other KEY=VALUE word ({', '.join(others)}); "
+                         "a file named so goes as ./NAME")
+    if pairs.get("workspace_id") == "":
+        raise UsageError("workspace_id is empty: give workspace_id=ID, or leave it out to use this chat's wirkspace")
+    if len(paths) > 1:
         raise UsageError("upload takes one file; several files for one item go through wirk write --request")
-    if words[0] == "-":
-        raise UsageError("upload takes a file, not standard input")
+    if paths in ([], ["-"]):
+        raise UsageError("upload takes a file path, not standard input: wirk upload PATH")
     request_id, description = options.get("--request-id") or new_id("u"), options.get("--description")
-    retry = command("wirk", "upload", words[0], "--request-id", request_id,  # the path as given, the same ID and description
+    retry = command("wirk", "upload", *words, "--request-id", request_id,  # the words as given, the same ID and description
                     *(["--description", description] if description is not None else []), *present(options, "--json"))
-    service = connect(transport)  # the wirkspace named here, so an uncertain confirm's retry adds no word upload refuses
-    with readable(words[0]) as source:
-        answer = store(source, words[0], request_id, retry, service, description, service.wirkspace, fmt(options))
-    if not answer["ok"] and answer["errors"][0]["code"] == "choose_wirkspace":  # upload takes no workspace_id: only a chosen wirkspace works
+    with readable(paths[0]) as source:
+        answer = store(source, paths[0], request_id, retry, connect(transport), description, pairs.get("workspace_id"),
+                       fmt(options))
+    if not answer["ok"] and answer["errors"][0]["code"] == "choose_wirkspace":
         problem = answer["errors"][0]
-        message = problem["message"].partition(" — ")[0] + " — choose one with: wirk wirkspace NAME, then upload again"
+        message = (problem["message"].partition(" — ")[0] + " — add workspace_id=ID, or choose one for this chat with: "
+                   "wirk wirkspace NAME")
         answer = {**{k: v for k, v in answer.items() if k != "text"}, "errors": [{**problem, "message": message}]}
     return emit(answer, options)
 
