@@ -32,7 +32,7 @@ def test_main_help_is_the_whole_entry_point(capsys):
 @pytest.mark.parametrize("command", COMMANDS)
 def test_each_command_help_is_short(capsys, command):
     text = help_of(capsys, command)
-    max_lines = {"write": 43, "admin": 35, "query": 26}.get(command, 25)
+    max_lines = {"write": 45, "admin": 35, "query": 26}.get(command, 25)
     assert len(text.rstrip("\n").split("\n")) <= max_lines
     assert "accept|reject|defer" not in text
 
@@ -412,7 +412,7 @@ def test_write_edit_help_is_the_edit_section_alone(capsys):
     text = help_of(capsys, "write", "edit")
     lines = text.rstrip("\n").split("\n")
     assert text != help_of(capsys, "write") and lines[0].startswith("usage: wirk write edit ID@N")
-    assert len(lines) <= 23
+    assert len(lines) <= 25
     assert all(len(line) <= 120 or line in RESERVATION_LONG_LINES for line in lines)
     assert "write new" not in text and '{"op"' not in text
     for needed in ("status=in_progress owner=me", "reservation=occupied", "--evidence", "basis_changed",
@@ -447,7 +447,7 @@ def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, 
 
 def test_write_help_limits_common_options_to_supported_short_forms(capsys):
     text = help_of(capsys, "write")
-    assert len(text.rstrip("\n").split("\n")) <= 43
+    assert len(text.rstrip("\n").split("\n")) <= 45
     assert ("--link TYPE is related_to, contributes_to, requires or works_at (a person record to a company record)."
             in " ".join(text.split()))
     assert "every form also takes --reason TEXT, --propose" not in text
@@ -519,9 +519,15 @@ RESERVATION_EXAMPLES = """  write edit 5c1e7a90@7 reservation=occupied --request
 RESERVATION_GUIDANCE = """reservation=occupied starts; occupied:G guards any edit; vacant:G releases; replace:G takes over (reviewer or administrator, with --reason). A reservation lapses to vacant:G after two hours with no WIRK call from its holder (inbox reads don't renew).
 RUN is an ID you make once per run; reuse the identical request_id and body after an uncertain result. Never adopt G from a reread; completing the work releases it."""
 
+RESERVE_RECIPE = ("  wirk query 5c1e7a90@7 depth=full max_bytes=65536 --json | python3 -c 'import json,sys,subprocess as s;"
+                  'd=json.load(sys.stdin);d["ok"] or sys.exit(d["errors"]);r=d["data"]["results"][0];'
+                  'r["body_complete"] or sys.exit("body cut: nothing written");sys.exit(s.run(sys.argv[1:],input=(open('
+                  '"block.md",encoding="utf-8").read().rstrip()+"\\n\\n"+r["body"]).encode()).returncode)\' '
+                  "wirk write edit 5c1e7a90@7 reservation=occupied status=in_progress owner=me --body-file - "
+                  "--request-id RUN-start")
 RESERVATION_STALE = 'A stale N is refused as basis_changed: query again and use the new rN; for reservation edits retain your acquired G and never retry a start while occupied.'
 RESERVATION_LONG_LINES = {line for line in [*RESERVATION_EXAMPLES.splitlines(), *RESERVATION_GUIDANCE.splitlines(),
-                                           "--propose needs --reason. " + RESERVATION_STALE] if len(line) > 120}
+                                           "--propose needs --reason. " + RESERVATION_STALE] if len(line) > 120} | {RESERVE_RECIPE}
 
 
 @pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
@@ -575,3 +581,46 @@ def test_write_help_states_the_ticket_shape(capsys):
     text = " ".join(help_of(capsys, "write").split())
     assert "Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE)." in text
     assert "Ticket body: Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on; plus one to three criteria." in text
+
+
+FAKE_WIRK = """#!/bin/sh
+case "$1" in
+  query) cat "$FETCHED" ;;
+  write) printf '%s\\n' "$@" > "$PWD/edit-args"; cat > "$PWD/edit-body" ;;
+esac
+"""
+
+
+def fetched(body, *, complete=True, ok=True):
+    results = [{"id": "item_5c1e7a90", "r": 7, "body": body, "body_complete": complete}] if ok else []
+    return json.dumps({"ok": ok, "errors": [] if ok else [{"code": "no_match"}], "data": {"results": results}})
+
+
+@pytest.mark.parametrize("argv", [("write",), ("write", "edit")])
+@pytest.mark.parametrize("shell", ["/bin/sh", "zsh"])
+@pytest.mark.parametrize("answer, written", [
+    (fetched("Why: keep me.\n\nCheck: still here.\n"),
+     "CURRENT ASSIGNMENT — me, my branch\n\nWhy: keep me.\n\nCheck: still here.\n"),
+    (fetched("Why: cut for the bud…", complete=False), None),
+    (fetched("", ok=False), None),
+], ids=["kept", "cut", "failed"])
+def test_write_help_reserves_with_the_assignment_above_the_whole_body(capsys, tmp_path, argv, shell, answer, written):
+    """190aeef0: the help's one-pipeline recipe keeps the body under the block, and writes nothing from a cut body or a
+    failed fetch (an empty standard input would clear the body)."""
+    text = help_of(capsys, *argv)
+    assert RESERVE_RECIPE in text.split("\n") and "data.results[0].body" in text
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "wirk").write_text(FAKE_WIRK)
+    (tmp_path / "bin" / "wirk").chmod(0o755)
+    (tmp_path / "fetched.json").write_text(answer)
+    (tmp_path / "block.md").write_text("CURRENT ASSIGNMENT — me, my branch\n")
+    env = {**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "FETCHED": str(tmp_path / "fetched.json")}
+    done = subprocess.run([shell, "-c", RESERVE_RECIPE], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
+    if written is None:
+        assert done.returncode != 0 and not (tmp_path / "edit-body").exists(), done
+        return
+    assert done.returncode == 0, done
+    assert (tmp_path / "edit-body").read_text() == written
+    assert (tmp_path / "edit-args").read_text().split("\n")[:-1] == [
+        "write", "edit", "5c1e7a90@7", "reservation=occupied", "status=in_progress", "owner=me", "--body-file", "-",
+        "--request-id", "RUN-start"]
