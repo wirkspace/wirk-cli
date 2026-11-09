@@ -44,6 +44,13 @@ def test_a_new_chat_is_told_to_log_in_then_acts_as_itself(run, monkeypatch):
     assert mine != TOKEN and run(["status"], service())[1].strip() == f"You: {mine}"
 
 
+def test_a_chat_login_names_only_the_chat_it_signs_in_as(run, monkeypatch):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    code, out, err, fake = run(["login"], service())
+    assert code == 0 and out.count("Logged in as") == 1 and out.count("next:") == 1
+    assert f"Logged in as agent-{chat_token(CODEX_A)[-6:]}" in out and "alice-agents" not in out
+
+
 def test_a_claude_code_session_alone_gets_its_own_chat_identity(run, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
     assert "actor_setup_required" in run(["status"], service())[2]
