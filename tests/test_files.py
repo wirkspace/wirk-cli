@@ -181,6 +181,41 @@ def test_an_upload_with_no_chosen_wirkspace_names_the_command_that_chooses(run, 
     problem = {"code": "choose_wirkspace", "message": "you belong to 2 wirkspaces — add workspace_id:", "choices": choices}
     answer = lambda r: envelope("Error choose_wirkspace", ok=False, status=422, errors=[problem])
     code, out, err, fake = run(["upload", "a.txt"], answer)
-    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id" not in out and "11111111 Sales" in out
+    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id=ID" in out and "11111111 Sales" in out
     code, out, err, fake = run(["upload", "a.txt", "--json"], answer)
-    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id" not in out and "22222222 Support" in out
+    assert code == 1 and "wirk wirkspace NAME" in out and "workspace_id=ID" in out and "22222222 Support" in out
+
+
+def test_upload_takes_workspace_id_like_every_command(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    answer, state = files_service()
+    code, out, err, fake = run(["upload", "a.txt", "workspace_id=wsp_9"], answer)
+    bodies = [json.loads(r.content) for r in fake.requests if r.url.host != "storage.test"]
+    assert code == 0 and [body["workspace_id"] for body in bodies] == ["wsp_9", "wsp_9"]
+    assert bodies[1]["confirm"]["filename"] == "a.txt"
+
+
+def test_a_storage_refusals_retry_keeps_the_wirkspace_word(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    answer, state = files_service(put_status=403)
+    code, out, err, fake = run(["upload", "a.txt", "workspace_id=wsp_9", "--request-id", "u-9"], answer)
+    assert code == 1 and "wirk upload a.txt workspace_id=wsp_9 --request-id u-9" in err
+
+
+def test_upload_refuses_any_other_key_naming_it(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    code, out, err, fake = run(["upload", "a.txt", "foo=bar"], files_service()[0])
+    assert code == 2 and "foo" in err and "workspace_id=ID" in err and fake.requests == []
+
+
+def test_upload_refuses_an_empty_workspace_id(run, tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    code, out, err, fake = run(["upload", "a.txt", "workspace_id="], files_service()[0])
+    assert code == 2 and "workspace_id" in err and fake.requests == []
+
+
+def test_upload_with_no_path_asks_for_one(run, tmp_path):
+    code, out, err, fake = run(["upload", "workspace_id=wsp_9"], files_service()[0])
+    assert code == 2 and "upload takes a file path" in err and "several" not in err and fake.requests == []
+    code, out, err, fake = run(["upload", "-"], files_service()[0])
+    assert code == 2 and "upload takes a file path, not standard input" in err and fake.requests == []
