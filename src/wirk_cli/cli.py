@@ -233,9 +233,8 @@ def prepended(service: Service, words: list[str], path: str) -> str:
     place = grammar.split(words[1:])[1].get("workspace_id")
     answer = service.post("/v2/query", {"fetch": [{"ref": item, "revision": read}], "depth": "full", "max_bytes": 65536,
                                         "format": "json", **({"workspace_id": place} if place else {})})
-    if not answer["ok"]:
-        problem = answer["errors"][0]
-        raise Failure(problem["code"], f"{problem['message']}; nothing was sent", problem.get("hint"))
+    if not answer["ok"]:  # the service's refusal as a query prints it, choices and hint unchanged
+        raise Failure(answer["errors"][0]["code"], problem_text(answer).split(": ", 1)[1] + "\n  nothing was sent")
     results = answer["data"]["results"]
     body = results[0].get("body") if len(results) == 1 and results[0].get("body_complete") is True else None
     if body is None:
