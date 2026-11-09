@@ -445,7 +445,7 @@ def sign_in(words, options, transport):
             raise
         answer = None
     if answer is None or (not answer["ok"] and answer["errors"][0]["code"] == "not_available"):
-        return digest_login(service, url, token)  # no browser approval on this service: the digest stays the way in
+        return digest_login(service, url, token, binding)  # no browser approval here: the digest stays the way in
     pending = answer["ok"] and answer["data"]["state"] == "pending"
     listener = None
     if pending and browser_here():
@@ -593,10 +593,13 @@ def login_text(service: Service, request: dict) -> str:
     return answer.get("text") or problem_text(answer)
 
 
-def digest_login(service: Service, url: str, token: str) -> int:
-    """Without web sign-in: check the token, or show its digest for an administrator to register."""
+def digest_login(service: Service, url: str, token: str, binding: str | None) -> int:
+    """Without web sign-in: check the token, or show its digest for an administrator to register. A chat on a
+    registered machine signs in as itself and names only itself, never the machine's shared identity."""
     answer = service.post("/v2/status", {"format": "json", "max_bytes": 1024})
     problem = answer["errors"][0] if answer["errors"] else {}
+    if binding and (answer["ok"] or problem.get("code") == "choose_wirkspace"):  # the machine is registered
+        return enrol(service, actor_path(url, binding), launcher(url, binding))
     if answer["ok"]:
         you = answer["data"]["you"]
         space = you["wirkspace"]
@@ -604,7 +607,8 @@ def digest_login(service: Service, url: str, token: str) -> int:
               "Next: wirk status")
     elif problem.get("code") == "unauthenticated":
         print("This machine's token is not registered yet. Send this digest to your WIRK administrator "
-              f"(it is safe to share; the token stays here):\n{digest(token)}\nThen run: wirk status")
+              f"(it is safe to share; the token stays here):\n{digest(token)}\n"
+              f"Then run: wirk {'login' if binding else 'status'}")
     else:
         print(problem_text(answer))
         return 0 if problem.get("code") == "choose_wirkspace" else 1
