@@ -71,15 +71,22 @@ def offline():
     return httpx.MockTransport(answer)
 
 
-def install(prefix, versions, *, uv_tool=False, bin_dir=None, editable=(), python=None):
-    """A fake environment at PREFIX holding these package versions."""
+EDITABLE = {"url": "file:///src", "dir_info": {"editable": True}}  # pip install -e
+LOCAL = {"url": "file:///src", "dir_info": {}}  # pip install . from a checkout
+WHEEL = {"url": "file:///src/dist/wirk-0.4.21-py3-none-any.whl", "archive_info": {}}  # a wheel built locally
+FROM_URL = {"url": "https://example.test/wirk-0.4.21-py3-none-any.whl", "archive_info": {}}
+
+
+def install(prefix, versions, *, uv_tool=False, bin_dir=None, editable=(), python=None, direct=EDITABLE):
+    """A fake environment at PREFIX holding these package versions; those named in EDITABLE have DIRECT's origin."""
     site = prefix / "lib" / "python3.12" / "site-packages"
     for name, version in versions.items():
         info = site / f"{name.replace('-', '_')}-{version}.dist-info"
         info.mkdir(parents=True)
         (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
         if name in editable:
-            (info / "direct_url.json").write_text(json.dumps({"url": "file:///src", "dir_info": {"editable": True}}))
+            (info / "direct_url.json").write_text(json.dumps(direct))
+    site.mkdir(parents=True, exist_ok=True)
     (prefix / "pyvenv.cfg").write_text("home = /usr/bin\n")
     (prefix / "bin").mkdir()
     if uv_tool:
@@ -146,11 +153,12 @@ def test_the_sibling_mcp_tool_catches_up_when_wirk_is_current(on, tmp_path, fake
     assert [call[0] for call in calls(fake_uv)] == [f"{UV} wirk-mcp==0.4.26"]
 
 
-def test_an_editable_sibling_mcp_tool_is_never_replaced(on, tmp_path, fake_uv):
+@pytest.mark.parametrize("direct", [EDITABLE, LOCAL])
+def test_a_developers_sibling_mcp_tool_is_never_replaced(on, tmp_path, fake_uv, direct):
     tools = tmp_path / "tools"
     prefix = install(tools / "wirk", {"wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin")
     install(tools / "wirk-mcp", {"wirk-mcp": "0.4.21", "wirk": "0.4.21"}, uv_tool=True, bin_dir=tmp_path / "bin",
-            editable=["wirk-mcp"])
+            editable=["wirk-mcp"], direct=direct)
     update.main(prefix, pypi())
     assert [call[0] for call in calls(fake_uv)] == [f"{UV} wirk==0.4.27"]
 
@@ -255,13 +263,30 @@ def test_an_unreachable_pypi_keeps_an_earlier_notice(on, tmp_path):
     assert state(on)["notice"]
 
 
+@pytest.mark.parametrize("direct", [EDITABLE, LOCAL, WHEEL])
 @pytest.mark.parametrize("editable", ["wirk", "wirk-mcp"])
-def test_an_editable_install_is_never_replaced(on, tmp_path, editable):
-    prefix = install(tmp_path / "venv", {"wirk": "0.4.21", "wirk-mcp": "0.4.21"}, editable=[editable])
+def test_a_developers_install_is_never_replaced(on, tmp_path, editable, direct):
+    prefix = install(tmp_path / "venv", {"wirk": "0.4.21", "wirk-mcp": "0.4.21"}, editable=[editable], direct=direct)
     recorder(prefix / "bin" / "python", tmp_path / "pip.log")
     transport = pypi()
     update.main(prefix, transport)
     assert not (tmp_path / "pip.log").exists() and transport.asked == []
+
+
+def test_without_wirk_installed_in_its_prefix_a_run_from_source_is_never_replaced(on, tmp_path):
+    prefix = install(tmp_path / "venv", {})  # PYTHONPATH=src python -m wirk_cli: the prefix holds no wirk
+    recorder(prefix / "bin" / "python", tmp_path / "pip.log")
+    transport = pypi()
+    update.main(prefix, transport)
+    assert not (tmp_path / "pip.log").exists() and transport.asked == []
+
+
+@pytest.mark.parametrize("direct, release", [(None, True), (FROM_URL, True), (EDITABLE, False), (LOCAL, False),
+                                             (WHEEL, False)])
+def test_only_wirk_from_an_index_or_a_remote_url_is_a_release(tmp_path, direct, release):
+    prefix = install(tmp_path / "venv", {"wirk": "0.4.21"}, editable=["wirk"] if direct else [], direct=direct)
+    assert update.release(prefix) is release
+    assert update.release(install(tmp_path / "empty", {})) is False
 
 
 def test_an_update_waits_for_whoever_holds_the_lock_then_runs(on, tmp_path):

@@ -2,12 +2,14 @@
 
 import json
 import os
+import sys
 import time
+from pathlib import Path
 
 import httpx
 import pytest
 
-from wirk_cli import cli
+from wirk_cli import cli, update
 
 URL = "https://wirk.test"
 TOKEN = "wirk_" + "a" * 43
@@ -88,6 +90,13 @@ def run(home, capsys):
         captured = capsys.readouterr()
         return code, captured.out, captured.err, fake
     return go
+
+
+@pytest.fixture(autouse=True)
+def as_a_release(monkeypatch):
+    """The suite runs from a developer's checkout; its logins act as a release's unless a test gives another prefix."""
+    release, own = update.release, Path(sys.prefix)
+    monkeypatch.setattr(update, "release", lambda prefix: prefix == own or release(prefix))
 
 
 @pytest.fixture(autouse=True)
