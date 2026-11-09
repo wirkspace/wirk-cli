@@ -51,6 +51,21 @@ def test_a_chat_login_names_only_the_chat_it_signs_in_as(run, monkeypatch):
     assert f"Logged in as agent-{chat_token(CODEX_A)[-6:]}" in out and "alice-agents" not in out
 
 
+@pytest.mark.parametrize("status", [
+    envelope(data={"you": {"principal": "alice-agents", "wirkspace": {"id": "wsp_1", "name": "Acme"}}}),
+    refusal("choose_wirkspace", "alice-agents works in several wirkspaces")])
+def test_a_chat_login_without_web_sign_in_names_the_chat_not_the_machine(run, monkeypatch, status):
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    chat = service()
+    def answer(request):  # no web sign-in here: the machine's token is checked with status, the chat still enrols
+        if request.url.path == "/v2/login" and json.loads(request.content)["for"] == "agent":
+            return refusal("not_available", "No web sign-in", status=404)
+        return status if request.url.path == "/v2/status" else chat(request)
+    code, out, err, fake = run(["login"], answer)
+    assert code == 0 and out.count("Logged in") == 1 and "alice-agents" not in out + err
+    assert f"Logged in as agent-{chat_token(CODEX_A)[-6:]}" in out
+
+
 def test_a_claude_code_session_alone_gets_its_own_chat_identity(run, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", CLAUDE)
     assert "actor_setup_required" in run(["status"], service())[2]
