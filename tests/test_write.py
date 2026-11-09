@@ -451,13 +451,18 @@ def test_a_fetch_refused_choose_wirkspace_as_json_keeps_the_services_fields(run,
     assert [request.url.path for request in fake.requests] == ["/v2/query"]
 
 
-def test_a_fetch_that_gets_no_answer_sends_nothing_and_promises_no_receipt(run, tmp_path):
+@pytest.mark.parametrize("error", ["ReadTimeout", "ConnectError"])
+def test_a_fetch_lost_on_the_network_says_nothing_was_sent_and_offers_no_write_retry(run, tmp_path, error):
+    """4ab2d50a: the fetch is a read, so its transport failure is said like every other refusal on this path."""
     import httpx
     def service(request):
-        raise httpx.ReadTimeout("slow")
+        raise getattr(httpx, error)("lost")
     (tmp_path / "block.md").write_text("B")
-    code, out, err, fake = run(["write", "edit", "5c1e7a90@7", "--prepend-body-file", "block.md"], service)
-    assert code != 0 and "service_unavailable" in out + err and "receipt" not in out + err, (out, err)
+    code, out, err, fake = run(["write", "edit", "5c1e7a90@7", "reservation=occupied", "--prepend-body-file", "block.md",
+                                "--request-id", "RUN-start"], service)
+    said = out + err
+    assert code == 1 and "service_unavailable" in said and said.rstrip().endswith("nothing was sent"), (out, err)
+    assert not any(word in said for word in ("receipt", "RUN-start", "same command", "outcome_unknown")), (out, err)
     assert {request.url.path for request in fake.requests} == {"/v2/query"}
 
 
