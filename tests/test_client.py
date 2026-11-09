@@ -187,23 +187,31 @@ def test_the_word_item_alone_is_still_a_title_to_fetch(run):
     assert code == 0 and json.loads(fake.requests[0].content)["fetch"] == ["item"]
 
 
-@pytest.mark.parametrize("argv, suggested", [
-    (["write", "message.acknowledge", "1840c538", "workspace_id=c0af212e"], "wirk write seen 1840c538 workspace_id=c0af212e"),
+@pytest.mark.parametrize("argv, suggested, note", [
+    (["write", "message.acknowledge", "1840c538", "workspace_id=c0af212e"], "wirk write seen 1840c538 workspace_id=c0af212e",
+     ""),
     (["write", "item.edit", "5c1e7a90@3", "status=in_progress", "workspace_id=c0af212e"],
-     "wirk write edit 5c1e7a90@3 status=in_progress workspace_id=c0af212e"),
-    (["write", "item.create", "Retry webhooks", "--to", "x"], "wirk write new 'Retry webhooks'"),
-    (["write", "message.send"], "wirk write message"),
-    (["write", "link.create"], "wirk write link FROM@N TYPE TO"),
-    (["write", "item.archive"], "wirk write archive ID@N"),
+     "wirk write edit 5c1e7a90@3 status=in_progress workspace_id=c0af212e", ""),
+    (["write", "item.edit", "5c1e7a90", "status=done", "workspace_id=c0af212e"],
+     "wirk write edit 5c1e7a90@N status=done workspace_id=c0af212e",
+     ". N is the rN you read: wirk query 5c1e7a90 workspace_id=c0af212e"),
+    (["write", "item.archive", "5c1e7a90", "--reason", "a duplicate"],
+     "wirk write archive 5c1e7a90@N --reason 'a duplicate'", ". N is the rN you read: wirk query 5c1e7a90"),
+    (["write", "message.send", "--on", "1840c538", "--to", "a", "--title", "hi", "--body", "x",
+      "workspace_id=c0af212e"],
+     "wirk write message workspace_id=c0af212e --on 1840c538 --to a --title hi --body x", ""),
+    (["write", "item.create", "Retry webhooks"], "wirk write new 'Retry webhooks'", ""),
+    (["write", "link.create"], "wirk write link FROM@N TYPE TO", ""),
 ])
-def test_write_with_an_operation_name_suggests_the_matching_shortcut(run, argv, suggested):
-    """The operation names of the instructions are not write words: nothing is sent, the shortcut is printed."""
+def test_write_with_an_operation_name_suggests_the_matching_shortcut(run, argv, suggested, note):
+    """The operation names of the instructions are not write words: nothing is sent; the hint is the shortcut to run,
+    with the caller's own words and options."""
+    message = f"{argv[1]} is an operation name; nothing was sent{note}"
     code, out, err, fake = run(argv)
-    assert (code, out, fake.requests) == (2, "", [])
-    assert err.splitlines()[:2] == [f"Error invalid_input: {argv[1]} is an operation name; nothing was sent. "
-                                    f"Did you mean: {suggested}",
-                                    "write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, "
-                                    "archive ID@N, restore ID@N, or --request FILE"]
+    assert (code, out, err, fake.requests) == (2, "", f"Error invalid_input: {message}\n  {suggested}\n", [])
+    code, out, err, fake = run([*argv, "--json"])
+    problem = json.loads(out)["errors"][0]
+    assert (code, problem["message"], problem["hint"], fake.requests) == (2, message, f"{suggested} --json", [])
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
