@@ -205,6 +205,8 @@ def shortcut(words: list[str], options: dict) -> dict:
     if action == "seen":
         return grammar.write_seen(rest, options)
     text = text_of(options["--body-file"]) if "--body-file" in options else options.get("--body")
+    if options.get("--body-file") == "-" and not text.strip():  # a failed pipeline step must not clear a body
+        raise UsageError("standard input was empty: nothing was sent. To clear a body on purpose use --body ''")
     if action == "message":
         return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
