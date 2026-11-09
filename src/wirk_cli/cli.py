@@ -192,7 +192,8 @@ def request_body(options: dict, words: list[str], build) -> dict:
 
 
 def query(words, options, transport):
-    return emit(connect(transport).post("/v2/query", request_body(options, words, lambda: grammar.query_body(words))), options)
+    body = request_body(options, words, lambda: grammar.query_body(words))  # a wrong word is refused before sign-in is read
+    return emit(connect(transport).post("/v2/query", body), options)
 
 
 def shortcut(words: list[str], options: dict, service: Service) -> dict:
@@ -288,7 +289,8 @@ def decision_phrase(body: dict) -> str:
 def show(words, options, transport):
     modes = (words == ["status"]) + ("--file" in options) + ("--revoke" in options)
     if modes != 1 or words not in ([], ["status"]):
-        raise UsageError("show takes exactly one of: status, --file FILE, --revoke LINK. To read an item: wirk query ID")
+        raise UsageError("show takes exactly one of: status, --file FILE, --revoke LINK. To read an item: "
+                         + (grammar.read_command(words) or "wirk query ID"))
     if "--revoke" in options:
         body = {"revoke": options["--revoke"]}
     else:
@@ -658,11 +660,19 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     return code
 
 
+def retired_hint(command: str, words: list[str]) -> str:
+    """What replaced a removed command; for wirk item, both reading and creating, reading first for get, show and view."""
+    if command != "item":
+        return f"Use: {RETIRED[command]}"
+    read, create = f"To read: {grammar.read_command(words) or 'wirk query ID'}", f"To create: {RETIRED['item']}"
+    return f"{read}. {create}" if words[:1] in (["get"], ["show"], ["view"]) else f"{create}. {read}"
+
+
 def run(argv: list[str], transport) -> int:
     command, words = (argv[0], argv[1:]) if argv and not argv[0].startswith("-") else ("", argv)
     try:
         if command in RETIRED:
-            raise Failure("invalid_input", f"wirk {command} is gone", f"Use: {RETIRED[command]}", 2)
+            raise Failure("invalid_input", f"wirk {command} was removed", retired_hint(command, words), 2)
         if command and command not in COMMANDS:
             raise Failure("invalid_input", f"unknown command {command}", "See: wirk --help", 2)
         if words == ["--version"] and not command:

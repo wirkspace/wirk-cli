@@ -144,7 +144,7 @@ def test_the_json_form_of_a_client_failure_is_an_envelope_on_stdout(run):
     (["status", "colour=blue"], "status takes no filters (colour)", "See: wirk status --help"),
     (["import", "gitlab", "acme"], "import takes github", "See: wirk import --help"),
     (["frobnicate"], "unknown command frobnicate", "See: wirk --help"),
-    (["read", "5c1e7a90"], "wirk read is gone", "Use: wirk query ID"),
+    (["read", "5c1e7a90"], "wirk read was removed", "Use: wirk query ID"),
 ])
 def test_a_usage_error_is_the_client_envelope_and_exits_2(run, argv, message, hint):
     """The form every client error has, in text and with --json; the hint is the next step. Nothing is sent."""
@@ -156,6 +156,35 @@ def test_a_usage_error_is_the_client_envelope_and_exits_2(run, argv, message, hi
     assert problem["message"].startswith(message)
     code, out, err, fake = run(argv)
     assert (code, out, err, fake.requests) == (2, "", f"Error invalid_input: {problem['message']}\n  {hint}\n", [])
+
+
+@pytest.mark.parametrize("argv, read", [
+    (["show", "addde4b6", "workspace_id=c0af212e"], "wirk query addde4b6 workspace_id=c0af212e"),
+    (["show", "item", "addde4b6"], "wirk query addde4b6"),
+    (["item", "get", "addde4b6", "workspace_id=c0af212e"], "wirk query addde4b6 workspace_id=c0af212e"),
+    (["item", "view", "item_" + "a" * 32], "wirk query item_" + "a" * 32),
+    (["query", "item", "addde4b6", "workspace_id=c0af212e"], "wirk query addde4b6 workspace_id=c0af212e"),
+    (["query", "show", "addde4b6@3", "depth=all"], "wirk query addde4b6@3 depth=all"),
+])
+def test_reading_an_item_the_wrong_way_prints_the_exact_query_command(run, argv, read):
+    """show, the removed wirk item and stray words before an ID refuse before sending and print the command to run."""
+    code, out, err, fake = run(argv)
+    assert (code, out, fake.requests) == (2, "", []) and read in err
+
+
+@pytest.mark.parametrize("argv, hint", [
+    (["item", "get", "addde4b6"], "To read: wirk query addde4b6. To create: wirk write new 'Title'"),
+    (["item", "show"], "To read: wirk query ID. To create: wirk write new 'Title'"),
+    (["item", "create", "x"], "To create: wirk write new 'Title'. To read: wirk query ID"),
+])
+def test_the_removed_item_command_names_reading_and_creating_reading_first_for_get(run, argv, hint):
+    code, out, err, fake = run(argv)
+    assert (code, err, fake.requests) == (2, f"Error invalid_input: wirk item was removed\n  {hint}\n", [])
+
+
+def test_the_word_item_alone_is_still_a_title_to_fetch(run):
+    code, out, err, fake = run(["query", "item"])
+    assert code == 0 and json.loads(fake.requests[0].content)["fetch"] == ["item"]
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])

@@ -3,6 +3,7 @@
 import re
 
 ID = re.compile(r"(?:[a-z]+_)?[0-9a-fA-F]{6,32}")
+ITEM = re.compile(r"(?:item_)?[0-9a-fA-F]{8,32}")
 KEY = re.compile(r"([a-z][a-z0-9_]*)=(.*)", re.S)
 STATUS_KEYS = {"task", "max_bytes", "workspace_id"}
 QUERY_KEYS = {"about", "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id", "wait"}
@@ -76,8 +77,17 @@ def status_body(words: list[str]) -> dict:
     return body
 
 
+def read_command(words: list[str]) -> str | None:
+    """The query that reads the item IDs among the words, keeping their KEY=VALUE words; None when none is an ID."""
+    ids = [word for word in words if ITEM.fullmatch(word.split("@")[0])]
+    return command("wirk", "query", *ids, *(word for word in words if KEY.fullmatch(word))) if ids else None
+
+
 def query_body(words: list[str]) -> dict:
     positionals, pairs = split(words)
+    stray = [word for word in positionals if word in ("item", "items", "show", "get")]
+    if stray and (read := read_command(words)):
+        raise UsageError(f"{' '.join(stray)} is not part of an ID; nothing was sent. Did you mean: {read}")
     if len(positionals) > 1 and all(not ID.fullmatch(word.split("@")[0]) and len(word.split()) == 1 for word in positionals):
         words_given = " ".join(positionals)
         raise UsageError(f"Two or more words were given as separate titles. To find what matters for them: "
