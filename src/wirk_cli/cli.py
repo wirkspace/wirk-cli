@@ -267,8 +267,11 @@ def prepended(service: Service, words: list[str], path: str) -> str:
     if not block:
         raise UsageError(f"{path} is empty: nothing was sent")
     place = grammar.split(words[1:])[1].get("workspace_id")
-    answer = service.post("/v2/query", {"fetch": [{"ref": item, "revision": read}], "depth": "full", "max_bytes": 65536,
-                                        "format": "json", **({"workspace_id": place} if place else {})})
+    try:
+        answer = service.post("/v2/query", {"fetch": [{"ref": item, "revision": read}], "depth": "full", "max_bytes": 65536,
+                                            "format": "json", **({"workspace_id": place} if place else {})})
+    except Failure as failure:  # the fetch is a read: whatever stopped it, the edit was never sent
+        answer = failure.envelope()
     if not answer["ok"]:
         raise Unsent(answer)
     results = answer["data"]["results"]
