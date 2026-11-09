@@ -357,3 +357,108 @@ def test_a_request_file_asking_for_json_prints_the_json_answer(run, tmp_path, ve
     code, out, err, fake = run([verb, "--request", "body.json"], lambda request: answer)
     assert (code, json.loads(out)["ok"]) == ((0, True) if ok else (1, False))
     assert fake.bodies()[-1]["format"] == "json"
+
+
+def fetched(body="Why: keep me.\n", *, complete=True, ok=True):
+    """The JSON answer to a fetch of 5c1e7a90@7: one result, or the service's refusal."""
+    if not ok:
+        return refusal("not_found", "5c1e7a90@7 is not in this wirkspace", status=404, hint="query 5c1e7a90")
+    result = {"id": "item_5c1e7a90", "r": 7, "body_complete": complete, **({"body": body} if body is not None else {})}
+    return envelope(data={"results": [result]})
+
+
+def prepend(run, tmp_path, block, answer, *words, written=None):
+    """write edit 5c1e7a90@7 … --prepend-body-file block.md against a service that answers the fetch with `answer` and
+    the edit with `written` (applied by default)."""
+    (tmp_path / "block.md").write_bytes(block.encode())
+    def service(request):
+        return answer if request.url.path == "/v2/query" else written or envelope("Applied")
+    return run(["write", "edit", "5c1e7a90@7", *words, "--prepend-body-file", "block.md", "--request-id", "RUN-start"],
+               service)
+
+
+@pytest.mark.parametrize("block, body, expected", [
+    ("CURRENT ASSIGNMENT — me\n", "Why: 'quotes' \"too\", $HOME and `ticks`.\n\nCheck: ünïcödé ✓\n",
+     "CURRENT ASSIGNMENT — me\n\nWhy: 'quotes' \"too\", $HOME and `ticks`.\n\nCheck: ünïcödé ✓\n"),
+    ("CURRENT ASSIGNMENT — me  \n\n\n", "No trailing newline", "CURRENT ASSIGNMENT — me\n\nNo trailing newline"),
+    ("Block", "", "Block"),
+], ids=["kept", "trimmed", "empty-body"])
+def test_prepend_body_file_puts_the_block_above_revision_n_whole_body(run, tmp_path, block, body, expected):
+    """199d4e95: one write edit reserves with the block above revision N's body, every other KEY=VALUE kept."""
+    code, out, err, fake = prepend(run, tmp_path, block, fetched(body), "reservation=occupied", "status=in_progress",
+                                   "owner=me")
+    assert code == 0, (out, err)
+    assert [request.url.path for request in fake.requests] == ["/v2/query", "/v2/write"]
+    asked, edit = fake.bodies()
+    assert asked == {"fetch": [{"ref": "5c1e7a90", "revision": 7}], "depth": "full", "max_bytes": 65536, "format": "json"}
+    assert edit == {"request_id": "RUN-start", "format": "text", "expect": {"5c1e7a90": 7}, "operations": [
+        {"op": "item.edit", "id": "5c1e7a90", "patch": {"reservation": "occupied", "body": expected,
+                                                          "fields": {"status": "in_progress"},
+                                                          "work": {"owner_id": "me"}}}]}
+
+
+def test_prepend_body_file_reads_standard_input(run, tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin", type("In", (), {"buffer": open(tmp_path / "in", "w+b")})())
+    (tmp_path / "in").write_bytes("Ä block\n".encode())
+    code, out, err, fake = run(["write", "edit", "5c1e7a90@7", "--prepend-body-file", "-"],
+                               lambda request: fetched("Body") if request.url.path == "/v2/query" else envelope())
+    assert code == 0, (out, err)
+    assert fake.bodies()[-1]["operations"][0]["patch"] == {"body": "Ä block\n\nBody"}
+
+
+@pytest.mark.parametrize("workspace", [["workspace_id=c0af212e"], []], ids=["given", "chat's choice"])
+def test_the_fetch_and_the_edit_go_to_the_same_wirkspace(run, tmp_path, workspace, monkeypatch):
+    if not workspace:
+        monkeypatch.setattr("wirk_cli.cli.chosen", lambda url, binding: "d1b2c3d4")
+    code, out, err, fake = prepend(run, tmp_path, "B", fetched(), *workspace)
+    assert code == 0, (out, err)
+    places = {body["workspace_id"] for body in fake.bodies()}
+    assert places == {"c0af212e" if workspace else "d1b2c3d4"}
+
+
+@pytest.mark.parametrize("answer, said", [
+    (fetched("Why: cut for the bud…", complete=False), "cut"),
+    (fetched(None), "cut"),
+    (fetched(None, complete=None), "cut"),
+    (fetched(ok=False), "5c1e7a90@7 is not in this wirkspace"),
+    (envelope(data={"results": []}), "cut"),
+], ids=["cut", "no-body", "no-flag", "failed", "nothing"])
+def test_a_cut_body_or_failed_fetch_sends_nothing(run, tmp_path, answer, said):
+    code, out, err, fake = prepend(run, tmp_path, "B", answer, "reservation=occupied")
+    assert code != 0 and said in out + err and "nothing was sent" in out + err, (out, err)
+    assert [request.url.path for request in fake.requests] == ["/v2/query"]
+
+
+def test_a_fetch_that_gets_no_answer_sends_nothing_and_promises_no_receipt(run, tmp_path):
+    import httpx
+    def service(request):
+        raise httpx.ReadTimeout("slow")
+    (tmp_path / "block.md").write_text("B")
+    code, out, err, fake = run(["write", "edit", "5c1e7a90@7", "--prepend-body-file", "block.md"], service)
+    assert code != 0 and "service_unavailable" in out + err and "receipt" not in out + err, (out, err)
+    assert {request.url.path for request in fake.requests} == {"/v2/query"}
+
+
+def test_a_stale_n_is_fetched_then_refused_basis_changed(run, tmp_path):
+    stale = refusal("basis_changed", "5c1e7a90 is at r8, not r7", status=409)
+    code, out, err, fake = prepend(run, tmp_path, "B", fetched(), "reservation=occupied", written=stale)
+    assert code == 1 and "basis_changed" in out + err
+    assert [request.url.path for request in fake.requests] == ["/v2/query", "/v2/write"]
+
+
+@pytest.mark.parametrize("argv", [
+    ["write", "edit", "5c1e7a90@7", "--body", "x", "--prepend-body-file", "block.md"],
+    ["write", "edit", "5c1e7a90@7", "--body-file", "block.md", "--prepend-body-file", "block.md"],
+    ["write", "edit", "5c1e7a90", "--prepend-body-file", "block.md"],
+    ["write", "edit", "5c1e7a90@7", "--prepend-body-file", "empty.md"],
+    ["write", "new", "T", "--prepend-body-file", "block.md"],
+    ["write", "message", "--on", "5c1e7a90", "--body", "x", "--prepend-body-file", "block.md"],
+    ["write", "link", "5c1e7a90@7", "related_to", "5c1e7a91", "--prepend-body-file", "block.md"],
+    ["write", "archive", "5c1e7a90@7", "--reason", "done", "--prepend-body-file", "block.md"],
+    ["write", "seen", "5c1e7a90", "--prepend-body-file", "block.md"],
+], ids=["body", "body-file", "no-revision", "empty", "new", "message", "link", "archive", "seen"])
+def test_prepend_body_file_usage_errors_send_nothing(run, tmp_path, argv):
+    (tmp_path / "block.md").write_text("B")
+    (tmp_path / "empty.md").write_text(" \n")
+    code, out, err, fake = run(argv)
+    assert code == 2 and fake.requests == [], (out, err)
