@@ -196,8 +196,19 @@ def query(words, options, transport):
     return emit(connect(transport).post("/v2/query", body), options)
 
 
+WRITE_WORDS = "write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, archive ID@N, restore ID@N, " \
+              "or --request FILE"
+OPERATIONS = {"message.acknowledge": "seen ID", "message.send": "message", "item.edit": "edit ID@N",
+              "item.create": "new Title", "link.create": "link FROM@N TYPE TO", "item.archive": "archive ID@N",
+              "item.restore": "restore ID@N"}  # the shortcut word, then the slots your own words fill
+
+
 def shortcut(words: list[str], options: dict, service: Service) -> dict:
     action, rest = (words[0], words[1:]) if words else ("", [])
+    if action in OPERATIONS:  # a hint only: the operation names of the instructions are not write words
+        word, *slots = OPERATIONS[action].split()
+        raise UsageError(f"{action} is an operation name; nothing was sent. Did you mean: "
+                         f"{command('wirk', 'write', word, *(rest or slots))}\n{WRITE_WORDS}")
     if "--prepend-body-file" in options and (action != "edit" or {"--body", "--body-file"} & set(options)):
         raise UsageError("--prepend-body-file belongs to write edit ID@N, without --body or --body-file")
     if action in ("archive", "restore"):
@@ -216,8 +227,7 @@ def shortcut(words: list[str], options: dict, service: Service) -> dict:
     if action == "message":
         return grammar.write_message(rest, options, text)
     if action not in ("new", "edit", "link") or (action != "link" and not rest):
-        raise UsageError("write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, archive ID@N, "
-                         "restore ID@N, or --request FILE")
+        raise UsageError(WRITE_WORDS)
     if action == "link":
         return grammar.write_link(rest, options)
     return (grammar.write_new if action == "new" else grammar.write_edit)(rest[0], rest[1:], options, text)

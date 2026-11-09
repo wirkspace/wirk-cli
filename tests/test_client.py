@@ -187,6 +187,25 @@ def test_the_word_item_alone_is_still_a_title_to_fetch(run):
     assert code == 0 and json.loads(fake.requests[0].content)["fetch"] == ["item"]
 
 
+@pytest.mark.parametrize("argv, suggested", [
+    (["write", "message.acknowledge", "1840c538", "workspace_id=c0af212e"], "wirk write seen 1840c538 workspace_id=c0af212e"),
+    (["write", "item.edit", "5c1e7a90@3", "status=in_progress", "workspace_id=c0af212e"],
+     "wirk write edit 5c1e7a90@3 status=in_progress workspace_id=c0af212e"),
+    (["write", "item.create", "Retry webhooks", "--to", "x"], "wirk write new 'Retry webhooks'"),
+    (["write", "message.send"], "wirk write message"),
+    (["write", "link.create"], "wirk write link FROM@N TYPE TO"),
+    (["write", "item.archive"], "wirk write archive ID@N"),
+])
+def test_write_with_an_operation_name_suggests_the_matching_shortcut(run, argv, suggested):
+    """The operation names of the instructions are not write words: nothing is sent, the shortcut is printed."""
+    code, out, err, fake = run(argv)
+    assert (code, out, fake.requests) == (2, "", [])
+    assert err.splitlines()[:2] == [f"Error invalid_input: {argv[1]} is an operation name; nothing was sent. "
+                                    f"Did you mean: {suggested}",
+                                    "write takes new TITLE, edit ID@N, link FROM@N TYPE TO, message, seen ID…, "
+                                    "archive ID@N, restore ID@N, or --request FILE"]
+
+
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 def test_redirects_do_not_reveal_bearers_in_diagnostics(run, status):
     child = "wirk_" + "c" * 43
