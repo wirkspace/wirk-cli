@@ -197,7 +197,7 @@ Only this command changes the choice. A workspace_id=ID on a command, or in a --
 
 The choice belongs to one agent chat (Codex, Claude Code or Grok); outside one, add workspace_id=ID to each command.
 A Claude Code Agent-tool helper shares its chat's identity, so its wirk wirkspace moves its launcher's choice too.""",
-        "upload": """usage: wirk upload PATH [--description TEXT] [--request-id ID] [--json]
+        "upload": """usage: wirk upload PATH [workspace_id=ID] [--description TEXT] [--request-id ID] [--json]
 
 Store one file; the bytes go straight to storage, and the answer prints how to attach it.
 

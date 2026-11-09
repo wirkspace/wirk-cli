@@ -152,8 +152,8 @@ def test_the_receipt_hint_names_the_wirkspace_sent_and_the_retry_adds_none_the_l
     assert SALES not in err
 
 
-def test_an_uncertain_upload_prints_a_retry_upload_takes(run, chat, tmp_path):
-    """upload takes no workspace_id=, so its retry stays as it was; the receipt still names where it went."""
+def test_an_uncertain_upload_retries_where_it_went(run, chat, tmp_path):
+    """The chat's choice is added to the retry; a workspace_id= on the line wins and is already in the same command."""
     run(["wirkspace", "Sales"], service())
     (tmp_path / "note.txt").write_text("hello")
     def files(request):
@@ -161,7 +161,12 @@ def test_an_uncertain_upload_prints_a_retry_upload_takes(run, chat, tmp_path):
             return no_answer(request)
         return envelope(data={"present": True})
     code, out, err, fake = run(["upload", "note.txt", "--request-id", "u-1"], service(refuse={"/v2/files": files}))
-    assert code == 1 and "--request-id u-1:" in err and f"wirk query receipt=u-1 workspace_id={SALES}" in err
+    assert code == 1 and f"--request-id u-1 workspace_id={SALES}:" in err
+    assert f"wirk query receipt=u-1 workspace_id={SALES}" in err
+    code, out, err, fake = run(["upload", "note.txt", f"workspace_id={SUPPORT}", "--request-id", "u-2"],
+                               service(refuse={"/v2/files": files}))
+    assert code == 1 and "--request-id u-2:" in err and f"wirk query receipt=u-2 workspace_id={SUPPORT}" in err
+    assert set(sent(fake)) == {SUPPORT} and SALES not in err
 
 
 def test_a_choice_no_longer_reachable_says_so_and_how_to_choose(run, chat):
