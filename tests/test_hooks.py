@@ -677,3 +677,29 @@ def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_pe
     edited = claude.read_bytes()
     hooks.install()
     assert claude.read_bytes() == edited
+
+
+@pytest.mark.parametrize("editable", [True, False])
+def test_a_developers_checkout_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
+                                                                               editable):
+    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.35.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.35\n")
+    if editable:
+        (info / "direct_url.json").write_text(json.dumps({"url": "file:///src", "dir_info": {"editable": True}}))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
+    set_up(".claude")
+    path = user_home() / ".claude" / "settings.json"
+    write(path, {"hooks": {}})
+    before = path.read_bytes()
+    answer = lambda request: (refusal("not_available", "No web sign-in", status=404) if request.url.path == "/v2/login"
+                              else envelope(data={"you": {"principal": "alice-agents", "wirkspace": {"id": "wsp_1", "name": "Acme"}}}))
+    code, out, err, fake = run(["login"], answer)
+    assert code == 0
+    dev = "Dev install: session hooks and the listener were left as they are\n"
+    if editable:
+        assert dev in out and "Session hooks added" not in out and path.read_bytes() == before
+        assert fakes.calls() == []
+    else:
+        assert dev not in out and "Session hooks added: Claude Code" in out and path.read_bytes() != before
+        assert any("launchctl bootstrap" in call for call in fakes.calls())

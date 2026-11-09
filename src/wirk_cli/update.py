@@ -73,9 +73,9 @@ def main(prefix: Path = Path(sys.prefix), transport=None) -> None:
 
 def targets(prefix: Path) -> list:
     """(name, installed version, upgrade command with {} for the version or None, environment) per install."""
-    found = installed(prefix)
-    if any(editable for _, editable in found.values()):  # a developer's checkout is never replaced
+    if checkout(prefix):  # a developer's checkout is never replaced
         return []
+    found = installed(prefix)
     name = "wirk-mcp" if "wirk-mcp" in found else "wirk"  # wirk-mcp pins its wirk: upgrading it brings the pair
     if (prefix / "uv-receipt.toml").exists():
         tools = [uv_tool(name, prefix, found[name][0])]
@@ -86,6 +86,11 @@ def targets(prefix: Path) -> list:
                "--disable-pip-version-check", "--index-url", INDEX, name + "=={}"]
     env = {**os.environ, "PIP_CONFIG_FILE": os.devnull}  # devnull: pip reads no config file at all, the venv's included
     return [(name, found[name][0], command if (prefix / "pyvenv.cfg").exists() else None, env)]
+
+
+def checkout(prefix: Path) -> bool:
+    """Whether wirk or wirk-mcp at PREFIX is a developer's editable checkout rather than a release."""
+    return any(editable for _, editable in installed(prefix).values())
 
 
 def installed(prefix: Path) -> dict:
