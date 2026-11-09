@@ -346,10 +346,12 @@ def upload(words, options, transport):
     if others := sorted(set(pairs) - {"workspace_id"}):
         raise UsageError(f"upload takes workspace_id=ID and no other KEY=VALUE word ({', '.join(others)}); "
                          "a file named so goes as ./NAME")
-    if len(paths) != 1:
+    if pairs.get("workspace_id") == "":
+        raise UsageError("workspace_id is empty: give workspace_id=ID, or leave it out to use this chat's wirkspace")
+    if len(paths) > 1:
         raise UsageError("upload takes one file; several files for one item go through wirk write --request")
-    if paths[0] == "-":
-        raise UsageError("upload takes a file, not standard input")
+    if paths in ([], ["-"]):
+        raise UsageError("upload takes a file path, not standard input: wirk upload PATH")
     request_id, description = options.get("--request-id") or new_id("u"), options.get("--description")
     retry = command("wirk", "upload", *words, "--request-id", request_id,  # the words as given, the same ID and description
                     *(["--description", description] if description is not None else []), *present(options, "--json"))
