@@ -236,11 +236,21 @@ def test_a_missing_route_is_named(run):
 
 
 def test_a_page_that_is_not_from_wirk(run):
-    code, out, err, fake = run(["status"], lambda r: httpx.Response(502, text="<html>Bad gateway</html>"))
-    assert code == 1 and "service_error" in err and "502" in err
+    code, out, err, fake = run(["status"], lambda r: httpx.Response(418, text="<html>teapot</html>"))
+    assert code == 1 and "service_error" in err
+    assert "answered HTTP 418 with a page that is not from WIRK" in err and "Try again shortly" in err
     code, out, err, fake = run(["write", "new", "T", "--request-id", "w-2"],
                                lambda r: httpx.Response(502, text="<html>Bad gateway</html>"))
     assert "outcome_unknown" in err and "--request-id w-2" in err
+
+
+@pytest.mark.parametrize("status", [500, 503])
+def test_a_service_fault_on_a_read_is_not_blamed_on_the_request(run, status):
+    code, out, err, fake = run(["query", "status=open"], lambda r: httpx.Response(status, text="<html>Internal error</html>"))
+    assert code == 1 and "service_error" in err
+    assert f"{URL} failed with HTTP {status} on POST /v2/query" in err and "not in your request" in err
+    assert "tell your WIRK administrator the time" in err and f"curl {URL}/health" in err
+    assert "not from WIRK" not in err and "Try again shortly" not in err
 
 
 def test_not_logged_in(run, home):
