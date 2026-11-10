@@ -246,8 +246,12 @@ class Service:
             raise Failure("unexpected_redirect", f"{self.url} answered {status} for POST {route}; "
                           "WIRK clients never follow redirects, so nothing was sent there.",
                           "Ask your WIRK administrator for the service's address.")
-        if lost and status >= 500:
-            raise lost(f"HTTP {status} with a page that is not from WIRK")
+        if status >= 500:
+            if lost:
+                raise lost(f"HTTP {status} with a page that is not from WIRK")
+            raise Failure("service_error", f"{self.url} failed with HTTP {status} on POST {route}: a fault in the service "
+                          "or a proxy in front of it, not in your request.",
+                          f"If it repeats, tell your WIRK administrator the time; check: curl {self.url}/health")
         if status == 404:
             raise Failure("missing_route", f"{self.url} answered 404 for POST {route}; this service does not have that "
                           "route yet.", "This client needs a newer service; tell your WIRK administrator.")
