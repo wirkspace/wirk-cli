@@ -89,8 +89,9 @@ request body and owner at the top of what query returns. Context (kind=context) 
 initiatives. A change to it applies directly when you may make it; for requires_review, propose with --propose --reason.
 --body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record is
 the default; data.work makes work. owner=X with kind=record makes X the record's owner. --link TYPE is related_to,
-contributes_to, requires or works_at (a person record to a company record). --evidence: passing tests, a link, file path
-or file attached with --upload. Results list IDs. A stored refusal keeps its request_id; correct with a new ID. After an
+contributes_to, requires, duplicate_of (duplicate to original) or works_at (a person record to a company
+record). --evidence: passing tests, a link, file path or file attached with --upload. Results list IDs. A stored
+refusal keeps its request_id; correct with a new ID. After an
 uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
 --prepend-body-file PATH (edit only): its text, a blank line, then revision N's whole body; a cut body sends nothing.
   {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}

@@ -169,11 +169,15 @@ def test_a_cancelled_blocker_is_still_a_prerequisite_and_a_completed_dependent_s
     assert "Blocked by: [ENG-4] (kept as related: WIRK cannot add a prerequisite to completed work)" in latest(hub, 3)["body"]
 
 
-def test_a_duplicate_stays_related_and_its_direction_is_in_the_header(folder, hub):
+def test_a_duplicate_is_a_directed_duplicate_of_link_and_the_header_keeps_the_line(folder, hub):
     linear = FakeLinear([issue(1), issue(2)], relations=[{"id": "r", "type": "duplicate", "issue": ref(2), "relatedIssue": ref(1)}])
     go(linear, folder, hub)
-    assert link_types(hub) == [("related_to", 1, 2)]
-    assert "Duplicate of: [ENG-1] (kept as related" in latest(hub, 2)["body"] and "Duplicates: [ENG-2] (kept as related" in latest(hub, 1)["body"]
+    assert link_types(hub) == [("duplicate_of", 2, 1)]
+    assert "Duplicate of: [ENG-1]" in latest(hub, 2)["body"] and "Duplicates: [ENG-2]" in latest(hub, 1)["body"]
+    assert "kept as related" not in latest(hub, 2)["body"]
+    before = len(hub.writes())
+    go(linear, folder, hub)
+    assert len(hub.writes()) == before
 
 
 def test_links_to_issues_archived_in_linear_are_kept_and_written_once(folder, hub):
