@@ -210,7 +210,7 @@ def test_an_image_in_linear_points_at_the_attached_file(folder, hub):
 
 
 def swapped(text: str) -> str:
-    return linear.rewrite(text, lambda key: f"/P/{key}" if key.startswith("ENG-") else None, lambda url: None)
+    return linear.rewrite(text, lambda key: f"/P/{key}" if key.startswith("ENG-") else None, lambda url: None, "acme")
 
 
 @pytest.mark.parametrize("text", [
@@ -224,6 +224,14 @@ def swapped(text: str) -> str:
     "text\n\n    see ENG-2\n",
     "\tsee ENG-2",
     "`ENG-2`",
+    "https://linear.app/other/issue/ENG-2/x",
+    "[t](https://linear.app/other/issue/ENG-2/x)",
+    "<!-- one\nENG-2\n-->",
+    "<!-- ENG-2 -->",
+    "<code>ENG-2</code>",
+    "<pre>\nsee ENG-2\n</pre>",
+    "````\n```\nENG-2\n```\nENG-2\n````",
+    "~~~~\n~~~\nENG-2\n~~~~",
 ])
 def test_a_reference_inside_a_url_tag_or_code_is_left_alone(text):
     assert swapped(text) == text
@@ -233,3 +241,8 @@ def test_a_reference_in_prose_is_linked_around_code():
     assert swapped("fixes ENG-2 (see ENG-2), not `ENG-2`.\n\n~~~\nENG-2\n~~~\nafter ENG-2") == (
         "fixes [ENG-2](/P/ENG-2) (see [ENG-2](/P/ENG-2)), not `ENG-2`.\n\n~~~\nENG-2\n~~~\nafter [ENG-2](/P/ENG-2)")
     assert swapped("https://linear.app/acme/issue/ENG-2/title") == "[ENG-2](/P/ENG-2)"
+
+
+def test_a_fence_closes_only_on_as_many_marks_and_the_text_after_it_is_prose():
+    assert swapped("````\n```\nENG-2\n````\nENG-2") == "````\n```\nENG-2\n````\n[ENG-2](/P/ENG-2)"
+    assert swapped("[t](https://linear.app/acme/issue/ENG-2/x)") == "[t](/P/ENG-2)"
