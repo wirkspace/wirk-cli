@@ -1,5 +1,6 @@
 """The Linear adapter: issues read through Linear's GraphQL API with a personal key restricted
-to Read, saved owner-only at <config>/import/linear-key. Queries only; the key goes only to Linear; no email is asked for."""
+to Read, saved owner-only at <config>/import/linear-key. Queries only; the key goes only to Linear. An assignee's
+email is read for the exact match with a WIRK person: it goes to WIRK for that and is kept out of every body and archive."""
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, time as day_time, timezone
@@ -26,7 +27,9 @@ LABELS = {"parent": "Parent", "sub_issue": "Sub-issues", "blocked_by": "Blocked 
           "milestone": "Milestone", "of": "Belongs to", "initiative": "Initiatives", "includes": "Projects",
           "parent_initiative": "Parent initiative", "sub_initiative": "Sub-initiatives",
           "previously": "Previously"}
-KINDS, DOCS = ("issue", "project", "milestone", "initiative", "document", "update"), frozenset({"initiative", "document", "update"})
+EPOCH = "1970-01-01T00:00:00.000Z"
+KINDS = ("issue", "project", "milestone", "initiative", "document", "update", "person")
+DOCS = frozenset({"initiative", "document", "update", "person"})
 SELECTIONS = {"Team": "many", "Workflow": "one", "Priority": "one", "Estimate": "one", "Cycle": "one", "Label": "many",
               "Health": "one"}
 STATES = {"triage": "open", "backlog": "open", "unstarted": "open", "started": "in_progress", "completed": "completed",
@@ -105,7 +108,7 @@ UPDATE = "id body health url createdAt editedAt archivedAt user { id } reactionD
 LISTS = {  # read whole at the start: (arguments, what each node holds)
     "teams": ("", "id key name private timezone issueEstimationType"),
     "workflowStates": ("includeArchived: true", "id name type position team { id }"),
-    "users": ("includeDisabled: true", "id name displayName"),
+    "users": ("includeDisabled: true", "id name displayName email avatarUrl"),
     "issueLabels": ("includeArchived: true", "id name isGroup parent { id }"),
     "cycles": ("includeArchived: true", "id number name team { id }"),
     "projects": ("includeArchived: true", "id name description content url status { id name type } priority lead { id } "
@@ -155,6 +158,7 @@ class Linear:
     def __init__(self, http=None, sleep=None, folder=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
         self.sleep, self.folder, self.points, self.key, self.slug = sleep or time.sleep, folder or config_dir() / "import", 0, None, None
+        self.assigned, self.emails = {}, {}  # the users issues are assigned to, and the address of each: for WIRK's matching only
 
     def rewrite(self, text: str, item, file) -> str:
         return rewrite(text, item, file, self.slug)
@@ -286,14 +290,14 @@ class Linear:
                           if team["private"] and team not in chosen]
         census.named_private = [(team["key"], "private", sum(node["team"]["id"] == team["id"] for node in issues))
                                 for team in chosen if team["private"]]
-        records += others
+        records += others + self.people()
         census.comments = sum(len(record.comments) for record in records)
         if len(readable) < len(lists["issueRelations"]):
             census.notes.append(f"relations this key cannot read, left out: {len(lists['issueRelations']) - len(readable)}")
         census.external_images = sum(1 for record in records for text in [record.body] + [c.body for c in record.comments]
                                      for url in IMAGE.findall(text) if not UPLOAD.match(url))
         counts = Counter(record.kind for record in others)
-        census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:]))
+        census.notes.append("also read: " + " · ".join(f"{counts[kind]} {kind}s" for kind in KINDS[1:-1]))
         return census, records
 
     # ---------------------------------------------------------------- projects, milestones, initiatives, documents and updates
@@ -360,6 +364,21 @@ class Linear:
                                    relations=[("of", parents[node[kind]["id"]])], comments=comments[node["id"]])
                         for node in lists[name] if node[kind]["id"] in parents]
         return records
+
+    def people(self) -> list:
+        """Each assignee as a placeholder record: the name and avatar stay in WIRK until a person is matched. The email is
+        kept out of the record and its archive; `emails` carries it to the match."""
+        slug = f"https://linear.app/{self.slug}" if self.slug else "https://linear.app"
+        found = []
+        for ident, user in sorted(self.assigned.items(), key=lambda pair: pair[1]["displayName"]):
+            node = {key: user.get(key) for key in ("id", "name", "displayName", "avatarUrl")}
+            self.emails[ident] = (user.get("email") or "").strip().lower() or None
+            body = [f"Linear user {user['name']} (@{user['displayName']}). Until a WIRK person is matched, they own nothing here.",
+                    *([f"Avatar: {user['avatarUrl']}"] if user.get("avatarUrl") else [])]
+            found.append(self.build("person", node, f"@{user['displayName']}", "\n".join(body), f"{slug}/profiles/{user['displayName']}",
+                                    EPOCH,  # a person has no edit time: the placeholder is written once and WIRK keeps it current
+                                    title=f"{user['name']} (Linear)"))
+        return found
 
     def part(self, ident: str) -> render.Ref:
         """A project, milestone or initiative as a reference: shown when one of its teams is selected or public."""
@@ -447,6 +466,8 @@ class Linear:
                     f"Archived in Linear on {node['archivedAt'][:10]}" if node.get("archivedAt") else None)
         times = [f"{word} {node[word + 'At']}" for word in ("started", "completed", "canceled") if node.get(word + "At")]
         ordered, assignee = self.thread(comments), self.users.get((node["assignee"] or {}).get("id"))
+        if assignee:
+            self.assigned[assignee["id"]] = assignee
         milestone, project = (node["projectMilestone"] or {}).get("id"), (node["project"] or {}).get("id")
         relations = ([("parent", self.reference(node["parent"]))] if node["parent"] else []) + \
             [("sub_issue", self.reference(child)) for child in children] + \
