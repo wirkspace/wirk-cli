@@ -39,13 +39,17 @@ UPLOAD = re.compile(r"https://uploads\.linear\.app/[^\s)\]\"'<>]+")
 IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
 KEY_NAME = r"[A-Za-z][A-Za-z0-9]*-[0-9]+"
-# What the text may point at, tried left to right: code is left alone; an upload or an issue URL in a markdown link is
-# swapped inside it; a bare issue URL or a bare PEB-123 becomes a link whose label keeps the Linear key.
-REFERENCES = re.compile(rf"""(?P<code>```[\s\S]*?```|`[^`\n]*`)
+# What the text may point at, tried left to right. Left alone: code (fenced with ``` or ~~~, indented four spaces or a
+# tab, or inline), HTML tags, autolinks, any other URL and any other link target. Swapped: an upload or an issue URL in a
+# markdown link, and a bare issue URL; a bare PEB-123 becomes a link only in prose, after a space or an opening mark.
+REFERENCES = re.compile(rf"""(?P<code>^[ ]{{0,3}}(?P<fence>```|~~~)[\s\S]*?(?:^[ ]{{0,3}}(?P=fence)[^\n]*$|\Z)
+    | ^(?:[ ]{{4}}|\t)[^\n]*$ | `[^`\n]*`
+    | <[^<>\n]*>)
   | \]\((?P<upload>https://uploads\.linear\.app/[^\s)]+)(?P<utitle>\s+"[^"]*")?\)
   | \]\(https://linear\.app/[\w.-]+/issue/(?P<mdkey>{KEY_NAME})[^\s)]*(?P<mtitle>\s+"[^"]*")?\)
   | https://linear\.app/[\w.-]+/issue/(?P<urlkey>{KEY_NAME})(?:/[\w-]*)?
-  | (?<![\w/#\[-])(?P<key>[A-Z][A-Z0-9]*-[0-9]+)(?![\w\]-])""", re.X)
+  | (?P<other>\]\([^)\n]*\)|\b[a-z][a-z0-9+.-]*://\S+)
+  | (?<![^\s("'*_])(?P<key>[A-Z][A-Z0-9]*-[0-9]+)(?![\w\]-])""", re.X | re.M)
 
 
 def rewrite(text: str, item, file) -> str:
@@ -61,7 +65,7 @@ def rewrite(text: str, item, file) -> str:
             path = item(key)
             return f"[{key}]({path})" if path else found.group()
         else:
-            return found.group()  # code
+            return found.group()  # code, a tag, another URL
         return f"]({target}{title})" if target else found.group()
     return REFERENCES.sub(swap, text)
 

@@ -7,7 +7,7 @@ import pytest
 from import_fakes import FakeWirk
 from test_import_linear import FakeLinear, comment, folder, issue, read, ref, state  # noqa: F401 - folder is a fixture
 from wirk_cli.client import Service
-from wirk_cli.importers import DEFAULT_STATUSES, render, wirk
+from wirk_cli.importers import DEFAULT_STATUSES, linear, render, wirk
 
 WORKFLOW = {"triage": "active", "todo": "active", "in_review": "active", "done": "active"}
 
@@ -207,3 +207,29 @@ def test_an_image_in_linear_points_at_the_attached_file(folder, hub):
     assert "![out](https://uploads.linear.app/acme/x/big.png)" in found["body"]  # not attached: stays Linear's link
     before = len(hub.writes())
     assert {o.outcome for o in go(linear, folder, hub)} == {"current"} and len(hub.writes()) == before
+
+
+def swapped(text: str) -> str:
+    return linear.rewrite(text, lambda key: f"/P/{key}" if key.startswith("ENG-") else None, lambda url: None)
+
+
+@pytest.mark.parametrize("text", [
+    "https://jira.x.com/browse?id=ENG-2",
+    "[x](https://other.com/?t=ENG-2)",
+    '<a href="https://x.com/?k=ENG-2">',
+    "https://x.com/?a=1&amp;k=ENG-2",
+    "<https://x.com/ENG-2>",
+    "~~~\nsee ENG-2\n~~~",
+    "~~~sh\nsee ENG-2\nno close",
+    "text\n\n    see ENG-2\n",
+    "\tsee ENG-2",
+    "`ENG-2`",
+])
+def test_a_reference_inside_a_url_tag_or_code_is_left_alone(text):
+    assert swapped(text) == text
+
+
+def test_a_reference_in_prose_is_linked_around_code():
+    assert swapped("fixes ENG-2 (see ENG-2), not `ENG-2`.\n\n~~~\nENG-2\n~~~\nafter ENG-2") == (
+        "fixes [ENG-2](/P/ENG-2) (see [ENG-2](/P/ENG-2)), not `ENG-2`.\n\n~~~\nENG-2\n~~~\nafter [ENG-2](/P/ENG-2)")
+    assert swapped("https://linear.app/acme/issue/ENG-2/title") == "[ENG-2](/P/ENG-2)"
