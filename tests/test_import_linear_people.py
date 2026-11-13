@@ -10,9 +10,9 @@ from test_import_linear import USERS, FakeLinear, folder, issue, read  # noqa: F
 from wirk_cli.client import Service
 from wirk_cli.importers import DEFAULT_STATUSES, render, wirk
 
-ADA = {"id": "u-ada", "name": "Ada Lovelace", "displayName": "ada", "active": True, "email": "ada@acme.test",
+ADA = {"id": "u-ada", "name": "Ada Lovelace", "displayName": "ada", "active": True, "email": "ada@example.com",
        "avatarUrl": "https://avatars.test/ada.png"}
-BEN = {"id": "u-ben", "name": "Ben Sample", "displayName": "ben", "active": True, "email": "ben@elsewhere.test", "avatarUrl": None}
+BEN = {"id": "u-ben", "name": "Ben Sample", "displayName": "ben", "active": True, "email": "ben@example.org", "avatarUrl": None}
 CARA = {"id": "u-cara", "name": "Zed Unknown", "displayName": "zed", "active": True, "email": None, "avatarUrl": None}
 
 
@@ -38,7 +38,7 @@ def hub():
 
 def test_every_assignee_becomes_a_placeholder_and_only_an_exact_verified_email_matches(folder):
     wirk_hub = hub()
-    wirk_hub.verified = {"ada@acme.test": "alice"}
+    wirk_hub.verified = {"ada@example.com": "alice"}
     run_import(folder, wirk_hub)
     known = {user: found["principal_id"] for (_, user), found in wirk_hub.identities.items()}
     assert known == {"u-ada": "alice", "u-ben": None, "u-cara": None}
@@ -68,5 +68,5 @@ def test_no_email_is_written_into_a_record_a_request_body_other_than_the_match_o
     for _, body in wirk_hub.requests:
         for op in body.get("operations", []):
             if op["op"] != "identity.set":
-                assert "@acme.test" not in json.dumps(op) and "@elsewhere.test" not in json.dumps(op)
-    assert not any(b"@acme.test" in data or b"@elsewhere.test" in data for data in wirk_hub.objects.values())
+                assert "@example.com" not in json.dumps(op) and "@example.org" not in json.dumps(op)
+    assert not any(b"@example.com" in data or b"@example.org" in data for data in wirk_hub.objects.values())
