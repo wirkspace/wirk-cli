@@ -38,6 +38,32 @@ RELATIONS = {"blocks": ("blocking", "blocked_by"), "duplicate": ("duplicate_of",
 UPLOAD = re.compile(r"https://uploads\.linear\.app/[^\s)\]\"'<>]+")
 IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
+KEY_NAME = r"[A-Za-z][A-Za-z0-9]*-[0-9]+"
+# What the text may point at, tried left to right: code is left alone; an upload or an issue URL in a markdown link is
+# swapped inside it; a bare issue URL or a bare PEB-123 becomes a link whose label keeps the Linear key.
+REFERENCES = re.compile(rf"""(?P<code>```[\s\S]*?```|`[^`\n]*`)
+  | \]\((?P<upload>https://uploads\.linear\.app/[^\s)]+)(?P<utitle>\s+"[^"]*")?\)
+  | \]\(https://linear\.app/[\w.-]+/issue/(?P<mdkey>{KEY_NAME})[^\s)]*(?P<mtitle>\s+"[^"]*")?\)
+  | https://linear\.app/[\w.-]+/issue/(?P<urlkey>{KEY_NAME})(?:/[\w-]*)?
+  | (?<![\w/#\[-])(?P<key>[A-Z][A-Z0-9]*-[0-9]+)(?![\w\]-])""", re.X)
+
+
+def rewrite(text: str, item, file) -> str:
+    """Issue references and uploaded files in Linear's text, pointed at WIRK where WIRK has them: `item(key)` is the WIRK
+    path of an imported issue and `file(url)` the name of the file attached for an upload, else None, and the Linear text
+    stays as it was (an issue URL stays a link to Linear, an upload a link only Linear's own users can open)."""
+    def swap(found: re.Match) -> str:
+        if found["upload"]:
+            target, title = file(found["upload"]), found["utitle"] or ""
+        elif found["mdkey"]:
+            target, title = item(found["mdkey"]), found["mtitle"] or ""
+        elif key := found["urlkey"] or found["key"]:
+            path = item(key)
+            return f"[{key}]({path})" if path else found.group()
+        else:
+            return found.group()  # code
+        return f"]({target}{title})" if target else found.group()
+    return REFERENCES.sub(swap, text)
 
 # ---------------------------------------------------------------- the queries
 
@@ -107,6 +133,7 @@ def reactions(data) -> str:
 
 class Linear:
     source, noun, unit, needs_selection = SOURCE, NOUN, "complexity points", False
+    rewrite = staticmethod(rewrite)
 
     def __init__(self, http=None, sleep=None, folder=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))

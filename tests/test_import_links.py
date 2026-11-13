@@ -56,10 +56,10 @@ def test_the_fallbacks_and_their_notes(fake):
                issue(12, relations=[("blocked_by", to(13))]), issue(13, state="cancelled", closed="closed as not planned by @ada at T"),
                issue(14, relations=[("blocked_by", to(15))]), issue(15, relations=[("blocked_by", to(14))])]
     make(fake).run(records)
-    assert links(fake) == [("related_to", 10, 11), ("related_to", 12, 13), ("related_to", 14, 15), ("requires", 14, 15)] or \
-        links(fake) == [("related_to", 10, 11), ("related_to", 12, 13), ("related_to", 15, 14), ("requires", 14, 15)]
-    assert "Blocked by: [acme/api#11] (kept as related: completed here)" in body_of(fake, 10)
-    assert "Blocked by: [acme/api#13] (kept as related: the blocker is cancelled)" in body_of(fake, 12)
+    assert links(fake) == [("related_to", 10, 11), ("related_to", 14, 15), ("requires", 12, 13), ("requires", 14, 15)] or \
+        links(fake) == [("related_to", 10, 11), ("related_to", 15, 14), ("requires", 12, 13), ("requires", 14, 15)]
+    assert "Blocked by: [acme/api#11] (kept as related: WIRK cannot add a prerequisite to completed work)" in body_of(fake, 10)
+    assert "kept as related" not in body_of(fake, 12)  # a cancelled blocker gates nothing, so it is a prerequisite like any
     assert "Blocked by: [acme/api#14] (kept as related: it would close a cycle)" in body_of(fake, 15)
     assert "Blocked by: [acme/api#15]\n" in body_of(fake, 14) or body_of(fake, 14).count("kept as related") == 0
 
@@ -122,7 +122,7 @@ def test_completing_work_that_its_own_link_gates_swaps_the_gate_first(fake):
                                              relations=[("blocked_by", to(1))])])
     assert outcomes(result)[("acme/api#2", "issue")] == "updated"
     assert links(fake) == [("related_to", 1, 2)]  # related_to reads the same either way round
-    assert "(kept as related: completed here)" in body_of(fake, 2)
+    assert "(kept as related: WIRK cannot add a prerequisite to completed work)" in body_of(fake, 2)
 
 
 def test_a_persons_gate_keeps_the_work_open_and_says_why(fake):
