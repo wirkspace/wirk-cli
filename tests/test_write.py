@@ -168,7 +168,7 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "edit", "5c1e7a90", "status=done"], "5c1e7a90@N"),
     (["write", "link", "5c1e7a90", "related_to", "6a0d2e83"], "5c1e7a90@N"),
     (["write", "new", "T", "--propose"], "--reason"),
-    (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires, duplicate_of or works_at"),
+    (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires, duplicate_of, blocked_by or works_at"),
     (["write", "edit", "5c1e7a90@1", "kind=work"], "--request"),
     (["write", "edit", "5c1e7a90@1", "--criterion", "x"], "--request"),
     (["write", "edit", "5c1e7a90@1", "kind=record"], "--request"),

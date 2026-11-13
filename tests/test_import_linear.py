@@ -28,8 +28,9 @@ def team(key, name, private=False, tz="UTC", scale="fibonacci"):
     return {"id": f"team-{key}", "key": key, "name": name, "private": private, "timezone": tz, "issueEstimationType": scale}
 
 
-def state(team_key, name, kind, position=0):
-    return {"id": f"st-{team_key}-{name}", "name": name, "type": kind, "position": position, "team": {"id": f"team-{team_key}"}}
+def state(team_key, name, kind, position=0, color="#95a2b3"):
+    return {"id": f"st-{team_key}-{name}", "name": name, "type": kind, "position": position, "color": color,
+            "team": {"id": f"team-{team_key}"}}
 
 
 def ref(n, team_key="ENG", private=False):
@@ -59,15 +60,17 @@ def comment(n, issue_n, body, **changes):
 
 TEAMS = [team("ENG", "Engineering", tz="America/Los_Angeles"), team("OPS", "Operations", tz="Europe/Berlin", scale="tShirt"),
          team("SEC", "Security", private=True)]
-STATES = [state(key, name, kind, position) for key in ("ENG", "OPS", "SEC")
+STATE_COLOURS = {"Triage": "#F2C94C", "Todo": "#e2e2e2", "In Review": "#5e6ad2", "Done": "#5E6AD3", "Won't Fix": "#95a2b3",
+                 "Duplicate": "#95a2b4"}  # as Linear gives them, in either case
+STATES = [state(key, name, kind, position, STATE_COLOURS[name]) for key in ("ENG", "OPS", "SEC")
           for position, (name, kind) in enumerate([("Triage", "triage"), ("Todo", "unstarted"), ("In Review", "started"),
                                                    ("Done", "completed"), ("Won't Fix", "canceled"), ("Duplicate", "duplicate")])]
 USERS = [{"id": "u-ada", "name": "Ada Lovelace", "displayName": "ada", "active": True},
          {"id": "u-ben", "name": "Ben Sample", "displayName": "ben", "active": False}]
-LABELS = [{"id": "l-bug", "name": "Bug", "isGroup": False, "parent": None},
-          {"id": "l-area", "name": "Area", "isGroup": True, "parent": None},
-          {"id": "l-front", "name": "Frontend", "isGroup": False, "parent": {"id": "l-area"}},
-          {"id": "l-back", "name": "Backend", "isGroup": False, "parent": {"id": "l-area"}}]
+LABELS = [{"id": "l-bug", "name": "Bug", "color": "#EB5757", "isGroup": False, "parent": None},
+          {"id": "l-area", "name": "Area", "color": "#bec2c8", "isGroup": True, "parent": None},
+          {"id": "l-front", "name": "Frontend", "color": "#26b5ce", "isGroup": False, "parent": {"id": "l-area"}},
+          {"id": "l-back", "name": "Backend", "color": "#f2994a", "isGroup": False, "parent": {"id": "l-area"}}]
 CYCLES = [{"id": "cy-42", "number": 42, "name": None, "team": {"id": "team-ENG"}}]
 def project(n, name, teams, status=("Started", "started"), **changes):
     base = {"id": f"p-{n}", "name": name, "description": f"{name} in a line.", "content": f"The plan for {name}.",
@@ -473,3 +476,10 @@ def test_archived_milestones_and_updates_are_read_so_they_are_mirrored_not_missi
     queries = [json.loads(r.content)["query"] for r in fake.requests if r.method == "POST"]
     for name in ("projectMilestones", "projectUpdates", "initiativeUpdates"):
         assert any(f"{name}(first: $first, after: $after, includeArchived: true" in q for q in queries), name
+
+
+def test_state_and_label_colours_are_read_by_field_and_option_name(folder):
+    source, _, _ = read(FakeLinear([issue(1)]), folder)
+    assert source.colors() == {"Workflow": {"Triage": "#F2C94C", "Todo": "#e2e2e2", "In Review": "#5e6ad2", "Done": "#5E6AD3",
+                                            "Won't Fix": "#95a2b3", "Duplicate": "#95a2b4"},
+                               "Label": {"Bug": "#EB5757"}, "Area": {"Frontend": "#26b5ce", "Backend": "#f2994a"}}

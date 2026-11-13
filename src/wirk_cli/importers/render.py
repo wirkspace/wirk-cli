@@ -339,6 +339,7 @@ class FieldPlan:
     name: str
     selection: str  # one or many
     options: dict  # option name -> key, in use
+    colors: dict = field(default_factory=dict)  # option name -> #rrggbb, where the source has one
 
 
 @dataclass(frozen=True)
@@ -347,6 +348,9 @@ class Attachment:
     url: str
     comment: bool  # referenced in a comment rather than the body
     holder: str = ""  # the source's ID for the text that references it, for a signed link
+
+
+COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 
 
 def slug(name: str) -> str:
@@ -362,8 +366,9 @@ def field_key(name: str, source: str) -> str:
     return f"{source.lower()}_{key}" if key in RESERVED else key
 
 
-def plan_fields(records: list, selections: dict, source: str) -> dict:
-    """Every field the source may fill, with the options in use; those within the field limit become fields."""
+def plan_fields(records: list, selections: dict, source: str, colors: dict | None = None) -> dict:
+    """Every field the source may fill, with the options in use and the colours it gave them; those within the field limit
+    become fields."""
     used = {name: {} for name in selections}
     for record in records:
         for name, values in record.fields.items():
@@ -378,7 +383,9 @@ def plan_fields(records: list, selections: dict, source: str) -> dict:
                 key, number = f"{slug(value)}_{number}", number + 1
             taken.add(key)
             options[value] = key
-        plans[name] = FieldPlan(field_key(name, source), name, selections[name], options)
+        given = (colors or {}).get(name, {})
+        plans[name] = FieldPlan(field_key(name, source), name, selections[name], options,
+                                {value: given[value].lower() for value in options if COLOR.fullmatch(given.get(value) or "")})
     return plans
 
 

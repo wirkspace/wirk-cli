@@ -449,7 +449,7 @@ def test_message_short_form_help_is_targeted_and_read_only(capsys, monkeypatch, 
 def test_write_help_limits_common_options_to_supported_short_forms(capsys):
     text = help_of(capsys, "write")
     assert len(text.rstrip("\n").split("\n")) <= 45
-    assert ("--link TYPE is related_to, contributes_to, requires, duplicate_of (duplicate to original) or works_at (a person record to a company record)."
+    assert ("--link TYPE is related_to, contributes_to, requires, duplicate_of (duplicate to original), blocked_by (blocked to blocker; gates nothing) or works_at (a person record to a company record)."
             in " ".join(text.split()))
     assert "every form also takes --reason TEXT, --propose" not in text
     assert "--propose needs --reason and cannot send or acknowledge messages" in text

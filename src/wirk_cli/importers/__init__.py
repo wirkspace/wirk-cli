@@ -103,7 +103,7 @@ class Run:
             adapter.check(mapped)
             census, records = adapter.read(self.selection)
             ctx = adapter.context(census.selected)
-            plan = render.plan_fields(records, adapter.selections(records), adapter.source)
+            plan = render.plan_fields(records, adapter.selections(records), adapter.source, getattr(adapter, "colors", dict)())
             importer = wirk.Importer(client, ctx, users=mapped.get("users", {}),
                                      statuses={**DEFAULT_STATUSES, **mapped.get("status", {})}, plan=plan,
                                      withheld=adapter.withheld(ctx), download=adapter.download, dry_run=self.dry_run,
@@ -184,7 +184,8 @@ class Run:
     def write_setup(self, importer, plan: dict, records: list, registered: bool) -> Path | None:
         fields = [{"op": "field.create", "field": {
             "key": field.key, "name": field.name, "applies_to": "item", "selection": field.selection, "required": False,
-            "options": [{"key": key, "name": name, "order": order} for order, (name, key) in enumerate(field.options.items(), 1)]}}
+            "options": [{"key": key, "name": name, "order": order, **({"color": field.colors[name]} if name in field.colors else {})}
+                        for order, (name, key) in enumerate(field.options.items(), 1)]}}
             for field in plan.values() if 0 < len(field.options) <= self.limit and field.key not in importer.vocab]
         operations = fields
         if not registered:

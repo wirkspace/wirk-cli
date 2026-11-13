@@ -9,7 +9,7 @@ STATUS_KEYS = {"task", "max_bytes", "workspace_id"}
 QUERY_KEYS = {"about", "receipt", "depth", "sort", "limit", "max_bytes", "cursor", "workspace_id", "wait"}
 NUMBERS = {"limit", "max_bytes", "wait"}
 SINGLE = {"text", "linked", "folder"}  # filters that take one string, commas included
-LINKS = ("related_to", "contributes_to", "requires", "duplicate_of", "works_at")
+LINKS = ("related_to", "contributes_to", "requires", "duplicate_of", "blocked_by", "works_at")
 PLACEHOLDERS = {"", "REASON", "WHY", "…", "..."}
 ACTIONS = ("accept", "reject", "defer")
 
