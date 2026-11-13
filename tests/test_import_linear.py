@@ -236,7 +236,8 @@ def test_only_queries_reach_linear_with_the_key_and_no_email_is_asked_for(folder
     for request in fake.requests:
         assert request.url == httpx.URL(linear.API) and request.headers["authorization"] == KEY
         query = json.loads(request.content)["query"]
-        assert query.lstrip().startswith("query") and "mutation" not in query and "email" not in query.lower()
+        assert query.lstrip().startswith("query") and "mutation" not in query
+        assert "email" not in query.lower() or "users(" in query  # the one place an address is read: the people list
 
 
 # ---------------------------------------------------------------- one issue
@@ -441,7 +442,7 @@ def test_projects_milestones_initiatives_documents_and_updates_of_the_selected_t
     assert links("update", "Checkout v2 update 2026-09-20 (pu-1)") == [("of", "Checkout v2")] and "Health: On track" in weekly.facts
     assert [c.body for c in weekly.comments] == ["On the update"]
     ctx = found.context(census.selected)
-    assert ctx.docs == {"initiative", "document", "update"} and set(ctx.kinds) >= {"issue", "project", "milestone"}
+    assert ctx.docs == {"initiative", "document", "update", "person"} and set(ctx.kinds) >= {"issue", "project", "milestone"}
 
 
 def test_a_project_relation_to_a_project_the_key_cannot_see_is_left_out(folder):

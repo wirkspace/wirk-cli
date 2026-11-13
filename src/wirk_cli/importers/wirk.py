@@ -10,7 +10,7 @@ import secrets
 from urllib.parse import urlencode
 
 from ..client import Failure
-from . import render
+from . import people, render
 
 PAGE = {"limit": 100, "max_bytes": 65536}
 ACTING = ("create", "update", "state")  # "state": only the fields the importer owns, on an item a person edited
@@ -178,7 +178,7 @@ class Plan:
 
 class Importer:
     def __init__(self, wirk: Wirk, ctx: render.Context, *, users: dict, statuses: dict, plan: dict, withheld, download,
-                 dry_run: bool, overwrite: bool, progress=None, rewrite=None):
+                 dry_run: bool, overwrite: bool, progress=None, rewrite=None, emails=None, suggester=None):
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
@@ -187,6 +187,8 @@ class Importer:
         self.rewrite = rewrite  # (text, item, file) -> text: the source's references into WIRK; see `fix_text`
         self.waiting = defaultdict(set)  # issue -> references its text will resolve once their items or files exist
         self.views, self.state_edits, self.absent = {}, {}, defaultdict(set)
+        self.emails, self.suggester = emails or {}, suggester or people.NameSimilarity()  # see people.py
+        self.people = Counter()  # matched, suggested and unmatched external people this run
 
     # ---------------------------------------------------------------- the run
 
@@ -207,14 +209,71 @@ class Importer:
         self.kinds = {record.ident: record.kind for record in records}
         self.identifiers = {record.key: record.ident for record in records}
         self.plan_links(records)
-        for done, record in enumerate(records, 1):
-            self.outcomes += self.guarded(record.key, record.kind, self.attempt, record)
-            self.progress(done, len(records))
+        placeholders = [record for record in records if record.kind == "person"]
+        done = 0
+        for group in (placeholders, [record for record in records if record.kind != "person"]):  # people first: owners follow
+            for record in group:
+                self.outcomes += self.guarded(record.key, record.kind, self.attempt, record)
+                done += 1
+                self.progress(done, len(records))
+            if group is placeholders and not self.dry_run:
+                self.outcomes += self.guarded("people", "person", self.identify, placeholders)
         if not self.dry_run:
             self.outcomes += self.second_look(records)
             self.outcomes += self.link_pass()
         self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
+
+    # ---------------------------------------------------------------- external people
+
+    def identify(self, placeholders: list) -> list:
+        """Tell WIRK who each placeholder stands for (an exact verified email matches at once), let matched people own
+        what they were assigned, and propose a match for the rest: a reviewer decides each, never the importer."""
+        found = [(record, held) for record in placeholders if (held := self.single(record.ident)) and not held.archived]
+        unmatched = []
+        for start in range(0, len(found), 32):
+            chunk = found[start:start + 32]
+            person = lambda record: record.raw["person"]  # noqa: E731
+            answer = self.wirk.write({"request_id": self.rid("people"), "operations": [
+                {"op": "identity.set", "data": {"provider": self.prefix, "external_user_id": record.ident, "item": held.item,
+                                                 "display_name": person(record)["name"], "avatar_url": person(record)["avatarUrl"],
+                                                 "email": self.emails.get(record.ident)}} for record, held in chunk]})
+            if not answer["ok"]:
+                problem = answer["errors"][0]
+                return [Outcome("people", "person", "error", f"{problem['code']}: {problem.get('message', '')}", hint=problem.get("hint"))]
+            for (record, held), result in zip(chunk, answer["data"]["results"]):
+                owner = result.get("principal_id")
+                if owner:
+                    if not self.users.get(person(record)["displayName"]):  # a person's own map entry wins
+                        self.users[person(record)["displayName"]] = owner
+                    self.people["matched"] += 1
+                else:
+                    unmatched.append((record, held))
+        return [outcome for record, held in unmatched for outcome in self.suggest(record, held)]
+
+    def suggest(self, record: render.Record, held: Held) -> list:
+        """One proposal for an unmatched person when the suggester has a clear candidate; none otherwise. The candidates are
+        the members WIRK names in refusing an owner no principal can be (so the probe never applies)."""
+        found = record.raw["person"]
+        if self.users.get(found["displayName"]):
+            return []  # the map file already says who they are
+        view = self.wirk.item(held.item, "card")
+        probe = self.wirk.post("/v2/write", {"request_id": self.rid("probe"), "expect": {held.item: view["r"]}, "operations": [
+            {"op": "item.edit", "id": held.item, "patch": {"owner": f"{found['name']} ?"}}]})
+        members = [choice["key"] for choice in (probe["errors"][0].get("choices") or [])] if not probe["ok"] else []
+        chosen = self.suggester.suggest({"name": found["name"], "handle": found["displayName"],
+                                         "email": self.emails.get(record.ident)}, members)
+        if not chosen:
+            self.people["unmatched"] += 1
+            return []
+        member, _, why = chosen
+        answer = self.wirk.write({"request_id": f"{self.prefix}-match-{record.ident}-{member}"[:200], "mode": "propose",
+                                  "reason": f"Is {found['name']} on {self.ctx.source} {member} here? {why}. Accepting makes them the owner of "
+                                            f"what they were assigned; a name is only a guess, so check before you accept.",
+                                  "expect": {held.item: view["r"]},
+                                  "operations": [{"op": "item.edit", "id": held.item, "patch": {"owner": member}}]})
+        self.people["suggested" if answer["ok"] else "unmatched"] += 1  # a refusal: it was proposed before (the request ID) or is stale
+        return []
 
     def attempt(self, record: render.Record) -> list:
         counts = self.counts.copy()
@@ -279,9 +338,10 @@ class Importer:
                     else:
                         requires[dependent].add(blocker)
                         self.planned.add(("requires", dependent, blocker))
-                elif relation in ("duplicate_of", "duplicated_by", "related", "initiative", "includes", "of"):
-                    if relation.startswith("duplicate"):  # related_to has no direction: the header line keeps it
-                        self.notes[(record.ident, ref.ident)] = "kept as related: WIRK has no duplicate link, so this line keeps the direction"
+                elif relation in ("duplicate_of", "duplicated_by"):  # directed, from the duplicate to the original
+                    duplicate, original = (record.ident, ref.ident) if relation == "duplicate_of" else (ref.ident, record.ident)
+                    self.planned.add(("duplicate_of", duplicate, original))
+                elif relation in ("related", "initiative", "includes", "of"):
                     self.planned.add(normal("related_to", record.ident, ref.ident))
 
     def single(self, ident: str) -> Held | None:
@@ -363,7 +423,8 @@ class Importer:
                                              if operation["data"]["type"] == "contributes_to"}}
                 body = {**body, "request_id": self.rid(ident), "operations": operations, "expect": expect}
                 continue
-            if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
+            older = problem["code"] == "invalid_input" and index is not None and operations[index]["data"]["type"] == "duplicate_of"
+            if problem["code"] not in ("link_cycle", "invalid_link") and not older or index is None:  # older: a service without duplicate_of
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}",
                                 hint=problem.get("hint"))]
             fallback = normal("related_to", *active[index][0][1:])

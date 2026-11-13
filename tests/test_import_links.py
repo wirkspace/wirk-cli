@@ -45,7 +45,7 @@ def test_parents_blockers_duplicates_and_relations_become_links_once(fake):
                issue(3, relations=[("blocked_by", to(1)), ("duplicate_of", to(4)), ("related", to(4))]),
                issue(4, relations=[("related", to(3))])]
     make(fake).run(records)
-    assert links(fake) == [("contributes_to", 2, 1), ("related_to", 3, 4), ("requires", 3, 1)]
+    assert links(fake) == [("contributes_to", 2, 1), ("duplicate_of", 3, 4), ("related_to", 3, 4), ("requires", 3, 1)]
     write = next(w for w in fake.writes() if any(o["op"] == "link.create" and o["data"]["type"] == "contributes_to" for o in w["operations"]))
     assert set(write["expect"]) == {item_of(fake, 1), item_of(fake, 2)}  # both ends of contributes_to
 
