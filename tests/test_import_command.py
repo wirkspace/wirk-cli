@@ -371,6 +371,11 @@ def test_linear_public_teams_by_default_then_the_import_as_its_own_importer(line
     setup = json.loads((linear_world["home"] / "import" / "linear-setup.json").read_text())
     assert setup["operations"][0]["id"] == "alice-linear-import" and setup["operations"][0]["name"] == "Linear importer"
     assert {"team", "label", "workflow"} <= {op["field"]["key"] for op in setup["operations"] if op["op"] == "field.create"}
+    fields = {op["field"]["key"]: op["field"]["options"] for op in setup["operations"] if op["op"] == "field.create"}
+    colours = lambda key: {option["name"]: option.get("color") for option in fields[key]}  # noqa: E731
+    assert colours("workflow")["Todo"] == "#e2e2e2" and None in colours("workflow").values()  # a project status has no colour
+    assert colours("label") == {"Bug": "#eb5757"}
+    assert all("color" not in option for option in fields["team"])  # nothing to carry over
     token = (linear_world["home"] / "import" / "wirk-token-linear-import").read_text().strip()
     fake.tokens[token] = "alice-linear-import"
     code, out, err = run()

@@ -107,9 +107,9 @@ COMMENT = ("id body createdAt editedAt quotedText resolvedAt reactionData parent
 UPDATE = "id body health url createdAt editedAt archivedAt user { id } reactionData"
 LISTS = {  # read whole at the start: (arguments, what each node holds)
     "teams": ("", "id key name private timezone issueEstimationType"),
-    "workflowStates": ("includeArchived: true", "id name type position team { id }"),
+    "workflowStates": ("includeArchived: true", "id name type position color team { id }"),
     "users": ("includeDisabled: true", "id name displayName email avatarUrl"),
-    "issueLabels": ("includeArchived: true", "id name isGroup parent { id }"),
+    "issueLabels": ("includeArchived: true", "id name color isGroup parent { id }"),
     "cycles": ("includeArchived: true", "id number name team { id }"),
     "projects": ("includeArchived: true", "id name description content url status { id name type } priority lead { id } "
                  "teams(first: 20) { nodes { id } } targetDate targetDateResolution health createdAt updatedAt completedAt "
@@ -491,14 +491,28 @@ class Linear:
             [self.comment(found, {c["id"]: c for c in comments}) for found in ordered], self.uploads(node, ordered), raw, ordered,
             archived)
 
+    def label_field(self, label: dict) -> str:
+        """The field a label belongs to: Label, or its group's own."""
+        parent = self.labels.get((label["parent"] or {}).get("id"))
+        group = parent["name"] if parent else "Label"
+        return f"{group} (label group)" if parent and group in SELECTIONS else group
+
+    def colors(self) -> dict:
+        """The colours Linear gave workflow states and labels, by field name and option name; the first state of a name wins."""
+        found = defaultdict(dict)
+        for state in sorted(self.states.values(), key=lambda state: state["position"]):
+            found["Workflow"].setdefault(state["name"], state["color"])
+        for label in self.labels.values():
+            if not label["isGroup"]:
+                found[self.label_field(label)].setdefault(label["name"], label["color"])
+        return found
+
     def fields_and_facts(self, node: dict, team: dict, state: dict) -> tuple[dict, list]:
         """The field values by name, and the header's facts: every value is also a header line."""
         groups = defaultdict(list)
         for label in sorted((self.labels[l["id"]] for l in node["labels"]["nodes"] if l["id"] in self.labels),
                             key=lambda label: label["name"].casefold()):
-            parent = self.labels.get((label["parent"] or {}).get("id"))
-            group = parent["name"] if parent else "Label"
-            groups[f"{group} (label group)" if parent and group in SELECTIONS else group].append(label["name"])
+            groups[self.label_field(label)].append(label["name"])
         priority, estimate, cycle = PRIORITIES.get(node["priority"]), self.estimate(node["estimate"], team), self.cycle(node["cycle"])
         fields = {"Team": [team["key"]], "Workflow": [state["name"]], "Priority": [priority], "Estimate": [estimate],
                   "Cycle": [cycle], **groups}
