@@ -38,6 +38,50 @@ RELATIONS = {"blocks": ("blocking", "blocked_by"), "duplicate": ("duplicate_of",
 UPLOAD = re.compile(r"https://uploads\.linear\.app/[^\s)\]\"'<>]+")
 IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
+KEY_NAME = r"[A-Za-z][A-Za-z0-9]*-[0-9]+"
+# What the text may point at, tried left to right. Left alone: code (a fence of three or more ` or ~, a line indented four
+# spaces or a tab, inline), HTML comments, <code> and <pre> elements, tags, autolinks, any other URL and any other link
+# target. Swapped: an upload or an issue URL of this workspace in a markdown link, and a bare issue URL; a bare PEB-123
+# becomes a link only in prose, after a space or an opening mark.
+REFERENCES = re.compile(rf"""(?P<code>(?P<fence>^[ ]{{0,3}}(?:```+|~~~+))
+    | ^(?:[ ]{{4}}|\t)[^\n]*$ | `[^`\n]*` | <!--[\s\S]*?(?:-->|\Z)
+    | <(?P<tag>code|pre)\b[^>]*>[\s\S]*?(?:</(?P=tag)\s*>|\Z) | <[^<>\n]*>)
+  | \]\((?P<upload>https://uploads\.linear\.app/[^\s)]+)(?P<utitle>\s+"[^"]*")?\)
+  | \]\(https://linear\.app/(?P<mslug>[\w.-]+)/issue/(?P<mdkey>{KEY_NAME})[^\s)]*(?P<mtitle>\s+"[^"]*")?\)
+  | https://linear\.app/(?P<uslug>[\w.-]+)/issue/(?P<urlkey>{KEY_NAME})(?:/[\w-]*)?
+  | (?P<other>\]\([^)\n]*\)|\b[a-z][a-z0-9+.-]*://\S+)
+  | (?<![^\s("'*_])(?P<key>[A-Z][A-Z0-9]*-[0-9]+)(?![\w\]-])""", re.X | re.M)
+
+
+def rewrite(text: str, item, file, slug: str | None) -> str:
+    """Issue references and uploaded files in Linear's text, pointed at WIRK where WIRK has them: `item(key)` is the WIRK
+    path of an imported issue and `file(url)` the name of the file attached for an upload, else None, and the Linear text
+    stays as it was (an issue URL stays a link to Linear, an upload a link only Linear's own users can open). Only issue
+    URLs of the workspace `slug` count as the imported issues."""
+    def swap(found: re.Match) -> str:
+        if found["upload"]:
+            target, title = file(found["upload"]), found["utitle"] or ""
+        elif found["mdkey"] and found["mslug"] == slug:
+            target, title = item(found["mdkey"]), found["mtitle"] or ""
+        elif (found["urlkey"] and found["uslug"] == slug) or found["key"]:
+            key = found["urlkey"] or found["key"]
+            path = item(key)
+            return f"[{key}]({path})" if path else found.group()
+        else:
+            return found.group()  # code, a tag, another URL or workspace
+        return f"]({target}{title})" if target else found.group()
+    out, pos = [], 0
+    while found := REFERENCES.search(text, pos):
+        out.append(text[pos:found.start()])
+        if fence := found["fence"]:  # closes on a line of at least as many of the same mark and nothing else
+            mark = fence.strip()
+            close = re.compile(rf"^[ ]{{0,3}}{re.escape(mark[0])}{{{len(mark)},}}[ \t]*$", re.M).search(text, found.end())
+            pos = close.end() if close else len(text)
+            out.append(text[found.start():pos])
+        else:
+            out.append(swap(found))
+            pos = found.end()
+    return "".join(out) + text[pos:]
 
 # ---------------------------------------------------------------- the queries
 
@@ -110,7 +154,10 @@ class Linear:
 
     def __init__(self, http=None, sleep=None, folder=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
-        self.sleep, self.folder, self.points, self.key = sleep or time.sleep, folder or config_dir() / "import", 0, None
+        self.sleep, self.folder, self.points, self.key, self.slug = sleep or time.sleep, folder or config_dir() / "import", 0, None, None
+
+    def rewrite(self, text: str, item, file) -> str:
+        return rewrite(text, item, file, self.slug)
 
     # ---------------------------------------------------------------- talking to Linear
 
@@ -211,6 +258,7 @@ class Linear:
         self.seen = {node["id"] for name in ("projects", "projectMilestones", "initiatives", "documents", "projectUpdates",
                                              "initiativeUpdates") for node in lists[name]}  # in Linear, selected or not
         issues = self.every("issues", f"includeArchived: true, filter: {{ {IN_TEAMS} }}", ISSUE, PAGE, sorted(self.chosen))
+        self.slug = next((found[1] for node in issues if (found := re.match(r"https://linear\.app/([\w.-]+)/", node["url"]))), None)
         for node in issues:
             for name in NESTED:
                 self.rest_of(node, name)
