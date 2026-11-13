@@ -46,6 +46,8 @@ class FakeWirk:
         self.as_whom = None  # a principal other than the importer, for tests that act as a person
         self.tokens = None  # token -> principal; None takes every token as the importer's
         self.no_files = None  # why the file store is unavailable, as status reports it
+        self.verified = {}  # a verified email -> the member it belongs to
+        self.identities, self.proposals = {}, []  # external user -> its record, and the owner suggestions made
 
     # ---------------------------------------------------------------- transport
 
@@ -171,11 +173,11 @@ class FakeWirk:
             if stored != canonical:
                 return refusal("request_conflict", "a different body under this request ID", 409)
             return envelope(data, notices=[{"code": "replayed", "message": "stored receipt"}])
-        saved = copy.deepcopy((self.items, self.links))
+        saved = copy.deepcopy((self.items, self.links, self.identities))
         try:
-            data = self.apply(body)
+            data = self.propose(body) if body.get("mode") == "propose" else self.apply(body)
         except Refused as error:
-            self.items, self.links = saved
+            self.items, self.links, self.identities = saved
             self.receipts[rid] = (canonical, {})
             status = 409 if error.code in ("basis_changed", "likely_duplicate") else 422
             return refusal(error.code, str(error), status, **error.extra)
@@ -201,6 +203,14 @@ class FakeWirk:
             results[-1]["operation_index"] = index
         return {"request_id": body["request_id"], "write_state": "applied", "results": results,
                 "revisions": {r["id"]: r["revision"] for r in results if r.get("resource") == "item"}}
+
+    def propose(self, body):
+        """A proposal waits for a reviewer: nothing applies, and a stale basis is refused like any write."""
+        for ref, revision in (body.get("expect") or {}).items():
+            if len(self.items[self.resolve(ref)[0]]["revisions"]) != revision:
+                raise Refused("basis_changed", f"{ref} changed")
+        self.proposals.append(body)
+        return {"request_id": body["request_id"], "write_state": "proposed", "results": []}
 
     def ident(self, ref, named):
         return named[ref[1:]] if ref.startswith("$") else self.resolve(ref)[0]
@@ -237,6 +247,16 @@ class FakeWirk:
             if op.get("ref"):
                 named[op["ref"]] = item_id
             return {"resource": "item", "id": item_id, "revision": 1}
+        if op["op"] == "identity.set":
+            data = op["data"]
+            key = (data["provider"], data["external_user_id"])
+            owner = self.verified.get((data.get("email") or "").lower())
+            self.identities[key] = {**data, "principal_id": owner}
+            return {"resource": "identity", "id": data["external_user_id"], "principal_id": owner}
+        if op["op"] == "item.edit" and "owner" in op["patch"]:
+            if op["patch"]["owner"] not in self.members:  # the probe: WIRK names who could be chosen
+                raise Refused("unknown_owner", "not a member", choices=[{"key": m} for m in sorted(self.members)])
+            return {"resource": "item", "id": self.ident(op["id"], named), "revision": 1}
         if op["op"] == "item.edit":
             item_id, patch = self.ident(op["id"], named), op["patch"]
             item = self.items[item_id]

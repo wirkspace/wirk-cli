@@ -108,7 +108,7 @@ class Run:
                                      statuses={**DEFAULT_STATUSES, **mapped.get("status", {})}, plan=plan,
                                      withheld=adapter.withheld(ctx), download=adapter.download, dry_run=self.dry_run,
                                      overwrite=bool(self.options.get("--overwrite")), progress=self.progress,
-                                     rewrite=getattr(adapter, "rewrite", None))
+                                     rewrite=getattr(adapter, "rewrite", None), emails=getattr(adapter, "emails", None))
             you = importer.start(me=self.principal)
             self.check_statuses(importer)
             try:
@@ -220,7 +220,7 @@ class Run:
                    "missing_options": {k: sorted(v) for k, v in importer.missing.items()}, "fields_not_set_up": sorted(importer.unset),
                    "owners_not_members": sorted(importer.not_members), "forged_lines_ignored": importer.index.forged,
                    "blocked": dict(importer.index.blocked), "notes": census.notes, "setup": str(setup) if setup else None,
-                   "setup_by": PERSON_STEP if setup else None}
+                   "setup_by": PERSON_STEP if setup else None, **({"people": dict(importer.people)} if importer.people else {})}
         failed = errors_of(outcomes)
         errors = ([problem(stopped)] if stopped else []) + failed
         if self.json:
@@ -253,6 +253,9 @@ class Run:
         if importer.not_members:
             lines.append(f"owners: {', '.join(sorted(importer.not_members))} not in this wirkspace, so their issues have no owner; "
                          f"add them, or change {self.map_file}")
+        if importer.people:
+            lines.append("people: " + " · ".join(f"{count} {word}" for word, count in importer.people.items())
+                         + (f" (decide the suggestions: {command('wirk', 'review')})" if importer.people["suggested"] else ""))
         lines.append(f"links: {len(importer.planned)} planned · {len(importer.notes)} kept as related (the notes say why) · "
                      f"{importer.counts['linked']} written this run")
         lines.append(f"files: attachments stored {importer.counts['attachments']} · left as links {importer.counts['left as links']} · "

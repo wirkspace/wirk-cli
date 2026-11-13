@@ -38,6 +38,12 @@ def test_a_person_record_works_at_a_company_record(run):
         "operations": [{"op": "link.create", "data": {"type": "works_at", "from": "5c1e7a90", "to": "5c1e7a91"}}]}
 
 
+def test_a_duplicate_points_from_the_duplicate_to_the_original(run):
+    assert sent(run, ["write", "link", "5c1e7a90@1", "duplicate_of", "5c1e7a91"]) == {
+        "expect": {"5c1e7a90": 1},
+        "operations": [{"op": "link.create", "data": {"type": "duplicate_of", "from": "5c1e7a90", "to": "5c1e7a91"}}]}
+
+
 def test_task_under_a_parent_taken_with_owner_me(run):
     assert sent(run, ["write", "new", "Rate-limit the API", "owner=me", "status=open", "--criterion", "429 after 100",
                       "--criterion", "Documented", "--link", "contributes_to:2f9b3c4e@7"]) == {
@@ -162,7 +168,7 @@ def test_a_completion_without_evidence_reaches_the_service_and_its_words_are_pri
     (["write", "edit", "5c1e7a90", "status=done"], "5c1e7a90@N"),
     (["write", "link", "5c1e7a90", "related_to", "6a0d2e83"], "5c1e7a90@N"),
     (["write", "new", "T", "--propose"], "--reason"),
-    (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires or works_at"),
+    (["write", "new", "T", "--link", "cites:6a0d2e83"], "related_to, contributes_to, requires, duplicate_of or works_at"),
     (["write", "edit", "5c1e7a90@1", "kind=work"], "--request"),
     (["write", "edit", "5c1e7a90@1", "--criterion", "x"], "--request"),
     (["write", "edit", "5c1e7a90@1", "kind=record"], "--request"),
