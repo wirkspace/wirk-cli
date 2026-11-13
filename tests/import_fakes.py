@@ -48,7 +48,7 @@ class FakeWirk:
         self.no_files = None  # why the file store is unavailable, as status reports it
         self.verified = {}  # a verified email -> the member it belongs to
         self.identities, self.proposals = {}, []  # external user -> its record, and the owner suggestions made
-        self.legacy = False  # a service from before blocked_by and link roles: it refuses the whole request that names one
+        self.legacy = False  # True, or "role" for a service that knows blocked_by but not roles: a service from before blocked_by and link roles: it refuses the whole request that names one
 
     # ---------------------------------------------------------------- transport
 
@@ -174,8 +174,11 @@ class FakeWirk:
             if stored != canonical:
                 return refusal("request_conflict", "a different body under this request ID", 409)
             return envelope(data, notices=[{"code": "replayed", "message": "stored receipt"}])
-        if self.legacy and any(op["op"] == "link.create" and ("role" in op["data"] or op["data"]["type"] == "blocked_by")
-                               for op in body["operations"]):
+        if self.legacy == "role" and any(op["op"] == "link.create" and "role" in op["data"] for op in body["operations"]):
+            self.receipts[rid] = (canonical, {})
+            return refusal("unknown_field", "no such field", field="operations[0].link.create.data.contributes_to.role")
+        if self.legacy is True and any(op["op"] == "link.create" and ("role" in op["data"] or op["data"]["type"] == "blocked_by")
+                                       for op in body["operations"]):
             self.receipts[rid] = (canonical, {})
             return refusal("invalid_input", "Input tag 'blocked_by' found using 'type' does not match any of the expected tags",
                            field="operations[0].link.create.data")

@@ -217,6 +217,16 @@ def test_a_service_that_does_not_know_blocked_by_or_roles_gets_related_links_wit
     assert all(l["role"] is None for l in hub.links.values())
 
 
+def test_a_service_that_knows_blocked_by_but_not_roles_keeps_the_links_and_says_only_the_role_is_dropped(folder, hub):
+    hub.legacy = "role"
+    linear = FakeLinear([issue(1), issue(2, parent=ref(1)), issue(3)], relations=[blocks(1, 3)])
+    run, records = importer(linear, folder, hub)
+    said = " ".join(o.message for o in run.run(records) if o.kind == "links")
+    assert "role" in said and "related" not in said
+    assert ("blocked_by", 1, 3) in link_types(hub) or ("blocked_by", 3, 1) in link_types(hub)
+    assert ("contributes_to", 2, 1) in link_types(hub) and all(l["role"] is None for l in hub.links.values())
+
+
 def uid_of(n):
     return f"00000000-0000-4000-8000-{n:012d}"
 

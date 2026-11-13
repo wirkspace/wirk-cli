@@ -428,13 +428,18 @@ class Importer:
                                              if operation["data"]["type"] == "contributes_to"}}
                 body = {**body, "request_id": self.rid(ident), "operations": operations, "expect": expect}
                 continue
-            if index is None and problem["code"] in ("invalid_input", "unknown_field") and any(
-                    word in f"{problem.get('field')} {problem.get('message')}" for word in (".role", "'blocked_by'", "'duplicate_of'")):
-                for operation in operations:  # a service older than these: the whole request was refused, so write them without
-                    operation["data"].pop("role", None)
-                    if operation["data"]["type"] in ("blocked_by", "duplicate_of"):
-                        operation["data"]["type"] = "related_to"
-                notes.append("kept as related: this service does not have that link type yet")
+            said = f"{problem.get('field')} {problem.get('message')}"
+            type_unknown = any(word in said for word in ("'blocked_by'", "'duplicate_of'"))
+            if index is None and problem["code"] in ("invalid_input", "unknown_field") and (type_unknown or ".role" in said):
+                # a service older than these refused the whole request: write the links again without what it lacks
+                dropped = [op for op in operations if op["data"].pop("role", None)]
+                retyped = [op for op in operations if type_unknown and op["data"]["type"] in ("blocked_by", "duplicate_of")]
+                for op in retyped:
+                    op["data"]["type"] = "related_to"
+                if retyped:
+                    notes.append("kept as related: this service does not have that link type yet")
+                if dropped:
+                    notes.append("link kept, role dropped: this service does not have link roles yet")
                 body = {**body, "request_id": self.rid(ident), "operations": operations}
                 continue
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
