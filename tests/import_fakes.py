@@ -48,6 +48,7 @@ class FakeWirk:
         self.no_files = None  # why the file store is unavailable, as status reports it
         self.verified = {}  # a verified email -> the member it belongs to
         self.identities, self.proposals = {}, []  # external user -> its record, and the owner suggestions made
+        self.legacy = False  # a service from before blocked_by and link roles: it refuses the whole request that names one
 
     # ---------------------------------------------------------------- transport
 
@@ -173,6 +174,11 @@ class FakeWirk:
             if stored != canonical:
                 return refusal("request_conflict", "a different body under this request ID", 409)
             return envelope(data, notices=[{"code": "replayed", "message": "stored receipt"}])
+        if self.legacy and any(op["op"] == "link.create" and ("role" in op["data"] or op["data"]["type"] == "blocked_by")
+                               for op in body["operations"]):
+            self.receipts[rid] = (canonical, {})
+            return refusal("invalid_input", "Input tag 'blocked_by' found using 'type' does not match any of the expected tags",
+                           field="operations[0].link.create.data")
         saved = copy.deepcopy((self.items, self.links, self.identities))
         try:
             data = self.propose(body) if body.get("mode") == "propose" else self.apply(body)
@@ -307,7 +313,8 @@ class FakeWirk:
             if data["type"] == "requires" and self.completed(self.items[source]["revisions"][-1]):
                 raise Refused("invalid_link", "Reopen completed work before adding a prerequisite")
             link_id = "link_" + secrets.token_hex(16)
-            self.links[link_id] = {"type": data["type"], "from": source, "to": target, "by": self.who(), "removed": False}
+            self.links[link_id] = {"type": data["type"], "from": source, "to": target, "by": self.who(), "removed": False,
+                                   "role": data.get("role")}
             return {"resource": "link", "id": link_id, "revision": 1}
         if op["op"] == "link.remove":
             self.links[self.resolve(op["id"])[0]]["removed"] = True

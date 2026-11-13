@@ -298,7 +298,7 @@ class Importer:
     def plan_links(self, records: list) -> None:
         """Every link the source asks for between this run's issues, once per pair, with each fallback's note."""
         states = {record.ident: record.state for record in records}
-        self.planned, requires, seen = set(), defaultdict(set), set()
+        self.planned, self.roles, requires, seen = set(), {}, defaultdict(set), set()
 
         def reaches(start, goal):
             stack, visited = [start], set()
@@ -323,8 +323,12 @@ class Importer:
                 if relation in ("parent", "project", "milestone", "sub_issue"):  # what it is part of, or a part of it
                     child, parent = (ref.ident, record.ident) if relation == "sub_issue" else (record.ident, ref.ident)
                     self.planned.add(("contributes_to", child, parent))
+                    self.roles[child, parent] = "parent" if relation == "sub_issue" else relation
                 elif relation in ("blocked_by", "blocking"):
                     dependent, blocker = (record.ident, ref.ident) if relation == "blocked_by" else (ref.ident, record.ident)
+                    if self.ctx.source == "Linear":  # Linear blocks any work, completed or circular: WIRK's non-gating link
+                        self.planned.add(("blocked_by", dependent, blocker))
+                        continue
                     if (dependent, blocker) in seen:
                         continue
                     seen.add((dependent, blocker))
@@ -402,7 +406,8 @@ class Importer:
 
     def write_links(self, ident, item, revision, chunk) -> list:
         active = list(chunk)
-        operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item}}
+        operations = [{"op": "link.create", "data": {"type": link[0], "from": item, "to": target.item,
+                                                      **({"role": self.roles[link[1], link[2]]} if link[0] == "contributes_to" else {})}}
                       for link, target in active]
         expect = {item: revision, **{target.item: target.r for link, target in active if link[0] == "contributes_to"}}
         body = {"request_id": self.rid(ident), "operations": operations, "expect": expect,
@@ -423,8 +428,16 @@ class Importer:
                                              if operation["data"]["type"] == "contributes_to"}}
                 body = {**body, "request_id": self.rid(ident), "operations": operations, "expect": expect}
                 continue
-            older = problem["code"] == "invalid_input" and index is not None and operations[index]["data"]["type"] == "duplicate_of"
-            if problem["code"] not in ("link_cycle", "invalid_link") and not older or index is None:  # older: a service without duplicate_of
+            if index is None and problem["code"] in ("invalid_input", "unknown_field") and any(
+                    word in f"{problem.get('field')} {problem.get('message')}" for word in (".role", "'blocked_by'", "'duplicate_of'")):
+                for operation in operations:  # a service older than these: the whole request was refused, so write them without
+                    operation["data"].pop("role", None)
+                    if operation["data"]["type"] in ("blocked_by", "duplicate_of"):
+                        operation["data"]["type"] = "related_to"
+                notes.append("kept as related: this service does not have that link type yet")
+                body = {**body, "request_id": self.rid(ident), "operations": operations}
+                continue
+            if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}",
                                 hint=problem.get("hint"))]
             fallback = normal("related_to", *active[index][0][1:])

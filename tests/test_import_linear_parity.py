@@ -160,13 +160,16 @@ def link_types(hub):
                   if not l["removed"] and l["from"] in numbered and l["to"] in numbered)
 
 
-def test_a_cancelled_blocker_is_still_a_prerequisite_and_a_completed_dependent_says_why(folder, hub):
+def test_a_block_is_a_blocked_by_link_whatever_the_work_has_done_and_loops_are_kept(folder, hub):
     done = {"completedAt": "2026-09-30T00:00:00.000Z"}
-    linear = FakeLinear([moved(1, "Won't Fix", canceledAt="2026-09-30T00:00:00.000Z"), issue(2), moved(3, "Done", **done), issue(4)],
-                        relations=[blocks(1, 2), blocks(4, 3)])
+    linear = FakeLinear([moved(1, "Won't Fix", canceledAt="2026-09-30T00:00:00.000Z"), issue(2), moved(3, "Done", **done), issue(4),
+                         issue(5), issue(6)], relations=[blocks(1, 2), blocks(4, 3), blocks(5, 6), blocks(6, 5)])
     go(linear, folder, hub)
-    assert link_types(hub) == [("related_to", 3, 4), ("requires", 2, 1)]
-    assert "Blocked by: [ENG-4] (kept as related: WIRK cannot add a prerequisite to completed work)" in latest(hub, 3)["body"]
+    assert link_types(hub) == [("blocked_by", 2, 1), ("blocked_by", 3, 4), ("blocked_by", 5, 6), ("blocked_by", 6, 5)]
+    assert "Blocked by: [ENG-4]" in latest(hub, 3)["body"] and "kept as related" not in latest(hub, 3)["body"]
+    before = len(hub.writes())
+    go(linear, folder, hub)
+    assert len(hub.writes()) == before
 
 
 def test_a_duplicate_is_a_directed_duplicate_of_link_and_the_header_keeps_the_line(folder, hub):
@@ -186,10 +189,32 @@ def test_links_to_issues_archived_in_linear_are_kept_and_written_once(folder, hu
                         relations=[blocks(2, 1), {"id": "r2", "type": "related", "issue": ref(1), "relatedIssue": ref(2)}])
     go(linear, folder, hub)
     assert hub.items[item(hub, 2)]["archived"] is True
-    assert link_types(hub) == [("contributes_to", 3, 1), ("related_to", 1, 2), ("requires", 1, 2)]
+    assert link_types(hub) == [("blocked_by", 1, 2), ("contributes_to", 3, 1), ("related_to", 1, 2)]
     before = len(hub.writes())
     go(linear, folder, hub)
     assert len(hub.writes()) == before
+
+
+def test_parent_project_and_milestone_are_contributes_to_links_that_say_which(folder, hub):
+    linear = FakeLinear([issue(1), issue(2, parent=ref(1)), issue(3, project={"id": "p-1"}), issue(4, project={"id": "p-1"},
+                                                                                              projectMilestone={"id": "m-1"})])
+    go(linear, folder, hub)
+    roles = {(l["type"], l["role"]) for l in hub.links.values() if not l["removed"] and hub.items[l["from"]]["revisions"][-1]["title"] in
+             ("Issue 2", "Issue 3", "Issue 4")}
+    assert roles == {("contributes_to", "parent"), ("contributes_to", "project"), ("contributes_to", "milestone")}
+    parent = next(l for l in hub.links.values() if hub.items[l["from"]]["revisions"][-1]["title"] == "Issue 2")
+    assert (hub.items[parent["to"]]["revisions"][-1]["title"], parent["role"]) == ("Issue 1", "parent")
+    before = len(hub.writes())
+    go(linear, folder, hub)
+    assert len(hub.writes()) == before
+
+
+def test_a_service_that_does_not_know_blocked_by_or_roles_gets_related_links_without_them(folder, hub):
+    hub.legacy = True
+    linear = FakeLinear([issue(1), issue(2, parent=ref(1)), issue(3)], relations=[blocks(1, 3)])
+    assert {o.outcome for o in go(linear, folder, hub)} == {"created"}
+    assert link_types(hub) == [("contributes_to", 2, 1), ("related_to", 1, 3)] or link_types(hub) == [("contributes_to", 2, 1), ("related_to", 3, 1)]
+    assert all(l["role"] is None for l in hub.links.values())
 
 
 def uid_of(n):
