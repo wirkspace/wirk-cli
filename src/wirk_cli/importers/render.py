@@ -170,6 +170,10 @@ def provenance(line: str) -> tuple | None:
     return found.groups() if found else None
 
 
+def same(text: str) -> str:
+    return text
+
+
 def cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
@@ -199,12 +203,13 @@ def relation_lines(ctx: Context, record: Record, counts: Counter, notes: dict) -
 
 # ---------------------------------------------------------------- the work item
 
-def work_item(ctx: Context, record: Record, users: dict, notes: dict) -> Rendered:
+def work_item(ctx: Context, record: Record, users: dict, notes: dict, fix=None) -> Rendered:
+    """`fix` rewrites the source's own references in the text, as the importer finds them in WIRK."""
     counts = Counter()
     clean = Clean(counts)
     full = clean.line(record.title)
     title = cut(full, TITLE_LIMIT) or f"Untitled {ctx.source} issue {record.key}"
-    body = clean.text(record.body).strip("\n")
+    body = (fix or same)(clean.text(record.body).strip("\n"))
     closers = [ref for kind, ref in record.relations if kind == "closed_by"]
     owner, people = None, []
     for user, shown in record.assignees:
@@ -241,7 +246,7 @@ def evidence(ctx: Context, record: Record) -> str:
 
 # ---------------------------------------------------------------- the discussion doc
 
-def discussion(ctx: Context, record: Record, work_item: Rendered | None = None) -> list:
+def discussion(ctx: Context, record: Record, work_item: Rendered | None = None, fix=None) -> list:
     """The comments in parts; the first part goes in one write with the work item, so its bytes count there too."""
     if not record.comments:
         return []
@@ -252,7 +257,7 @@ def discussion(ctx: Context, record: Record, work_item: Rendered | None = None) 
         if comment.hidden in SPAM:
             spam += 1
             continue
-        text, found = HEADING.subn(r"\1\\\2", clean.text(comment.body).strip("\n"))
+        text, found = HEADING.subn(r"\1\\\2", (fix or same)(clean.text(comment.body).strip("\n")))
         counts["neutralized"] += found
         heading = " · ".join([f"### {comment.author}", comment.created, *(["edited"] if comment.edited else []),
                               *([f"hidden on {ctx.source} as {comment.hidden}"] if comment.hidden else []), *comment.marks])

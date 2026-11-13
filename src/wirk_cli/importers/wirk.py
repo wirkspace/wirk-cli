@@ -7,11 +7,13 @@ import hashlib
 import io
 import re
 import secrets
+from urllib.parse import urlencode
 
 from ..client import Failure
 from . import render
 
 PAGE = {"limit": 100, "max_bytes": 65536}
+ACTING = ("create", "update", "state")  # "state": only the fields the importer owns, on an item a person edited
 UNSETTLED = {"outcome_unknown", "storage_failed", "storage_mismatch"}  # failures of one issue's write or file
 KEYED = re.compile(r"\[((?:\\.|[^\]\\])*)\]")  # a key in brackets, a ] inside it escaped
 
@@ -143,9 +145,11 @@ class Index:
             if creator != self.me and not creator.endswith(f"-{self.source.lower()}-import"):
                 self.forged += parsed is not None
                 return
-            if card["by"] != creator or not parsed:
-                own = max(version["r"] for version in whole["versions"] if version["by"] == creator)
-                parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
+            if card["by"] != creator or not parsed:  # the newest of its own revisions that still carries its line
+                for own in sorted((version["r"] for version in whole["versions"] if version["by"] == creator), reverse=True):
+                    parsed = render.provenance(self.wirk.item({"ref": card["id"], "revision": own}, "card").get("line") or "")
+                    if parsed:
+                        break
                 if not parsed or parsed[0] != self.source:
                     return
         if creator != self.me:
@@ -174,12 +178,15 @@ class Plan:
 
 class Importer:
     def __init__(self, wirk: Wirk, ctx: render.Context, *, users: dict, statuses: dict, plan: dict, withheld, download,
-                 dry_run: bool, overwrite: bool, progress=None):
+                 dry_run: bool, overwrite: bool, progress=None, rewrite=None):
         self.wirk, self.ctx, self.users, self.statuses, self.plan = wirk, ctx, users, statuses, plan
         self.withheld, self.download, self.dry_run, self.overwrite = withheld, download, dry_run, overwrite
         self.prefix, self.counts, self.missing, self.unset = ctx.source.lower(), Counter(), defaultdict(set), set()
         self.not_members = set()  # owners WIRK refused this run: their issues are planned without an owner
         self.outcomes, self.notes, self.progress = [], {}, progress or (lambda done, total: None)
+        self.rewrite = rewrite  # (text, item, file) -> text: the source's references into WIRK; see `fix_text`
+        self.waiting = defaultdict(set)  # issue -> references its text will resolve once their items or files exist
+        self.views, self.state_edits, self.absent = {}, {}, defaultdict(set)
 
     # ---------------------------------------------------------------- the run
 
@@ -187,6 +194,7 @@ class Importer:
         """Read status and the index. `me` is the importer's principal when another token reads for its dry run."""
         you = self.wirk.ok("/v2/status", {"max_bytes": 65536})["data"]
         self.me = me or you["you"]["principal"]
+        self.wirkspace = (you["you"].get("wirkspace") or {}).get("id")
         self.vocab = {entry["key"]: entry["name"].split(": ", 1)[1].split(", ") for entry in you["ask"]["fields"]
                       if ": " in entry["name"] and entry["key"] not in render.RESERVED - {"status"}}
         self.managed = {"status"} | {plan.key for plan in self.plan.values() if plan.key in self.vocab}
@@ -197,11 +205,13 @@ class Importer:
     def run(self, records: list) -> list:
         self.keys = {record.ident: record.key for record in records}
         self.kinds = {record.ident: record.kind for record in records}
+        self.identifiers = {record.key: record.ident for record in records}
         self.plan_links(records)
         for done, record in enumerate(records, 1):
             self.outcomes += self.guarded(record.key, record.kind, self.attempt, record)
             self.progress(done, len(records))
         if not self.dry_run:
+            self.outcomes += self.second_look(records)
             self.outcomes += self.link_pass()
         self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
@@ -259,8 +269,10 @@ class Importer:
                     if (dependent, blocker) in seen:
                         continue
                     seen.add((dependent, blocker))
-                    note = ("completed here" if states[dependent] == "completed" else "the blocker is cancelled"
-                            if states[blocker] == "cancelled" else "it would close a cycle" if reaches(blocker, dependent) else None)
+                    # WIRK itself refuses a prerequisite on completed work and a cycle; a cancelled or completed
+                    # blocker never gates anything, so it is a prerequisite like any other
+                    note = ("WIRK cannot add a prerequisite to completed work" if states[dependent] == "completed"
+                            else "it would close a cycle" if reaches(blocker, dependent) else None)
                     if note:
                         self.notes[(dependent, blocker)] = f"kept as related: {note}"
                         self.planned.add(normal("related_to", dependent, blocker))
@@ -268,6 +280,8 @@ class Importer:
                         requires[dependent].add(blocker)
                         self.planned.add(("requires", dependent, blocker))
                 elif relation in ("duplicate_of", "duplicated_by", "related", "initiative", "includes", "of"):
+                    if relation.startswith("duplicate"):  # related_to has no direction: the header line keeps it
+                        self.notes[(record.ident, ref.ident)] = "kept as related: WIRK has no duplicate link, so this line keeps the direction"
                     self.planned.add(normal("related_to", record.ident, ref.ident))
 
     def single(self, ident: str) -> Held | None:
@@ -309,14 +323,22 @@ class Importer:
     def links_of(self, ident: str, wanted: list) -> list:
         source = self.single(ident)
         targets = [(link, target) for link in wanted
-                   if (target := self.single(link[2] if link[1] == ident else link[1])) and not target.archived]
-        if not source or source.archived or not targets:
+                   if (target := self.single(link[2] if link[1] == ident else link[1])) and self.linkable(target)]
+        if not source or not self.linkable(source) or not targets:
             return []
         view = self.wirk.item(source.item, "full")
         have = self.existing(view, earlier=True)  # recognize an existing link to a prior imported issue
+        for link, target in targets:  # WIRK hides an undirected link to an archived item from the other end only
+            if target.archived and link[0] == "related_to":
+                have |= self.existing(self.wirk.item(target.item, "full"), earlier=True)
         missing = [(link, target) for link, target in targets if link not in have]
         return [outcome for start in range(0, len(missing), 31)
                 for outcome in self.write_links(ident, source.item, view["r"], missing[start:start + 31])]
+
+    def linkable(self, held: Held) -> bool:
+        """Whether a link may end at the item: what the importer archived (the source archived it) keeps its links, what a
+        person archived is theirs to relate again."""
+        return not held.archived or held.by == self.me
 
     def write_links(self, ident, item, revision, chunk) -> list:
         active = list(chunk)
@@ -333,6 +355,14 @@ class Importer:
                 return [Outcome(self.keys[ident], "links", "linked", "; ".join(notes))] if notes else []
             problem = answer["errors"][0]
             index = problem.get("input_index")
+            if problem["code"] == "invalid_link" and "already joins" in problem.get("message", "") and index is not None:
+                del active[index], operations[index]  # made earlier and not visible from here: the link is there
+                if not operations:
+                    return []
+                expect = {item: revision, **{target.item: target.r for (_, target), operation in zip(active, operations)
+                                             if operation["data"]["type"] == "contributes_to"}}
+                body = {**body, "request_id": self.rid(ident), "operations": operations, "expect": expect}
+                continue
             if problem["code"] not in ("link_cycle", "invalid_link") or index is None:
                 return [Outcome(self.keys[ident], "links", "error", f"{problem['code']}: {problem.get('message', '')}",
                                 hint=problem.get("hint"))]
@@ -370,19 +400,71 @@ class Importer:
             absent = {value for value, key in zip(values, keys) if key not in self.vocab[plan.key]}
             if absent:
                 self.missing[plan.key].update(absent)
+                self.absent[record.ident].update(f"{plan.name}: {value}" for value in absent)
             if present:
                 found[plan.key] = present if plan.selection == "many" else present[0]
         return found
 
+    def view(self, held: Held) -> dict:
+        """An item whole, read once for each revision of it."""
+        if self.views.get(held.item, (None,))[0] != held.r:
+            self.views[held.item] = (held.r, self.wirk.item(held.item, "all"))
+        return self.views[held.item][1]
+
+    def fix_text(self, record: render.Record):
+        """The source's text as WIRK holds it: references to imported issues and attached files point at WIRK. What is not
+        there yet is remembered, and `second_look` writes it once it is."""
+        if self.rewrite is None:
+            return None
+        names = {a.url: a.name for a in record.attachments}
+        stored = self.stored(record) if names else set()
+
+        def item(identifier: str) -> str | None:
+            ident = self.identifiers.get(identifier.upper())
+            held = self.single(ident) if ident else None
+            if held is None:
+                if ident:
+                    self.waiting[record.ident].add(("item", identifier.upper()))
+                return None
+            return "/work?" + urlencode({key: value for key, value in (("workspace", self.wirkspace), ("item", held.item)) if value})
+
+        def file(url: str) -> str | None:
+            if names.get(url) in stored:
+                return names[url]
+            if url in names:
+                self.waiting[record.ident].add(("file", url))
+            return None
+        return lambda text: self.rewrite(text, item, file)
+
+    def second_look(self, records: list) -> list:
+        """Issues whose text pointed at something that did not exist yet are written again now that it does."""
+        outcomes = []
+        for record in records:
+            if any(self.resolves(record, what) for what in self.waiting.pop(record.ident, ())):
+                outcomes += [o for o in self.guarded(record.key, record.kind, self.attempt, record) if o.outcome == "error"]
+        return outcomes
+
+    def resolves(self, record, what: tuple) -> bool:
+        kind, value = what
+        if kind == "item":
+            return self.single(self.identifiers[value]) is not None
+        return next(a.name for a in record.attachments if a.url == value) in self.stored(record)
+
+    def stored(self, record) -> set:
+        """The names of the files WIRK holds for an issue, on its work item and its discussion."""
+        return {f["filename"] for kind in (record.kind, "comments") for held in self.index.held.get((kind, record.ident), [])
+                for f in self.view(held)["all"]["files"]}
+
     def plans(self, record: render.Record) -> list:
         users = {user: wirk_id for user, wirk_id in self.users.items() if wirk_id not in self.not_members}
-        made = render.work_item(self.ctx, record, users, self.notes)
+        fix = self.fix_text(record)
+        made = render.work_item(self.ctx, record, users, self.notes, fix)
         self.counts.update(made.counts)
         archive = (f"{self.prefix}-{record.kind}-{record.ident}.json", render.archive(record.raw, self.withheld, self.counts))
         attachments = [a for a in record.attachments if not a.comment]
         doc = record.kind in self.ctx.docs
         plans = [self.seal(made, record, None if doc else self.fields_of(record), None if doc else made.work, [archive], attachments)]
-        for number, part in enumerate(render.discussion(self.ctx, record, made), 1):
+        for number, part in enumerate(render.discussion(self.ctx, record, made, fix), 1):
             self.counts.update(part.counts)
             files = [(f"{self.prefix}-comments-{record.ident}.json", render.archive(record.raw_comments, self.withheld, self.counts))] \
                 if number == 1 else []
@@ -404,11 +486,30 @@ class Importer:
         found = active[0]
         if found.hash == digest:
             return "current", found, ""
-        if found.by == self.me:
+        edit = self.person_edit(found)
+        if edit is None:
             return "update", found, ""
-        changed = f"changed in WIRK since import (r{found.r} by {found.by})"
+        changed = f"changed in WIRK since import (r{edit[0]} by {edit[1]})"
         return ("update", found, changed + "; replaced by --overwrite") if self.overwrite else \
             ("skipped", found, changed + "; to replace it: --overwrite")
+
+    def person_edit(self, found: Held) -> tuple[int, str] | None:
+        """The newest revision made by anyone but the importer: once a person has edited an item, the item is theirs."""
+        if found.by != self.me:
+            return found.r, found.by
+        edits = [v for v in self.view(found)["all"]["versions"] if v["by"] != self.me]
+        return (edits[-1]["r"], edits[-1]["by"]) if edits else None
+
+    def state_changes(self, plan: Plan, held: Held) -> dict:
+        """The fields the importer owns (status and the source's own fields) that the source has changed since the
+        importer last wrote them. A person's edit to anything else, or to a field the source did not change, stays."""
+        mine = [v["r"] for v in self.view(held)["all"]["versions"] if v["by"] == self.me]
+        written = self.wirk.item({"ref": held.item, "revision": mine[-1]}, "card").get("fields", {}) if mine else {}
+
+        def same(a, b) -> bool:
+            return sorted(a if isinstance(a, list) else [] if a is None else [a]) == \
+                sorted(b if isinstance(b, list) else [] if b is None else [b])
+        return {key: plan.fields.get(key) for key in self.managed if not same(plan.fields.get(key), written.get(key))}
 
     # ---------------------------------------------------------------- one issue
 
@@ -417,18 +518,20 @@ class Importer:
         if blocked:
             return [Outcome(record.key, record.kind, "blocked", f"imported by {blocked}")]
         plans = self.plans(record)
-        decided = [(plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest)) for plan in plans]
+        decided = [self.follow_state(record, plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest))
+                   for plan in plans]
         _, action, held, message = decided[0]
         if action == "ambiguous" or (action == "skipped" and held.archived):  # the discussion follows its work item
             return [Outcome(record.key, plan.kind, action, message, found.item if found else None)
                     for plan, _, found, _ in decided]
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
-                    for plan, action, held, message in decided if action not in ("create", "update")]
-        acting = [(plan, action, held) for plan, action, held, _ in decided if action in ("create", "update")]
+                    for plan, action, held, message in decided if action not in ACTING]
+        acting = [(plan, action, held) for plan, action, held, _ in decided if action in ACTING]
         said = {plan.kind: message for plan, _, _, message in decided}
         if self.dry_run:  # what --overwrite would replace says who changed it
-            return outcomes + [Outcome(record.key, plan.kind, f"would {action}", message, held.item if held else None)
-                               for plan, action, held, message in decided if action in ("create", "update")] + \
+            return outcomes + [Outcome(record.key, plan.kind, "would create" if action == "create" else "would update", message,
+                                       held.item if held else None)
+                               for plan, action, held, message in decided if action in ACTING] + \
                 self.stale(record, len(plans) - 1) + self.mirror(record, plans)
         # the work item and the discussion's first part go in one write; later parts one to a write
         together = [entry for entry in acting if entry[0].kind in (record.kind, "comments")]
@@ -440,6 +543,16 @@ class Importer:
             if entry not in together:
                 outcomes += self.send(record, [entry], work, said)
         return outcomes + self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+
+    def follow_state(self, record, plan: Plan, action: str, held: Held | None, message: str) -> tuple:
+        """A work item a person edited is left alone, except for what the source changed in the fields the importer owns."""
+        if action == "skipped" and held and not held.archived and plan.kind == record.kind and plan.fields is not None:
+            changes = self.state_changes(plan, held)
+            if changes:
+                self.state_edits[held.item] = changes
+                return (plan, "state", held, f"{message.split(';')[0]}; only what changed in {self.ctx.source} was updated "
+                        f"({', '.join(sorted(changes))}); to replace the rest: --overwrite")
+        return plan, action, held, message
 
     def mirror(self, record, plans) -> list:
         """Archive what the source archived, and restore what the importer archived once the source restores it; an archive
@@ -467,10 +580,14 @@ class Importer:
     def operations(self, record, acting, work):
         operations, expect = [], {}
         for plan, action, held in acting:
-            view = self.wirk.item(held.item, "all") if held else None
-            uploads, patch_files = self.files_for(record, plan, view)
+            view = self.view(held) if held else None
             if view and plan.kind == record.kind:
                 operations += self.stale_links(view)  # before the edit, so a completion is never gated by a stale link
+            if action == "state":
+                operations.append({"op": "item.edit", "id": held.item, "patch": {"fields": self.state_edits[held.item]}})
+                expect[held.item] = held.r
+                continue
+            uploads, patch_files = self.files_for(record, plan, view)
             if action == "create":
                 data = {"title": plan.title, "body": plan.body, **({"uploads": uploads} if uploads else {})}
                 if plan.work is not None:
@@ -549,8 +666,10 @@ class Importer:
         outcomes = []
         for (plan, action, held), result in zip(acting, [r for r in results if r.get("resource") == "item"]):
             self.index.add(plan.kind, record.ident, Held(result["id"], result["revision"], self.me, bool(held and held.archived),
-                                                         plan.digest))
-            message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes]))
+                                                         held.hash if action == "state" else plan.digest))
+            absent = self.absent.pop(record.ident, None) if plan.kind == record.kind else None
+            message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes,
+                                              f"not options in WIRK, kept in the header: {', '.join(sorted(absent))}" if absent else ""]))
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
@@ -575,7 +694,9 @@ class Importer:
             return f"possible duplicate kept separate: {others}"
         if problem["code"] in ("unknown_enum_field", "unknown_enum_option") and operation["op"] in ("item.create", "item.edit"):
             fields = part.get("fields") or {}
-            dropped = [key for key in list(fields) if key != "status"]
+            text = f"{problem.get('field') or ''} {problem.get('message') or ''}"
+            named = [key for key in fields if key != "status" and re.search(rf"\b{re.escape(key)}\b", text)]
+            dropped = named or [key for key in list(fields) if key != "status"]  # the one refused, else every one
             for key in dropped:
                 fields.pop(key)
             return f"fields {', '.join(dropped)} changed in WIRK during the run; left as header text"

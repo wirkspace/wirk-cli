@@ -107,7 +107,8 @@ class Run:
             importer = wirk.Importer(client, ctx, users=mapped.get("users", {}),
                                      statuses={**DEFAULT_STATUSES, **mapped.get("status", {})}, plan=plan,
                                      withheld=adapter.withheld(ctx), download=adapter.download, dry_run=self.dry_run,
-                                     overwrite=bool(self.options.get("--overwrite")), progress=self.progress)
+                                     overwrite=bool(self.options.get("--overwrite")), progress=self.progress,
+                                     rewrite=getattr(adapter, "rewrite", None))
             you = importer.start(me=self.principal)
             self.check_statuses(importer)
             try:
