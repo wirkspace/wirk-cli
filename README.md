@@ -119,6 +119,13 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### 0.4.35
 
+- Linear import keeps workflow statuses and their colours, label colours, issue references as links, images as uploads, relations (blocks as `blocked_by`, duplicates as `duplicate_of`), parents as roles and external people. `wirk write link FROM@N blocked_by TO` and `--link blocked_by:ID` are accepted; against a service that does not yet know a new type or role, the import falls back to `related_to` and says so.
+- `wirk write edit --prepend-body-file` puts a block above the whole body; an empty `--body-file -` is refused instead of clearing the body; write help has a tested recipe to reserve with the assignment above the body.
+- `wirk write` with an operation name prints the matching shortcut; reading an item the wrong way prints the exact query command.
+- `wirk upload` takes `workspace_id=ID` like every other command.
+- `wirk login` prints one identity line for a chat, names the chat rather than the machine without web sign-in, and from a development build leaves session hooks and the listener alone.
+- The listener's wake names the message and its sender.
+- A network failure in the prepend fetch says nothing was sent, and its refusal keeps the service's wirkspace choices; a non-WIRK 5xx on a read is called a service fault, not a bad request.
 - The listener's cap is per chat: each chat is woken at most 10 times an hour, so one busy chat never uses up another's wakes; there is no limit across chats. Before, 10 wakes an hour were shared by every chat of the user on the machine.
 - Claude Code refuses, once, a `wirk write new` of work with no `Size:` line (or the MCP write tool filing unsized work): the refusal says how to cut it into Size: S tickets, or to add `Size:` when it is one change. Run the identical call again and it files. The hook reaches a machine at its next `wirk login`, not through the hourly update. Codex and Grok are unchanged.
 - `wirk write --help` shows the cut and the ticket body shape where agents read the write examples.
