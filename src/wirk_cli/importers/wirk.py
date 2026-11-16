@@ -2,12 +2,12 @@
 decision for each object, one issue per write, refusals, receipts and files. WIRK's index is the only state."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import re
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from ..client import Failure
 from . import people, render
@@ -174,7 +174,7 @@ class Plan:
     files: list  # (name, bytes) the importer makes
     attachments: list
     digest: str
-    talk: list = field(default_factory=list)  # the comments that go on the item's board as messages
+    talk: list | None = None  # the comments that go on the item's board as messages; None where the board is not the importer's
 
 
 class Importer:
@@ -191,7 +191,6 @@ class Importer:
         self.emails, self.suggester = emails or {}, suggester or people.NameSimilarity()  # see people.py
         self.people = Counter()  # matched, suggested and unmatched external people this run
         self.talking = []  # (record, plan): the issues whose comments are sent once every issue is written
-        self.made = set()  # the items this run created: their boards hold nothing yet
 
     # ---------------------------------------------------------------- the run
 
@@ -551,13 +550,11 @@ class Importer:
         return [self.seal(made, record, None if doc else self.fields_of(record), None if doc else made.work, [archive],
                           record.attachments, talk)]
 
-    def seal(self, made, record, fields, work, files, attachments, talk=()) -> Plan:
-        """The plan, its digest over what the item holds and which comments its board carries: a new comment is a change."""
-        names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments] \
-            + [f"comment {comment.ident}" for comment in talk]
+    def seal(self, made, record, fields, work, files, attachments, talk=None) -> Plan:
+        names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
         return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
-                    files, attachments, digest, list(talk))
+                    files, attachments, digest, talk)
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
         active = [h for h in held if not h.archived or h.by == self.me]  # an archive the importer made is its own to undo
@@ -602,7 +599,7 @@ class Importer:
         plans = self.plans(record)
         decided = [self.follow_state(record, plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest))
                    for plan in plans]
-        self.talking += [(record, plan) for plan, action, _, _ in decided if plan.talk and action not in ("current", "ambiguous")]
+        self.talking += [(record, plan) for plan, action, _, _ in decided if plan.talk is not None and action != "ambiguous"]
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
                     for plan, action, held, message in decided if action not in ACTING]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ACTING]
@@ -739,8 +736,6 @@ class Importer:
             absent = self.absent.pop(record.ident, None) if plan.kind == record.kind else None
             message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes,
                                               f"not options in WIRK, kept in the header: {', '.join(sorted(absent))}" if absent else ""]))
-            if action == "create":
-                self.made.add(result["id"])
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
@@ -776,20 +771,19 @@ class Importer:
     # ---------------------------------------------------------------- comments as messages
 
     def converse(self, record, plan: Plan) -> list:
-        """Each comment one message on the issue's board, its request ID made from the comment's ID, so a run sends a
-        comment once however often it runs; a reply answers its parent's message. A message never changes once sent."""
+        """Each comment one message on the issue's board, every run: its request ID, made from the source's site and the
+        comment's ID, makes a comment already sent a replay that applies nothing. A reply answers its parent's message, and
+        a message never changes once sent. Once every comment is there, an earlier version's discussion record is archived."""
         held = self.single(record.ident)
         if held is None and not self.dry_run or held and held.archived:  # its write failed, or it was archived since
             return []
-        on_board = 0 if held is None or held.item in self.made else sum(1 for _ in self.wirk.cards(
-            {"kind": "message", "linked": held.item, "participant": "me"}))
-        if on_board >= len(plan.talk):
-            return []
-        if self.dry_run:
-            return [Outcome(record.key, "comment", "would send")] * (len(plan.talk) - on_board)
         fix, sent, outcomes = self.fix_text(record), {}, []
         for comment in plan.talk:
-            request_id = f"{self.prefix}-comment-{comment.ident}"[:200]
+            request_id = f"{self.prefix}-comment-{urlsplit(record.url).netloc}-{comment.ident}"[:200]
+            if self.dry_run:
+                found = None if held is None else self.wirk.post("/v2/query", {"receipt": request_id})
+                outcomes += [] if found and found["ok"] else [Outcome(record.key, "comment", "would send")]
+                continue
             data = {"body": render.message(self.ctx, comment, fix), **({"reply_to": sent[comment.parent]} if comment.parent in sent else {})}
             answer = self.wirk.write({"request_id": request_id, "operations": [
                 {"op": "message.send", "ref": "m", "data": data},
@@ -799,13 +793,35 @@ class Importer:
                 found = self.wirk.post("/v2/query", {"receipt": request_id})
                 answer = found if found["ok"] and found["data"].get("write_state") == "applied" else answer
             if not answer["ok"]:
-                problem = answer["errors"][0]
-                outcomes.append(Outcome(record.key, "comment", "error", f"{problem['code']}: {problem.get('message', '')}",
-                                        hint=problem.get("hint")))
+                outcomes.append(refused(record.key, "comment", answer))
                 continue
             sent[comment.ident] = answer["data"]["results"][0]["id"]
             if not edited and not any(notice.get("code") == "replayed" for notice in answer.get("notices", [])):
                 outcomes.append(Outcome(record.key, "comment", "sent", item=sent[comment.ident]))
+        return outcomes + ([] if any(o.outcome == "error" for o in outcomes) else self.retire(record))
+
+    def retire(self, record) -> list:
+        """The discussion records an earlier version wrote for the issue, archived when the importer wrote them last;
+        one a person changed since is theirs, and stays."""
+        outcomes, number = [], 1
+        while (kind := "comments" if number == 1 else f"comments-{number}", record.ident) in self.index.held:
+            number += 1
+            for found in self.index.held[(kind, record.ident)]:
+                if found.archived:
+                    continue
+                if found.by != self.me:
+                    outcomes.append(Outcome(record.key, kind, "skipped", f"its comments are messages now, but it was changed "
+                                            f"in WIRK (r{found.r} by {found.by})", found.item))
+                    continue
+                if self.dry_run:
+                    outcomes.append(Outcome(record.key, kind, "would archive", item=found.item))
+                    continue
+                answer = self.wirk.write(self.archiving(record, "archive", [found], f"Its comments are messages on [{record.key}] now"))
+                if not answer["ok"]:
+                    outcomes.append(refused(record.key, kind, answer, found.item))
+                    continue
+                self.index.add(kind, record.ident, replace(found, r=answer["data"]["results"][0]["revision"], archived=True))
+                outcomes.append(Outcome(record.key, kind, "archived", item=found.item))
         return outcomes
 
     def key_of(self, item: str) -> str:
@@ -834,6 +850,12 @@ class Importer:
             return []
         return [Outcome(key, kind, "missing", f"deleted, transferred out or no longer visible in {self.ctx.source}; nothing was archived",
                         found.item)]
+
+
+def refused(key: str, kind: str, answer: dict, item: str | None = None) -> Outcome:
+    """WIRK's refusal of one write, as an error outcome with its hint."""
+    problem = answer["errors"][0]
+    return Outcome(key, kind, "error", f"{problem['code']}: {problem.get('message', '')}", item, hint=problem.get("hint"))
 
 
 def normal(kind: str, source: str, target: str) -> tuple:

@@ -145,9 +145,9 @@ def test_a_linear_thread_is_messages_on_the_ticket_in_order_with_replies_and_a_r
         "@ben (Linear) · 2 Sep 2026 11:00 UTC\n\nLater thought."]
     assert board[1]["reply_to"] == next(i for i, found in hub.items.items() if found is board[0]) and board[2]["reply_to"] is None
     assert not [i for i in hub.mine("record").values() if "discussion" in i["revisions"][0]["title"]]
-    before = len(hub.writes())
-    go(FakeLinear([issue(1)], comments=thread), folder, hub)
-    assert len(hub.writes()) == before and len(hub.board(item(hub, 1))) == 3
+    items = len(hub.items)
+    go(FakeLinear([issue(1)], comments=thread), folder, hub)  # each comment's write is a replay of its receipt
+    assert len(hub.items) == items and len(hub.board(item(hub, 1))) == 3
 
 
 def test_a_reference_is_settled_in_the_run_that_creates_both_and_a_second_run_writes_nothing(folder, hub):
