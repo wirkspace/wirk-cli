@@ -23,6 +23,14 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
+      - name: The pull request's title and body, which become the squash commit, name nothing private
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          TEXT: ${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$TEXT" | grep -qE '\b(wsp|item|change|proposal|link|acc)_[0-9a-f]{32}\b|^(Wirk-Part-Of|Release):'; then
+            echo "Remove private IDs and Wirk-Part-Of or Release lines from the pull request's title and body."; exit 1
+          fi
       - name: zsh, for the shell-safety tests
         run: command -v zsh || { sudo apt-get update -q && sudo apt-get install -y -q zsh; }
       - run: python -m pip install build uv ".[test]"  # uv runs install.sh's real install test
