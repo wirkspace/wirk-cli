@@ -130,8 +130,24 @@ def test_references_in_descriptions_and_comments_become_links_to_imported_items(
     body = latest(hub, 1)["body"].split("\n\n", 1)[1]
     assert body == (f"See [ENG-2]({path.replace('&', '&')}) and [ENG-2]({path}) and [ENG-2]({path} \"x\"), "
                     "not ENG-9 or `ENG-2` or https://linear.app/acme/issue/ENG-9/other or XENG-2.")
-    discussion = next(i for i in hub.mine("record").values() if "comments on [ENG-1]" in i["revisions"][-1]["body"])
-    assert f"Same as [ENG-2]({path}), and [ENG-1](/work?workspace=wsp_{'1' * 32}&item={item(hub, 1)})." in discussion["revisions"][-1]["body"]
+    message = next(m for m in hub.board(item(hub, 1)))  # a comment's message: its references found every issue first
+    assert message["revisions"][0]["body"].endswith(f"Same as [ENG-2]({path}), and [ENG-1](/work?workspace=wsp_{'1' * 32}&item={item(hub, 1)}).")
+
+
+def test_a_linear_thread_is_messages_on_the_ticket_in_order_with_replies_and_a_rerun_sends_none(folder, hub):
+    thread = [comment(1, 1, "Should we ship?", user={"id": "u-ada"}), comment(2, 1, "Yes, **today**.", parent={"id": "c-1"}),
+              comment(3, 1, "Later thought.")]
+    go(FakeLinear([issue(1)], comments=thread), folder, hub)
+    board = hub.board(item(hub, 1))
+    assert [m["revisions"][0]["body"] for m in board] == [
+        "@ada (Linear) · 2 Sep 2026 11:00 UTC\n\nShould we ship?",
+        "@ben (Linear) · 2 Sep 2026 11:00 UTC · reply to @ada\n\nYes, **today**.",
+        "@ben (Linear) · 2 Sep 2026 11:00 UTC\n\nLater thought."]
+    assert board[1]["reply_to"] == next(i for i, found in hub.items.items() if found is board[0]) and board[2]["reply_to"] is None
+    assert not [i for i in hub.mine("record").values() if "discussion" in i["revisions"][0]["title"]]
+    items = len(hub.items)
+    go(FakeLinear([issue(1)], comments=thread), folder, hub)  # each comment's write is a replay of its receipt
+    assert len(hub.items) == items and len(hub.board(item(hub, 1))) == 3
 
 
 def test_a_reference_is_settled_in_the_run_that_creates_both_and_a_second_run_writes_nothing(folder, hub):

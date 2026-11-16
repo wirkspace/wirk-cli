@@ -335,7 +335,7 @@ class Jira:
             f"{f['duedate']}T23:59:59Z" if f.get("duedate") else None, self.relations(f, history, children),
             [render.Comment(self.name(c.get("author")), c["created"], c.get("updated", c["created"]) != c["created"],
                             adf.markdown(c.get("body"), self.counts, files), "", None, c.get("updated", c["created"]),
-                            ("internal",) if c.get("jsdPublic") is False else ()) for c in comments],
+                            ("internal",) if c.get("jsdPublic") is False else (), c["id"]) for c in comments],
             [render.Attachment(render.attachment_name(SOURCE, a["id"], a["filename"]), f"{self.base}/rest/api/3/attachment/content/{a['id']}",
                                False) for a in attachments],
             raw, clean(comments))

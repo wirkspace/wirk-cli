@@ -583,14 +583,14 @@ def test_success_and_hintless_cli_bytes_match_main_baseline(world, monkeypatch):
     world["fake"].write = lambda body: refusal("invalid_input", "operations[0] is not accepted")
     hintless = world["run"]("github", "acme")
     hintless_json = world["run"]("github", "acme", "--json")
-    # Byte-exact stdout baselines captured on main 3de8628, with exit codes and stderr.
+    # Byte-exact stdout baselines, with exit codes and stderr; the text line lost its comment headings count with the discussion record.
     runs = (success, current_json, hintless, hintless_json)
     assert [code for code, _, _ in runs] == [0, 0, 1, 1]
     assert [err for _, _, err in runs] == ["", "", "", ""]
     assert [hashlib.sha256(out.encode()).hexdigest() for _, out, _ in runs] == [
-        "a86ff8194aa4717c7dd956b94c1f24cf248c33339e9303be9124b1c3ba4e5faf",
+        "c869095cf1d0cf681df2561ca0f01f10afee74ed10f4e99ed66b109aa76f0047",
         "2153f57e071d2df04ff3cb7de67fc09c04e6eb68af87b75bb5a57367322cf1b3",
-        "e8534d68e75a07368f69e331d969b244a41cf446732c2665aa8bb0bd49d5978a",
+        "ad4e1120cd47436d7634066dd96895e5350d4e3899d3875bfe07468bf103059b",
         "47aac47b5e855794ff2392a1c4d76c5f0cae5fb5ab52409886dcc7eaa2b40a3b",
     ]
 

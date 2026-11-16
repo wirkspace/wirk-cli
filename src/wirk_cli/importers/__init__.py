@@ -263,7 +263,7 @@ class Run:
                      f"images on other hosts left as links {census.external_images}")
         text = importer.counts
         lines.append(f"text: {text['redacted']} possible credentials redacted · {text['guarded']} [github markers guarded · "
-                     f"{text['neutralized']} comment headings neutralized · {text['withheld']} references withheld · "
+                     f"{text['withheld']} references withheld · "
                      f"{text['addresses']} email addresses typed in text, kept as written")
         lines.append(f"cost: {census.points} {self.adapter.unit} · {self.adapter.source} read and WIRK "
                      f"{'checked' if self.dry_run else 'written'}")

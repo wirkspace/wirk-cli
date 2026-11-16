@@ -562,7 +562,8 @@ class Linear:
             ([f"resolved by {self.person(found['resolvingUser'])} at {found['resolvedAt']}"] if found["resolvedAt"] else [])
         return render.Comment(self.author(found), found["createdAt"], bool(found["editedAt"]), quote + (found["body"] or ""),
                               reactions(found["reactionData"]), None,
-                              max(filter(None, [found["createdAt"], found["editedAt"], found["resolvedAt"]])), tuple(marks))
+                              max(filter(None, [found["createdAt"], found["editedAt"], found["resolvedAt"]])), tuple(marks),
+                              found["id"], (found["parent"] or {}).get("id", ""))
 
     def uploads(self, node: dict, comments: list) -> list:
         """Files uploaded to Linear that the description or a comment references, each once, named by a hash of its path."""

@@ -169,22 +169,22 @@ def test_relations_keep_their_ids_and_order():
 
 
 def test_people_bots_and_deleted_accounts():
-    comments = page([{"fullDatabaseId": "1", "author": None, "body": "gone", "createdAt": "2026-09-02T00:00:00Z",
+    comments = page([{"id": "IC_1", "fullDatabaseId": "1", "author": None, "body": "gone", "createdAt": "2026-09-02T00:00:00Z",
                       "lastEditedAt": None, "isMinimized": False, "minimizedReason": None, "reactionGroups": []},
-                     {"fullDatabaseId": "2", "author": {"__typename": "Bot", "login": "github-actions"}, "body": "beep",
+                     {"id": "IC_2", "fullDatabaseId": "2", "author": {"__typename": "Bot", "login": "github-actions"}, "body": "beep",
                       "createdAt": "2026-09-03T00:00:00Z", "lastEditedAt": "2026-09-04T00:00:00Z", "isMinimized": True,
                       "minimizedReason": "outdated", "reactionGroups": [{"content": "HEART", "reactors": {"totalCount": 2}}]}])
     _, _, records = read(FakeGh([repo("acme/web")], {"acme/web": [node(1, author=None, comments=comments)]}))
     record = records[0]
     assert record.opened[0].startswith("Opened by @ghost (deleted account)")
     first, second = record.comments
-    assert first.author == "@ghost (deleted account)" and not first.edited
+    assert first.author == "@ghost (deleted account)" and not first.edited and (first.ident, second.ident) == ("IC_1", "IC_2")
     assert (second.author, second.edited, second.hidden, second.reactions, second.version) == (
         "@github-actions[bot] (bot)", True, "outdated", "❤️ 2", "2026-09-04T00:00:00Z")
 
 
 def test_the_archive_holds_no_comments_and_nothing_that_moves_with_them():
-    issue = node(1, comments=page([{"fullDatabaseId": "1", "author": {"login": "ben"}, "body": "hi", "createdAt": "2026-09-02T00:00:00Z",
+    issue = node(1, comments=page([{"id": "IC_1", "fullDatabaseId": "1", "author": {"login": "ben"}, "body": "hi", "createdAt": "2026-09-02T00:00:00Z",
                                     "lastEditedAt": None, "isMinimized": False, "minimizedReason": None, "reactionGroups": []}]))
     _, _, records = read(FakeGh([repo("acme/web")], {"acme/web": [issue]}))
     raw = records[0].raw
@@ -213,7 +213,7 @@ def test_withheld_references_are_found_wherever_they_sit():
 # ---------------------------------------------------------------- paging, pacing, read-only
 
 def test_issue_pages_and_long_nested_connections_are_followed():
-    comment = lambda n: {"fullDatabaseId": str(n), "author": {"login": "ben"}, "body": f"c{n}", "createdAt": f"2026-09-02T00:00:{n % 60:02d}Z",
+    comment = lambda n: {"id": f"IC_{n}", "fullDatabaseId": str(n), "author": {"login": "ben"}, "body": f"c{n}", "createdAt": f"2026-09-02T00:00:{n % 60:02d}Z",
                          "lastEditedAt": None, "isMinimized": False, "minimizedReason": None, "reactionGroups": []}
     issues = [node(n) for n in range(1, 60)]
     issues[0] = node(1, comments=page([comment(n) for n in range(100)], True, "c100"))
