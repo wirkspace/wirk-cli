@@ -2,7 +2,7 @@
 decision for each object, one issue per write, refusals, receipts and files. WIRK's index is the only state."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import io
 import re
@@ -174,6 +174,7 @@ class Plan:
     files: list  # (name, bytes) the importer makes
     attachments: list
     digest: str
+    talk: list = field(default_factory=list)  # the comments that go on the item's board as messages
 
 
 class Importer:
@@ -189,6 +190,8 @@ class Importer:
         self.views, self.state_edits, self.absent = {}, {}, defaultdict(set)
         self.emails, self.suggester = emails or {}, suggester or people.NameSimilarity()  # see people.py
         self.people = Counter()  # matched, suggested and unmatched external people this run
+        self.talking = []  # (record, plan): the issues whose comments are sent once every issue is written
+        self.made = set()  # the items this run created: their boards hold nothing yet
 
     # ---------------------------------------------------------------- the run
 
@@ -220,6 +223,9 @@ class Importer:
                 self.outcomes += self.guarded("people", "person", self.identify, placeholders)
         if not self.dry_run:
             self.outcomes += self.second_look(records)
+        for record, plan in self.talking:  # after every issue, so a comment's references find the issues they name
+            self.outcomes += self.guarded(record.key, "comment", self.converse, record, plan)
+        if not self.dry_run:
             self.outcomes += self.link_pass()
         self.outcomes += self.gone({record.ident for record in records})
         return self.outcomes
@@ -540,21 +546,18 @@ class Importer:
         made = render.work_item(self.ctx, record, users, self.notes, fix)
         self.counts.update(made.counts)
         archive = (f"{self.prefix}-{record.kind}-{record.ident}.json", render.archive(record.raw, self.withheld, self.counts))
-        attachments = [a for a in record.attachments if not a.comment]
         doc = record.kind in self.ctx.docs
-        plans = [self.seal(made, record, None if doc else self.fields_of(record), None if doc else made.work, [archive], attachments)]
-        for number, part in enumerate(render.discussion(self.ctx, record, made, fix), 1):
-            self.counts.update(part.counts)
-            files = [(f"{self.prefix}-comments-{record.ident}.json", render.archive(record.raw_comments, self.withheld, self.counts))] \
-                if number == 1 else []
-            plans.append(self.seal(part, record, None, None, files, [a for a in record.attachments if a.comment] if number == 1 else []))
-        return plans
+        talk = [comment for comment in record.comments if comment.ident and comment.hidden not in render.SPAM]  # spam stays out
+        return [self.seal(made, record, None if doc else self.fields_of(record), None if doc else made.work, [archive],
+                          record.attachments, talk)]
 
-    def seal(self, made, record, fields, work, files, attachments) -> Plan:
-        names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments]
+    def seal(self, made, record, fields, work, files, attachments, talk=()) -> Plan:
+        """The plan, its digest over what the item holds and which comments its board carries: a new comment is a change."""
+        names = [f"{name} {hashlib.sha256(data).hexdigest()}" for name, data in files] + [a.name for a in attachments] \
+            + [f"comment {comment.ident}" for comment in talk]
         digest = render.digest(made.title, made.body, fields or {}, work or {}, names)
         return Plan(made.kind, made.title, render.sealed(made, self.ctx.source, record.ident, digest), fields, work,
-                    files, attachments, digest)
+                    files, attachments, digest, list(talk))
 
     def decide(self, held: list, digest: str) -> tuple[str, Held | None, str]:
         active = [h for h in held if not h.archived or h.by == self.me]  # an archive the importer made is its own to undo
@@ -599,10 +602,7 @@ class Importer:
         plans = self.plans(record)
         decided = [self.follow_state(record, plan, *self.decide(self.index.held[(plan.kind, record.ident)], plan.digest))
                    for plan in plans]
-        _, action, held, message = decided[0]
-        if action == "ambiguous" or (action == "skipped" and held.archived):  # the discussion follows its work item
-            return [Outcome(record.key, plan.kind, action, message, found.item if found else None)
-                    for plan, _, found, _ in decided]
+        self.talking += [(record, plan) for plan, action, _, _ in decided if plan.talk and action not in ("current", "ambiguous")]
         outcomes = [Outcome(record.key, plan.kind, action, message, held.item if held else None)
                     for plan, action, held, message in decided if action not in ACTING]
         acting = [(plan, action, held) for plan, action, held, _ in decided if action in ACTING]
@@ -610,18 +610,10 @@ class Importer:
         if self.dry_run:  # what --overwrite would replace says who changed it
             return outcomes + [Outcome(record.key, plan.kind, "would create" if action == "create" else "would update", message,
                                        held.item if held else None)
-                               for plan, action, held, message in decided if action in ACTING] + \
-                self.stale(record, len(plans) - 1) + self.mirror(record, plans)
-        # the work item and the discussion's first part go in one write; later parts one to a write
-        together = [entry for entry in acting if entry[0].kind in (record.kind, "comments")]
-        work = held.item if held else None
-        if together:
-            outcomes += self.send(record, together, work, said)
-            work = work or next((o.item for o in outcomes if o.kind == record.kind and o.item), None)
-        for entry in acting:
-            if entry not in together:
-                outcomes += self.send(record, [entry], work, said)
-        return outcomes + self.stale(record, len(plans) - 1) + self.mirror(record, plans)
+                               for plan, action, held, message in decided if action in ACTING] + self.mirror(record, plans)
+        if acting:
+            outcomes += self.send(record, acting, said)
+        return outcomes + self.mirror(record, plans)
 
     def follow_state(self, record, plan: Plan, action: str, held: Held | None, message: str) -> tuple:
         """A work item a person edited is left alone, except for what the source changed in the fields the importer owns."""
@@ -656,7 +648,7 @@ class Importer:
         return {"request_id": self.rid(record.ident), "reason": reason, "expect": {h.item: h.r for h in held},
                 "operations": [{"op": f"item.{word}", "id": h.item} for h in held]}
 
-    def operations(self, record, acting, work):
+    def operations(self, record, acting):
         operations, expect = [], {}
         for plan, action, held in acting:
             view = self.view(held) if held else None
@@ -671,9 +663,7 @@ class Importer:
                 data = {"title": plan.title, "body": plan.body, **({"uploads": uploads} if uploads else {})}
                 if plan.work is not None:
                     data.update(work=plan.work, fields=plan.fields)
-                operations.append({"op": "item.create", "ref": "w" if plan.kind == record.kind else "d", "data": data})
-                if plan.kind != record.kind:
-                    operations.append({"op": "link.create", "data": {"type": "related_to", "from": "$d", "to": work or "$w"}})
+                operations.append({"op": "item.create", "ref": "w", "data": data})
             else:
                 patch = {"title": plan.title, "body": plan.body, **patch_files}
                 if plan.work is not None:
@@ -715,8 +705,8 @@ class Importer:
             return render.evidence(self.ctx, record)
         return f"Imported from {self.ctx.source} {record.key} by wirk import {self.prefix}"
 
-    def send(self, record, acting, work, said: dict) -> list:
-        operations, expect = self.operations(record, acting, work)
+    def send(self, record, acting, said: dict) -> list:
+        operations, expect = self.operations(record, acting)
         body = {"request_id": self.rid(record.ident), "operations": operations, "reason": self.reason(record),
                 **({"expect": expect} if expect else {})}
         notes = []
@@ -749,6 +739,8 @@ class Importer:
             absent = self.absent.pop(record.ident, None) if plan.kind == record.kind else None
             message = "; ".join(filter(None, [said.get(plan.kind, ""), *notes,
                                               f"not options in WIRK, kept in the header: {', '.join(sorted(absent))}" if absent else ""]))
+            if action == "create":
+                self.made.add(result["id"])
             outcomes.append(Outcome(record.key, plan.kind, "created" if action == "create" else "updated", message, result["id"]))
         return outcomes
 
@@ -781,37 +773,47 @@ class Importer:
             return f"fields {', '.join(dropped)} changed in WIRK during the run; left as header text"
         return None
 
+    # ---------------------------------------------------------------- comments as messages
+
+    def converse(self, record, plan: Plan) -> list:
+        """Each comment one message on the issue's board, its request ID made from the comment's ID, so a run sends a
+        comment once however often it runs; a reply answers its parent's message. A message never changes once sent."""
+        held = self.single(record.ident)
+        if held is None and not self.dry_run or held and held.archived:  # its write failed, or it was archived since
+            return []
+        on_board = 0 if held is None or held.item in self.made else sum(1 for _ in self.wirk.cards(
+            {"kind": "message", "linked": held.item, "participant": "me"}))
+        if on_board >= len(plan.talk):
+            return []
+        if self.dry_run:
+            return [Outcome(record.key, "comment", "would send")] * (len(plan.talk) - on_board)
+        fix, sent, outcomes = self.fix_text(record), {}, []
+        for comment in plan.talk:
+            request_id = f"{self.prefix}-comment-{comment.ident}"[:200]
+            data = {"body": render.message(self.ctx, comment, fix), **({"reply_to": sent[comment.parent]} if comment.parent in sent else {})}
+            answer = self.wirk.write({"request_id": request_id, "operations": [
+                {"op": "message.send", "ref": "m", "data": data},
+                {"op": "link.create", "data": {"type": "related_to", "from": "$m", "to": held.item}}]})
+            edited = not answer["ok"] and answer["errors"][0]["code"] == "request_conflict"
+            if edited:  # changed in the source since it was sent: the message stays as it was sent
+                found = self.wirk.post("/v2/query", {"receipt": request_id})
+                answer = found if found["ok"] and found["data"].get("write_state") == "applied" else answer
+            if not answer["ok"]:
+                problem = answer["errors"][0]
+                outcomes.append(Outcome(record.key, "comment", "error", f"{problem['code']}: {problem.get('message', '')}",
+                                        hint=problem.get("hint")))
+                continue
+            sent[comment.ident] = answer["data"]["results"][0]["id"]
+            if not edited and not any(notice.get("code") == "replayed" for notice in answer.get("notices", [])):
+                outcomes.append(Outcome(record.key, "comment", "sent", item=sent[comment.ident]))
+        return outcomes
+
     def key_of(self, item: str) -> str:
         """An item's source key when it is one of this run's issues, else its short ID."""
         ident = self.ident_of(item)
         return self.keys[ident] if ident in self.keys else item[5:13] if item.startswith("item_") else item
 
-    # ---------------------------------------------------------------- parts and items no longer needed
-
-    def stale(self, record, parts: int) -> list:
-        """Discussion parts beyond what the discussion needs now are archived, when the importer wrote them last."""
-        outcomes, number = [], parts
-        while (render.part_kind(number + 1), record.ident) in self.index.held:
-            number += 1
-            kind = render.part_kind(number)
-            for found in self.index.held[(kind, record.ident)]:
-                if found.archived:
-                    continue
-                if found.by != self.me:
-                    outcomes.append(Outcome(record.key, kind, "skipped", f"no longer needed, but changed in WIRK (r{found.r} by {found.by})",
-                                            found.item))
-                elif self.dry_run:
-                    outcomes.append(Outcome(record.key, kind, "would archive", item=found.item))
-                else:
-                    reason = f"No longer needed: the discussion of [{record.key}] now fits in {parts} part{'s' if parts != 1 else ''}"
-                    answer = self.wirk.write(self.archiving(record, "archive", [found], reason))
-                    if answer["ok"]:
-                        outcomes.append(Outcome(record.key, kind, "archived", item=found.item))
-                    else:
-                        problem = answer["errors"][0]
-                        outcomes.append(Outcome(record.key, kind, "error", f"{problem['code']}: {problem.get('message', '')}",
-                                                found.item, hint=problem.get("hint")))
-        return outcomes
+    # ---------------------------------------------------------------- items no longer needed
 
     def gone(self, present: set) -> list:
         """The importer's active items that the source no longer has: an issue missing from a complete read of its scope, or

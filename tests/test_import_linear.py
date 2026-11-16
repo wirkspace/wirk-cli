@@ -332,6 +332,7 @@ def test_comments_in_threads_with_replies_resolutions_quotes_and_bots(folder):
     assert bot.author == "Triage bot (bot)"
     assert first.version == "2026-09-05T00:00:00.000Z"  # a resolution changes the discussion
     assert [c["id"] for c in record.raw_comments] == ["c-1", "c-3", "c-2"]
+    assert [(c.ident, c.parent) for c in record.comments] == [("c-1", ""), ("c-3", "c-1"), ("c-2", "")]
 
 
 def test_uploads_are_attachments_fetched_with_the_key_only_from_linear(folder):

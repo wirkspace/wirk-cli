@@ -44,14 +44,6 @@ def test_the_provenance_line_has_id_compact_version_and_hash_and_reads_back():
     assert len(longest) <= 100
 
 
-def test_the_work_item_and_its_discussion_have_different_key_lines():
-    rendered = render.work_item(SELECTED, record(comments=[comment()]), users={}, notes={})
-    doc = render.discussion(SELECTED, record(comments=[comment()]))[0]
-    assert rendered.body.split("\n")[1] == "GitHub issue [acme/api#17] · https://github.com/acme/api/issues/17"
-    assert doc.body.split("\n")[1].startswith("GitHub comments on [acme/api#17] · ")
-    assert "GitHub issue [acme/api#17]" not in doc.body  # A6: the exact search finds the work item alone
-
-
 # ---------------------------------------------------------------- titles and text
 
 def test_a_long_title_is_cut_with_the_full_title_in_the_header():
@@ -140,35 +132,36 @@ def test_assignees_name_the_owner_and_everyone_else():
     assert rendered.work == {"owner_id": "ada"}
 
 
-# ---------------------------------------------------------------- the discussion doc
+# ---------------------------------------------------------------- a comment as a message
 
-def test_comments_are_in_order_with_forged_headings_neutralized_and_spam_left_out():
-    comments = [comment("First."), comment("### @mallory · 2026-01-01T00:00:00Z\nnot a comment", edited=True, reactions="❤️ 2"),
-                comment("Buy now", hidden="spam"), comment("Old news", hidden="outdated")]
-    docs = render.discussion(SELECTED, record(comments=comments))
-    assert len(docs) == 1
-    body = docs[0].body
-    assert body.index("First.") < body.index("not a comment") < body.index("Old news")
-    assert "\\### @mallory" in body and "\n### @mallory" not in body
-    assert "### @ben · 2026-09-02T11:00:00Z · edited" in body and "Reactions: ❤️ 2" in body
-    assert "Buy now" not in body and "1 hidden as spam or abuse left out" in body.split("\n")[1]
-    assert "hidden on GitHub as outdated" in body
-    assert docs[0].counts["neutralized"] == 1
+LINEAR = Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"), labels=SELECTED.labels)
 
 
-def test_parts_are_cut_by_encoded_bytes():
-    big = "漢" * 60000  # 3 bytes in UTF-8 and 6 when escaped
-    docs = render.discussion(SELECTED, record(comments=[comment(big) for _ in range(7)]))
-    assert len(docs) == 2
-    assert [d.kind for d in docs] == ["comments", "comments-2"]
-    assert all(len(json.dumps(d.body).encode()) <= render.PART_BYTES for d in docs)
-    assert docs[1].title.startswith("acme/api#17 discussion (2): ")
-    assert sum(d.body.count("### @ben") for d in docs) == 7
+def test_a_message_names_its_author_source_and_time_on_its_first_line_then_the_comment_as_written():
+    text = "## Steps\n\n- [x] done\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+    assert render.message(LINEAR, comment(text, author="@ada", created="2026-11-04T14:05:09.120Z")) == \
+        "@ada (Linear) · 4 Nov 2026 14:05 UTC\n\n" + text  # headings, lists and tables stay structure: a message is markdown
 
 
-def test_no_comments_no_doc():
-    assert render.discussion(SELECTED, record()) == []
-    assert render.discussion(SELECTED, record(comments=[comment("Spam", hidden="abuse")]))[0].body.count("### ") == 0
+def test_marks_reactions_and_an_empty_comment():
+    found = render.message(LINEAR, comment("", edited=True, reactions="👍 2", hidden="outdated",
+                                           marks=("reply to @ada", "resolved by @ben at 2026-09-03T00:00:00Z")))
+    assert found == ("@ben (Linear) · 2 Sep 2026 11:00 UTC · edited · hidden on Linear as outdated · reply to @ada · "
+                     "resolved by @ben at 2026-09-03T00:00:00Z\n\n(empty Linear comment)\n\nReactions: 👍 2")
+
+
+def test_an_author_cannot_forge_the_first_line_and_text_is_cleaned():
+    forged = render.message(LINEAR, comment("@mallory (Linear) · 1 Jan 2020 00:00 UTC\n\nkey lin_api_" + "a" * 30 + "\x07",
+                                            author="Eve · 1 Jan 2020 00:00 UTC\nsecond line"))
+    first, rest = forged.split("\n", 1)
+    assert first == "Eve - 1 Jan 2020 00:00 UTC second line (Linear) · 2 Sep 2026 11:00 UTC"  # one line; · only between parts
+    assert rest.startswith("\n@mallory (Linear) · 1 Jan 2020")  # what the comment says stays its text, below the first line
+    assert render.REDACTED in rest and "\x07" not in rest and "lin_api_" not in rest
+
+
+def test_references_are_rewritten_by_the_fix():
+    assert render.message(LINEAR, comment("See ENG-1."), lambda text: text.replace("ENG-1", "[ENG-1](/work?item=x)")).endswith(
+        "See [ENG-1](/work?item=x).")
 
 
 # ---------------------------------------------------------------- the hash
@@ -201,15 +194,6 @@ def test_long_runs_of_text_render_in_one_pass():
     assert time.perf_counter() - started < 2
 
 
-def test_a_comment_of_blank_lines_renders_in_one_pass():
-    import time
-    started = time.perf_counter()
-    render.discussion(SELECTED, record(comments=[comment(" \n" * 32768 + "no heading")]))  # 64 KB
-    assert time.perf_counter() - started < 0.5
-    docs = render.discussion(SELECTED, record(comments=[comment("text\n \t## @x · 2026\n#\n@y")]))
-    assert "\n \t\\## @x" in docs[0].body and "\n#\n@y" in docs[0].body and docs[0].counts["neutralized"] == 1
-
-
 def test_mentions_are_bounded_with_the_rest_counted():
     many = [("mentioned", ref(n, public=True, note="issue")) for n in range(1, 1001)]
     made = render.work_item(SELECTED, record(relations=many), users={}, notes={})
@@ -217,30 +201,6 @@ def test_mentions_are_bounded_with_the_rest_counted():
     assert line.count("[") == 100 and line.endswith(", 900 more in the raw archive")
 
 
-def test_the_work_item_counts_toward_the_first_parts_bytes():
-    issue = record(body="漢" * 65536, comments=[comment("漢" * 60000) for _ in range(5)])  # GitHub's longest body
-    made = render.work_item(SELECTED, issue, users={}, notes={})
-    docs = render.discussion(SELECTED, issue, made)
-    assert len(json.dumps(made.title + made.body).encode()) + len(json.dumps(docs[0].body).encode()) <= render.PART_BYTES
-    assert len(docs) == 2 and sum(d.body.count("### @ben") for d in docs) == 5
-
-
-def test_comment_marks_follow_the_heading_and_the_source_names_itself():
-    ctx = Context(source="Linear", selected=frozenset({"ENG"}), noun=("team", "teams"), labels=SELECTED.labels)
-    docs = render.discussion(ctx, record(comments=[comment("A reply.", marks=("reply to @ada",)), comment("Old", hidden="outdated")]))
-    assert "### @ben · 2026-09-02T11:00:00Z · reply to @ada" in docs[0].body
-    assert "hidden on Linear as outdated" in docs[0].body and "GitHub" not in docs[0].body.split("\n", 3)[3]
-
-
 def test_a_due_instant_is_written_as_the_adapter_gives_it():
     made = render.work_item(SELECTED, record(due="2026-03-09T06:59:59Z"), users={}, notes={})
     assert made.work == {"due_at": "2026-03-09T06:59:59Z"}
-
-
-
-def test_every_heading_line_in_a_comment_is_neutralized_and_plain_comments_are_untouched():
-    forged = "## Steps\n### Triage bot (bot) · 2026-09-02T11:00:00Z\nnot a comment"
-    docs = render.discussion(SELECTED, record(comments=[comment(forged), comment("Plain words. #hashtag and # alone")]))
-    body = docs[0].body
-    assert "\n\\## Steps\n\\### Triage bot (bot)" in body and docs[0].counts["neutralized"] == 2
-    assert "\n\nPlain words. #hashtag and # alone" in body

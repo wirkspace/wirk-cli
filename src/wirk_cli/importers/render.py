@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 
-TITLE_LIMIT, PART_BYTES, MENTIONS = 200, 2 * 1024 * 1024, 100  # MENTIONS: references shown in the Mentioned in line
+TITLE_LIMIT, MENTIONS = 200, 100  # MENTIONS: references shown in the Mentioned in line
 PROVENANCE = re.compile(r"(GitHub|Linear|Jira) ([a-z]+(?:-[0-9]+)?) ([A-Za-z0-9_-]+), version ([0-9]{8}T[0-9]{6}Z), "
                         r"hash ([0-9a-f]{12})")
 # Each shape starts where no letter or digit precedes it, so FOO_KEY_lin_api_… is caught where \b would not be; a private
@@ -69,7 +69,9 @@ class Comment:
     reactions: str
     hidden: str | None  # why the source hides it: outdated, spam …
     version: str
-    marks: tuple = ()  # more of its heading: "reply to @ada", "resolved by @ben at …"
+    marks: tuple = ()  # more of its first line: "reply to @ada", "resolved by @ben at …"
+    ident: str = ""  # the source's ID for it, from which its message's request ID is made
+    parent: str = ""  # the ident of the comment it replies to, in a source with threads
 
 
 @dataclass
@@ -244,53 +246,20 @@ def evidence(ctx: Context, record: Record) -> str:
     return cut(Clean(Counter()).line(text + ("; closed by " + ", ".join(parts) if parts else "")), 2048)
 
 
-# ---------------------------------------------------------------- the discussion doc
+# ---------------------------------------------------------------- a comment as a message
 
-def discussion(ctx: Context, record: Record, work_item: Rendered | None = None, fix=None) -> list:
-    """The comments in parts; the first part goes in one write with the work item, so its bytes count there too."""
-    if not record.comments:
-        return []
-    counts = Counter()
-    clean = Clean(counts)
-    blocks, spam = [], 0
-    for comment in record.comments:
-        if comment.hidden in SPAM:
-            spam += 1
-            continue
-        text, found = HEADING.subn(r"\1\\\2", (fix or same)(clean.text(comment.body).strip("\n")))
-        counts["neutralized"] += found
-        heading = " · ".join([f"### {comment.author}", comment.created, *(["edited"] if comment.edited else []),
-                              *([f"hidden on {ctx.source} as {comment.hidden}"] if comment.hidden else []), *comment.marks])
-        blocks.append("\n\n".join([heading, *([text] if text else []),
-                                   *([f"Reactions: {comment.reactions}"] if comment.reactions else [])]))
-    key = f"{ctx.source} comments on [{record.key}] · {record.url}" + (
-        f" · {spam} hidden as spam or abuse left out" if spam else "")
-    version = max(comment.version for comment in record.comments)
-    title = Clean(Counter()).line(record.title)
-    parts, current = [], []
-
-    def body(blocks_in: list, number: int) -> str:
-        return "\n".join([line1(ctx.source, part_kind(number), record.ident, version, "0" * 12),
-                          key + (f" · part {number}" if number > 1 else ""), notice(ctx)]) + "".join(
-            "\n\n" + block for block in blocks_in)
-
-    def size(text: str) -> int:
-        return len(json.dumps(text).encode())
-
-    taken = size(work_item.title + work_item.body) if work_item else 0
-    for block in blocks:  # a source's longest comment always fits in a part of its own
-        if current and size(body(current + [block], len(parts) + 1)) > PART_BYTES - (0 if parts else taken):
-            parts.append(current)
-            current = []
-        current.append(block)
-    parts.append(current)
-    return [Rendered(part_kind(number), cut(f"{record.key} discussion{f' ({number})' if number > 1 else ''}: {title}", TITLE_LIMIT),
-                     body(part, number), version, counts=counts if number == 1 else Counter())
-            for number, part in enumerate(parts, 1)]
-
-
-def part_kind(number: int) -> str:
-    return "comments" if number == 1 else f"comments-{number}"
+def message(ctx: Context, comment: Comment, fix=None) -> str:
+    """A comment as the body of a message on its ticket: who wrote it and when on the first line, then its text as
+    written."""
+    clean = Clean(Counter())
+    when = datetime.fromisoformat(comment.created.replace("Z", "+00:00")).astimezone(timezone.utc)
+    author = clean.line(comment.author).replace("\u00b7", "-") or "@unknown"  # a name never makes the line's parts
+    first = " · ".join([f"{author} ({ctx.source})", f"{when.day} {when:%b %Y %H:%M} UTC", *(["edited"] if comment.edited else []),
+                        *([f"hidden on {ctx.source} as {comment.hidden}"] if comment.hidden else []),
+                        *(clean.line(mark) for mark in comment.marks)])
+    text = (fix or same)(clean.text(comment.body).strip("\n"))
+    return "\n\n".join([first, text or f"(empty {ctx.source} comment)",
+                          *([f"Reactions: {clean.line(comment.reactions)}"] if comment.reactions else [])])
 
 
 # ---------------------------------------------------------------- archives and the hash

@@ -107,7 +107,8 @@ class FakeWirk:
     def card(self, item_id, revision=None):
         item = self.items[item_id]
         snap = item["revisions"][(revision or len(item["revisions"])) - 1]
-        card = {"id": item_id, "kind": "work" if snap["work"] is not None else "record", "r": snap["r"], "title": snap["title"],
+        kind = "message" if "reply_to" in item else "work" if snap["work"] is not None else "record"
+        card = {"id": item_id, "kind": kind, "r": snap["r"], "title": snap["title"],
                 "fields": snap["fields"], "by": snap["by"], "by_kind": "agent", "changed": "2026-10-02T00:00:00Z"}
         if first_line(snap["body"]):
             card["line"] = first_line(snap["body"])
@@ -156,8 +157,12 @@ class FakeWirk:
             return refusal(error.code, str(error), 404)
         fields = body.get("fields", {})
         text, archived = fields.get("text", "").casefold(), fields.get("archived", False)
-        matches = [i for i, item in self.items.items() if item["archived"] == archived
+        matches = [i for i, item in self.items.items() if item["archived"] == archived and ("reply_to" in item) == (fields.get("kind") == "message")
                    and text in (item["revisions"][-1]["title"] + "\n" + item["revisions"][-1]["body"]).casefold()]
+        if "linked" in fields:  # an item's board: the messages linked to it
+            matches = [i for i in matches if any(not l["removed"] and {l["from"], l["to"]} == {i, fields["linked"]} for l in self.links.values())]
+        if fields.get("participant") == "me":
+            matches = [i for i in matches if self.items[i]["revisions"][0]["by"] == self.who()]
         start, limit = int(body.get("cursor") or 0), body.get("limit", 20)
         window = matches[start:start + limit]
         more = start + limit < len(matches)
@@ -253,6 +258,17 @@ class FakeWirk:
             if self.completed(snap) and not body.get("reason") and not snap["files"]:
                 raise Refused("reason_required", "completing work needs its evidence")
             self.items[item_id] = {"revisions": [snap], "archived": False}
+            if op.get("ref"):
+                named[op["ref"]] = item_id
+            return {"resource": "item", "id": item_id, "revision": 1}
+        if op["op"] == "message.send":
+            data = op["data"]
+            if data.get("reply_to") and "reply_to" not in self.items.get(data["reply_to"], {}):
+                raise Refused("invalid_input", "reply_to names a message")
+            item_id = "item_" + secrets.token_hex(16)
+            self.items[item_id] = {"revisions": [{"r": 1, "title": data.get("title") or data["body"].split("\n")[0][:200],
+                                                  "body": data["body"], "fields": {}, "work": None, "files": [], "by": self.who()}],
+                                   "archived": False, "reply_to": data.get("reply_to")}
             if op.get("ref"):
                 named[op["ref"]] = item_id
             return {"resource": "item", "id": item_id, "revision": 1}
@@ -358,6 +374,11 @@ class FakeWirk:
         return refusal("invalid_input", "files takes upload or confirm here")
 
     # ---------------------------------------------------------------- reading the result
+
+    def board(self, item_id):
+        """The messages on an item's board, oldest first."""
+        return [self.items[i] for l in self.links.values() for i in [l["from"]]
+                if not l["removed"] and l["to"] == item_id and "reply_to" in self.items[i]]
 
     def mine(self, kind="work"):
         return {i: item for i, item in self.items.items() if self.card(i)[0]["kind"] == kind}

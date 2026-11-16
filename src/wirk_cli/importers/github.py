@@ -352,7 +352,7 @@ class GitHub:
         fields, facts, due = self.fields_and_facts(repo, node)
         comments = [render.Comment(person(c["author"]), c["createdAt"], bool(c["lastEditedAt"]), c["body"] or "",
                                    reactions(c["reactionGroups"]), (c["minimizedReason"] or "hidden").lower() if c["isMinimized"] else None,
-                                   c["lastEditedAt"] or c["createdAt"]) for c in node["comments"]["nodes"]]
+                                   c["lastEditedAt"] or c["createdAt"], ident=c["id"]) for c in node["comments"]["nodes"]]
         raw = {key: value for key, value in node.items() if key not in ("comments", "updatedAt", "id")}
         return render.Record(SOURCE, "issue", node["fullDatabaseId"], f"{scope}#{node['number']}", node["url"],
                              node["updatedAt"], node["title"], node["body"] or "", state, closed, [opened], facts,
