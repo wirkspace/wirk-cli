@@ -685,11 +685,11 @@ def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_pe
                                     None])  # a release: from the index, with no direct_url.json
 def test_a_developers_install_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
                                                                               direct):
-    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.35.dist-info"
+    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.36.dist-info"
     info.parent.mkdir(parents=True)
     if direct != "no wirk":
         info.mkdir()
-        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.35\n")
+        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.36\n")
     if isinstance(direct, dict):
         (info / "direct_url.json").write_text(json.dumps(direct))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))

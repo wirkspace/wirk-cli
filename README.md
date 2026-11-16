@@ -117,6 +117,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.36
+
+- Imported comments (Linear, GitHub, Jira) arrive as messages on their ticket, threaded, instead of in a separate discussion record. The first line names the original author, source and time. Re-importing sends nothing twice, and a comment missed by a failed write arrives on the next run. Once an issue's comments are all messages, its old discussion record is archived; one a person edited is left alone and reported.
+
 ### 0.4.35
 
 - Linear import keeps workflow statuses and their colours, label colours, issue references as links, images as uploads, relations (blocks as `blocked_by`, duplicates as `duplicate_of`), parents as roles and external people. `wirk write link FROM@N blocked_by TO` and `--link blocked_by:ID` are accepted; against a service that does not yet know a new type or role, the import falls back to `related_to` and says so.
