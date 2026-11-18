@@ -236,10 +236,68 @@ def test_two_logins_at_once_take_turns(monkeypatch):
     assert commands(settings(user_home() / ".claude" / "settings.json"), "SessionEnd") == [hooks.command("end claude")]
 
 
-def test_a_command_whose_interpreter_is_gone_is_silent(monkeypatch, tmp_path):
-    monkeypatch.setattr(hooks, "PYTHON", str(tmp_path / "gone" / "python"))
-    done = subprocess.run(["sh", "-c", hooks.command("end claude")], input="{}", capture_output=True, text=True)
-    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+def run_hook(words, tmp_path, *, path, **env):
+    """The installed command as a shell runs it, with only PATH and HOME of its own."""
+    return subprocess.run(["sh", "-c", hooks.command(words)], input="{}", capture_output=True, text=True,
+                          env={"PATH": path, "HOME": str(tmp_path / "home"), **env})
+
+
+def fake_install(root: Path, name="bin"):
+    """A venv-shaped install whose python records that it ran, and a wirk beside it."""
+    folder = root / name
+    folder.mkdir(parents=True)
+    (folder / "python").write_text('#!/bin/sh\necho "ran $*" >&2\n')
+    (folder / "wirk").write_text("#!/bin/sh\n")
+    for file in folder.iterdir():
+        file.chmod(0o755)
+    return folder
+
+
+def test_the_command_finds_the_current_wirk_when_it_runs_not_the_one_that_wrote_it(tmp_path):
+    old, new = fake_install(tmp_path / "0.4.34"), fake_install(tmp_path / "0.4.37")
+    link = tmp_path / "home" / ".local" / "bin"
+    link.mkdir(parents=True)
+    (link / "wirk").symlink_to(new / "wirk")  # as the installer links it; the old release is gone from the PATH
+    done = run_hook("write claude", tmp_path, path="/usr/bin:/bin:" + str(link))
+    assert (done.returncode, done.stderr) == (0, f"ran -I -m wirk_cli.hooks write claude\n")
+    assert str(old) not in hooks.command("write claude") and "0.4.34" not in hooks.command("write claude")
+    (link / "wirk").unlink()
+    (link / "wirk").symlink_to(old / "wirk")  # repointing the link repoints every hook, with no rewrite of the file
+    assert run_hook("end claude", tmp_path, path="/usr/bin:/bin:" + str(link)).stderr.endswith("hooks end claude\n")
+
+
+@pytest.mark.parametrize("path", ["bin:/usr/bin:/bin", ":/usr/bin:/bin", "/usr/bin:/bin:", ".:/usr/bin"])
+def test_a_wirk_found_through_a_relative_or_empty_path_entry_is_never_run(tmp_path, path):
+    (tmp_path / "home").mkdir()
+    folder = fake_install(tmp_path / "work")  # a checkout's bin/wirk and bin/python, and the same at the top
+    for name in ("wirk", "python"):
+        (tmp_path / "work" / name).write_text((folder / name).read_text())
+        (tmp_path / "work" / name).chmod(0o755)
+    for words in ("write claude", "end codex"):
+        done = subprocess.run(["/bin/sh", "-c", hooks.command(words)], input="{}", capture_output=True, text=True,
+                              cwd=tmp_path / "work", env={"PATH": path, "HOME": str(tmp_path / "home")})
+        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+
+
+def test_with_no_wirk_to_be_found_the_command_is_silent_and_never_runs_a_python_from_the_folder(tmp_path):
+    (tmp_path / "home").mkdir()
+    fake_install(tmp_path / "home", "cwd")
+    for words in ("write claude", "start codex card"):
+        done = subprocess.run(["sh", "-c", hooks.command(words)], input="{}", capture_output=True, text=True,
+                              cwd=tmp_path / "home" / "cwd", env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "home")})
+        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+
+
+def test_a_pinned_interpreter_command_from_an_older_wirk_is_replaced_at_login():
+    set_up(".claude")
+    path = user_home() / ".claude" / "settings.json"
+    old = "[ -x /gone/venv/bin/python3 ] && /gone/venv/bin/python3 -I -m wirk_cli.hooks write claude || true"
+    write(path, {"hooks": {"PreToolUse": [{"matcher": hooks.WRITES, "hooks": [{"type": "command", "command": old, "timeout": 2}]}]}})
+    hooks.install()
+    assert commands(settings(path), "PreToolUse") == [hooks.command("write claude")]
+    before = path.read_bytes()
+    hooks.install()
+    assert path.read_bytes() == before
 
 
 def test_login_adds_the_hooks_and_a_person_login_does_not(run, monkeypatch):
@@ -359,7 +417,7 @@ def test_a_signed_in_chat_hands_the_flag_to_a_detached_process(home, monkeypatch
     payload(monkeypatch, hook_event_name="SessionEnd", reason="other")
     assert hooks.main(["end", "claude"]) == 0
     [(argv, options)] = started
-    assert argv == [hooks.PYTHON, "-I", "-m", "wirk_cli.hooks", "flag", "claude"]
+    assert argv == [sys.executable, "-I", "-m", "wirk_cli.hooks", "flag", "claude"]
     assert options["start_new_session"] and os.environ["CLAUDE_CODE_SESSION_ID"] == CHAT  # the process inherits it
     assert options["stdin"] == options["stdout"] == options["stderr"] == subprocess.DEVNULL
 
@@ -525,6 +583,22 @@ def create(**data):
     return {"operations": [{"op": "item.create", "data": {"title": "T", **data}}]}
 
 
+def child(ref, parent, size="S"):
+    return [{"op": "item.create", "ref": ref, "data": {"title": ref, "body": f"Why: x\nSize: {size}", "work": {}}},
+            {"op": "link.create", "data": {"type": "contributes_to", "from": "$" + ref, "to": parent}}]
+
+
+def parent_of(*refs, size="XL"):
+    return {"operations": [{"op": "item.create", "ref": "p", "data": {"title": "P", "body": f"Why: x\nSize: {size}", "work": {}}},
+                           *[op for ref in refs for op in child(ref, "$p")]]}
+
+
+BIG = create(body="Why: x\nSize: XL", work={})
+LOOSE_PARENT = parent_of()  # a Size XL ticket nothing contributes to
+ONE_OF_TWO = {"operations": [*child("a", ITEM), {"op": "item.create", "data": {"title": "B", "work": {}}}]}
+CUT = parent_of("a", "b")  # the cut itself: the parent's children are created in the same request
+
+
 @pytest.fixture(autouse=True)
 def own_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(hooks.tempfile, "gettempdir", lambda: str(tmp_path))
@@ -544,7 +618,10 @@ def refused(out: str):
     answer = json.loads(out)["hookSpecificOutput"]
     assert (answer["hookEventName"], answer["permissionDecision"]) == ("PreToolUse", "deny")
     assert answer["permissionDecisionReason"] == hooks.NUDGE
-    assert "Method section" in hooks.NUDGE and "Size: S" in hooks.NUDGE and "again unchanged" in hooks.NUDGE
+    for words in ("ONE `wirk write --request`", "contributes_to", "Owns, Check and Runs on", "1-3 criteria", "Size: S",
+                  "again unchanged"):
+        assert words in hooks.NUDGE
+    assert len(hooks.NUDGE) < 600
 
 
 FILINGS = [
@@ -558,6 +635,21 @@ FILINGS = [
     bash("wirk write new Do owner=me --body \"$(cat <<'EOF'\nWhy: it's the uploader's retry\nEOF\n)\""),  # an apostrophe
     bash("cat > /t/b.md <<'EOF'\nWhy: x\nEOF\nwirk write new Do owner=me --body-file /t/b.md"),
     bash("wirk write new Do owner=me --body-file -"),
+    bash("wirk write new Do kind=wirk --body 'Why: x'"),
+    bash("wirk write new Do kind=doc owner=me --body 'Why: x'"),  # owner= only names a record's owner with kind=record
+    bash("wirk write new Do kind=record --criterion 'It works' --body 'Why: x'"),  # criteria make work, as the CLI builds it
+    bash("wirk write new Do owner=me --body 'Why: x\nSize: XL'"),
+    bash("wirk write new Do owner=me --body 'Why: x\nSize: L'"),
+    bash("wirk write new Do owner=me --body 'Why: x\nSize: Small'"),
+    (MCP, create(body="Why: x\nSize: XL", work={})),
+    (MCP, create(body="Why: x\nSize: L", work={})),
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps(BIG)}\nEOF"),
+    bash(f"cat <<'EOF' | wirk write --request -\n{json.dumps(BIG)}\nEOF"),
+    bash(f"cat > /t/r.json <<EOF\n{json.dumps(BIG)}\nEOF\nwirk write --request /t/r.json"),
+    bash(f"wirk write --request=- <<-'EOF'\n{json.dumps(BIG)}\nEOF"),
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps(LOOSE_PARENT)}\nEOF"),  # a parent of nothing in this request
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps(ONE_OF_TWO)}\nEOF"),  # one of two creates has no size
+    (MCP, {"operations": LOOSE_PARENT["operations"]}),
 ]
 
 
@@ -583,6 +675,17 @@ def test_filing_work_without_a_size_line_is_refused_once_and_the_identical_retry
     bash("wirk write edit 5c1e7a90@3 owner=me"),
     bash("wirk write message --to a --body x"),
     bash("wirk write --request req.json"),
+    bash("git commit -m 'Hook: wirk write new owner=me now needs a Size'"),
+    bash("git commit -m \"wirk write new Do owner=me\" && ls"),
+    bash("grep -rn 'wirk write new owner=me' src; grep \"wirk write --request x\" y"),
+    bash(f"git commit -m 'wirk write --request -' <<'EOF'\n{json.dumps(BIG)}\nEOF"),
+    bash("wirk write --request - <<'EOF'\nnot json\nEOF"),
+    bash("wirk write --request -"),  # the request is in a pipe the hook cannot see
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps(create(body='Why: x'))}\nEOF"),  # a record
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps({'operations': child('a', ITEM, 'M')})}\nEOF"),
+    bash(f"wirk write --request - <<'EOF'\n{json.dumps(CUT)}\nEOF"),
+    (MCP, CUT),
+    (MCP, create(body="Why: x\nSize: M", work={})),
     bash("grep wirk write new owner=me notes.md"),
     bash("echo 'wirk write new X owner=me' ; wirk status"),
     bash("# wirk write new X owner=me"),
@@ -598,10 +701,46 @@ def test_a_body_file_is_read_only_when_it_is_a_small_regular_file(monkeypatch, c
     (tmp_path / "t.md").write_text(SHAPED)
     (tmp_path / "u.md").write_text("Why: x")
     (tmp_path / "big.md").write_text("Why: x" + " " * hooks.SMALL + "\nSize: S")
-    (tmp_path / "pipe").mkdir()  # not a regular file
+    (tmp_path / "dir").mkdir()
+    os.mkfifo(tmp_path / "pipe")  # opening it would wait for ever
     assert pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / 't.md'}")) == ""
-    for name in ("u.md", "big.md", "pipe", "no.md"):
+    for name in ("dir", "pipe", "/dev/stdin"):  # not regular files: no evidence either way, so never refused
+        assert pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / name}")) == ""
+    for name in ("u.md", "big.md", "no.md"):
         refused(pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / name}")))
+
+
+def test_a_filing_after_quotes_an_apostrophe_or_a_substitution_is_still_a_filing(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("echo 'it is' \"fine\" && wirk write new Do owner=me --body 'Why: x'")))
+    refused(pre(monkeypatch, capsys, *bash("cat > /t/n <<'EOF'\nit's here\nEOF\nwirk write new Do owner=me")))
+    refused(pre(monkeypatch, capsys, *bash("echo \"id: $(wirk write new Do owner=me --body 'x')\"")))
+    refused(pre(monkeypatch, capsys, *bash("wirk write new 'Do it' --criterion 'It works' --body \"Why: it's x\"")))
+    refused(pre(monkeypatch, capsys, *bash(f"wirk write --request '/nope' <<'EOF'\n{json.dumps(BIG)}\nEOF")))
+
+
+@pytest.mark.parametrize("command", [
+    "wirk write --request - <<'EOF'\n" + "<<a\n" * 20_000,
+    ";" * 12_000 + "wirk write new Do owner=me",
+    "wirk write new Do owner=me --body '" + "wirk write new " * 20_000 + "'",
+    "wirk write --request - <<E\n" + json.dumps(BIG) + "\nE\n" + "<<E\n" * 20_000,
+])
+def test_a_large_command_is_not_parsed_for_ever(monkeypatch, capsys, command):
+    start = time.perf_counter()
+    pre(monkeypatch, capsys, *bash(command))
+    assert time.perf_counter() - start < 0.5
+
+
+def test_a_request_file_is_read_when_it_is_a_small_regular_file_holding_json(monkeypatch, capsys, tmp_path):
+    (tmp_path / "big.json").write_text(json.dumps(BIG))
+    (tmp_path / "cut.json").write_text(json.dumps(CUT))
+    (tmp_path / "bad.json").write_text("{")
+    (tmp_path / "huge.json").write_text(json.dumps(BIG) + " " * hooks.SMALL)
+    for name in ("cut.json", "bad.json", "huge.json", "missing.json"):
+        assert pre(monkeypatch, capsys, *bash(f"wirk write --request {tmp_path / name}")) == ""
+    command = f"cd {tmp_path} && wirk write --request '{tmp_path / 'big.json'}'"
+    refused(pre(monkeypatch, capsys, *bash(command)))
+    assert pre(monkeypatch, capsys, *bash(command)) == ""  # the identical retry files
+    refused(pre(monkeypatch, capsys, *bash(f"wirk write --request {tmp_path / 'big.json'} --json")))
 
 
 def test_a_retry_of_a_different_call_or_session_is_refused_again(monkeypatch, capsys):
@@ -648,6 +787,12 @@ def test_the_hook_needs_no_network_and_no_sign_in(home, monkeypatch, capsys):
     refused(pre(monkeypatch, capsys, MCP, create(work={})))
 
 
+def test_codex_gets_the_same_refusal_for_its_shell_and_mcp_calls(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("wirk write new A owner=me"), name="codex"))
+    refused(pre(monkeypatch, capsys, MCP, create(work={}), name="codex"))
+    assert pre(monkeypatch, capsys, MCP, create(work={}, body=SHAPED), name="codex") == ""
+
+
 def test_grok_running_claude_codes_pre_write_hook_gets_nothing(monkeypatch, capsys):
     monkeypatch.setenv("GROK_HOOK_EVENT", "PreToolUse")
     assert pre(monkeypatch, capsys, MCP, create(work={}), name="claude") == ""
@@ -659,7 +804,7 @@ def test_a_large_command_without_wirk_costs_nothing(monkeypatch, capsys):
     assert time.perf_counter() - start < 0.5
 
 
-def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_persons(capsys):
+def test_login_registers_the_pre_write_hook_for_claude_code_and_codex_and_keeps_a_persons(capsys):
     set_up(".claude", ".agents")
     (user_home() / ".codex").mkdir()
     theirs = {"matcher": "Bash", "hooks": [{"type": "command", "command": "mine.sh"}]}
@@ -669,7 +814,8 @@ def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_pe
     groups = settings(claude)["hooks"]["PreToolUse"]
     assert groups[0] == theirs and groups[1] == {"matcher": "mcp__wirk__wirk_write|Bash", "hooks": [
         {"type": "command", "command": hooks.command("write claude"), "timeout": 2}]}
-    assert "PreToolUse" not in settings(user_home() / ".codex" / "hooks.json")["hooks"]
+    assert settings(user_home() / ".codex" / "hooks.json")["hooks"]["PreToolUse"] == [{"matcher": hooks.WRITES, "hooks": [
+        {"type": "command", "command": hooks.command("write codex"), "timeout": 2}]}]
     before = claude.read_bytes()
     hooks.install()
     assert claude.read_bytes() == before
@@ -685,11 +831,11 @@ def test_login_registers_the_pre_write_hook_for_claude_code_alone_and_keeps_a_pe
                                     None])  # a release: from the index, with no direct_url.json
 def test_a_developers_install_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
                                                                               direct):
-    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.36.dist-info"
+    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.37.dist-info"
     info.parent.mkdir(parents=True)
     if direct != "no wirk":
         info.mkdir()
-        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.36\n")
+        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.37\n")
     if isinstance(direct, dict):
         (info / "direct_url.json").write_text(json.dumps(direct))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
