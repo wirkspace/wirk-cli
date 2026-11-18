@@ -254,7 +254,7 @@ def fake_install(root: Path, name="bin"):
 
 
 def test_the_command_finds_the_current_wirk_when_it_runs_not_the_one_that_wrote_it(tmp_path):
-    old, new = fake_install(tmp_path / "0.4.34"), fake_install(tmp_path / "0.4.36")
+    old, new = fake_install(tmp_path / "0.4.34"), fake_install(tmp_path / "0.4.37")
     link = tmp_path / "home" / ".local" / "bin"
     link.mkdir(parents=True)
     (link / "wirk").symlink_to(new / "wirk")  # as the installer links it; the old release is gone from the PATH
@@ -831,11 +831,11 @@ def test_login_registers_the_pre_write_hook_for_claude_code_and_codex_and_keeps_
                                     None])  # a release: from the index, with no direct_url.json
 def test_a_developers_install_logs_in_but_leaves_hooks_and_the_listener_alone(run, monkeypatch, tmp_path, fakes,
                                                                               direct):
-    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.36.dist-info"
+    info = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "wirk-0.4.37.dist-info"
     info.parent.mkdir(parents=True)
     if direct != "no wirk":
         info.mkdir()
-        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.36\n")
+        (info / "METADATA").write_text("Metadata-Version: 2.1\nName: wirk\nVersion: 0.4.37\n")
     if isinstance(direct, dict):
         (info / "direct_url.json").write_text(json.dumps(direct))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))

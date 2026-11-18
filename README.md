@@ -119,6 +119,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 ### Next release
 
+- Nothing yet.
+
+### 0.4.37
+
 - The write hook (Claude Code and now Codex) also checks a `wirk write --request` read from a file or a heredoc, not only `write new` and the MCP tool. It recognises work the way `write new` builds it (`kind=work`, `--criterion`, `owner=`), and wants `Size: S` or `Size: M`: a missing or larger size is refused once with the cut guidance, unless the ticket is a parent whose children are created in the same request.
 - The write hook ignores `wirk write new` inside quoted strings (a commit message, a grep pattern), skips commands over 16 KB, and treats an unreadable body path as sized.
 - Hook commands in the settings files now find the current wirk, in an absolute PATH entry or `~/.local/bin`, when they run, instead of pinning the Python that ran `wirk login`, which silently did nothing once that install was removed. Run `wirk login` once to replace an older command.
