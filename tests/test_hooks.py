@@ -266,6 +266,19 @@ def test_the_command_finds_the_current_wirk_when_it_runs_not_the_one_that_wrote_
     assert run_hook("end claude", tmp_path, path="/usr/bin:/bin:" + str(link)).stderr.endswith("hooks end claude\n")
 
 
+@pytest.mark.parametrize("path", ["bin:/usr/bin:/bin", ":/usr/bin:/bin", "/usr/bin:/bin:", ".:/usr/bin"])
+def test_a_wirk_found_through_a_relative_or_empty_path_entry_is_never_run(tmp_path, path):
+    (tmp_path / "home").mkdir()
+    folder = fake_install(tmp_path / "work")  # a checkout's bin/wirk and bin/python, and the same at the top
+    for name in ("wirk", "python"):
+        (tmp_path / "work" / name).write_text((folder / name).read_text())
+        (tmp_path / "work" / name).chmod(0o755)
+    for words in ("write claude", "end codex"):
+        done = subprocess.run(["/bin/sh", "-c", hooks.command(words)], input="{}", capture_output=True, text=True,
+                              cwd=tmp_path / "work", env={"PATH": path, "HOME": str(tmp_path / "home")})
+        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+
+
 def test_with_no_wirk_to_be_found_the_command_is_silent_and_never_runs_a_python_from_the_folder(tmp_path):
     (tmp_path / "home").mkdir()
     fake_install(tmp_path / "home", "cwd")
@@ -662,6 +675,10 @@ def test_filing_work_without_a_size_line_is_refused_once_and_the_identical_retry
     bash("wirk write edit 5c1e7a90@3 owner=me"),
     bash("wirk write message --to a --body x"),
     bash("wirk write --request req.json"),
+    bash("git commit -m 'Hook: wirk write new owner=me now needs a Size'"),
+    bash("git commit -m \"wirk write new Do owner=me\" && ls"),
+    bash("grep -rn 'wirk write new owner=me' src; grep \"wirk write --request x\" y"),
+    bash(f"git commit -m 'wirk write --request -' <<'EOF'\n{json.dumps(BIG)}\nEOF"),
     bash("wirk write --request - <<'EOF'\nnot json\nEOF"),
     bash("wirk write --request -"),  # the request is in a pipe the hook cannot see
     bash(f"wirk write --request - <<'EOF'\n{json.dumps(create(body='Why: x'))}\nEOF"),  # a record
@@ -684,10 +701,33 @@ def test_a_body_file_is_read_only_when_it_is_a_small_regular_file(monkeypatch, c
     (tmp_path / "t.md").write_text(SHAPED)
     (tmp_path / "u.md").write_text("Why: x")
     (tmp_path / "big.md").write_text("Why: x" + " " * hooks.SMALL + "\nSize: S")
-    (tmp_path / "pipe").mkdir()  # not a regular file
+    (tmp_path / "dir").mkdir()
+    os.mkfifo(tmp_path / "pipe")  # opening it would wait for ever
     assert pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / 't.md'}")) == ""
-    for name in ("u.md", "big.md", "pipe", "no.md"):
+    for name in ("dir", "pipe", "/dev/stdin"):  # not regular files: no evidence either way, so never refused
+        assert pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / name}")) == ""
+    for name in ("u.md", "big.md", "no.md"):
         refused(pre(monkeypatch, capsys, *bash(f"wirk write new Do owner=me --body-file {tmp_path / name}")))
+
+
+def test_a_filing_after_quotes_an_apostrophe_or_a_substitution_is_still_a_filing(monkeypatch, capsys):
+    refused(pre(monkeypatch, capsys, *bash("echo 'it is' \"fine\" && wirk write new Do owner=me --body 'Why: x'")))
+    refused(pre(monkeypatch, capsys, *bash("cat > /t/n <<'EOF'\nit's here\nEOF\nwirk write new Do owner=me")))
+    refused(pre(monkeypatch, capsys, *bash("echo \"id: $(wirk write new Do owner=me --body 'x')\"")))
+    refused(pre(monkeypatch, capsys, *bash("wirk write new 'Do it' --criterion 'It works' --body \"Why: it's x\"")))
+    refused(pre(monkeypatch, capsys, *bash(f"wirk write --request '/nope' <<'EOF'\n{json.dumps(BIG)}\nEOF")))
+
+
+@pytest.mark.parametrize("command", [
+    "wirk write --request - <<'EOF'\n" + "<<a\n" * 20_000,
+    ";" * 12_000 + "wirk write new Do owner=me",
+    "wirk write new Do owner=me --body '" + "wirk write new " * 20_000 + "'",
+    "wirk write --request - <<E\n" + json.dumps(BIG) + "\nE\n" + "<<E\n" * 20_000,
+])
+def test_a_large_command_is_not_parsed_for_ever(monkeypatch, capsys, command):
+    start = time.perf_counter()
+    pre(monkeypatch, capsys, *bash(command))
+    assert time.perf_counter() - start < 0.5
 
 
 def test_a_request_file_is_read_when_it_is_a_small_regular_file_holding_json(monkeypatch, capsys, tmp_path):

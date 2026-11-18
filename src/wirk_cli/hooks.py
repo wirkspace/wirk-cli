@@ -40,7 +40,10 @@ NEW_CHAT = "If this session works on WIRK items, run `wirk login` in it first."
 HAND_BACK = re.compile(r"(DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED)\b")
 MARKER, DEADLINE = "wirk_cli.hooks", 5.0
 # Found when the hook runs, as wirk's own launcher does: the python beside the wirk on PATH (or the installer's link), links followed.
-FIND = 'p=$(realpath -- "$(command -v wirk || echo "$HOME/.local/bin/wirk")" 2>/dev/null); p=${p%/*}/python; [ -x "$p" ] && "$p" -I -m '
+# Only a wirk in an absolute PATH entry counts, never one through a relative or empty entry, so a checkout's ./bin is never run.
+FIND = ('w=$(set -f; IFS=:; for d in $PATH; do [ "${d#/}" != "$d" ] && [ -x "$d/wirk" ] && { echo "$d/wirk"; break; }; done); '
+        '[ -n "$w" ] || w="$HOME/.local/bin/wirk"; p=$(realpath -- "$w" 2>/dev/null); p=${p%/*}/python; '
+        '[ -x "$p" ] && "$p" -I -m ')
 PINNED = r"\[ -x (.+) \] && \1 -I -m "  # what wirk 0.4.36 and before wrote: the interpreter that ran wirk login
 OURS = re.compile(f"(?:{PINNED}|{re.escape(FIND)})" + re.escape(MARKER) + r" \w+ \w+(?: card)? \|\| true")
 EVENTS = {"start": "SessionStart", "end": "SessionEnd"}
@@ -51,10 +54,10 @@ NUDGE = ("Not filed yet: work needs Size: S or Size: M. Cut larger work into Siz
 # A segment of a shell command that begins `wirk write new`, after any VAR=value words and a path ending /wirk.
 NEW = re.compile(r"(?:^|&&|\|\||[;|\n(`])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+new\b(.*)", re.S)
 REQUEST = re.compile(r"(?:^|&&|\|\||[;|\n(`])[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:\S*/)?wirk[ \t]+write[ \t]+(?:[^\n;&|]*?[ \t])?--request[ =](\S+)")
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?:\n|$)", re.S)
+HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)(\w+)\2")
 SIZED = re.compile(r"Size:[ \t]*[SM]\b")
 BODY_FILE = re.compile(r"--body-file[ =]['\"]?([^\s'\"]+)")
-SMALL = 1 << 16
+SMALL, LARGE = 1 << 16, 1 << 14  # a file read, and a command parsed, at most this long
 NAMES = {"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 
 
@@ -320,17 +323,61 @@ def flag(name: str, transport=None) -> None:
 
 def sized_text(text: str) -> bool:
     """Whether Size: S or Size: M is anywhere in TEXT (a heredoc, a body file written earlier in the command), or in a
-    small regular file named by --body-file. An unreadable file is no evidence either way: True."""
+    small regular file named by --body-file. A path that is not a regular file (a pipe, a folder, /dev/stdin), or one
+    that cannot be read, is no evidence either way: True; it is never opened."""
     if SIZED.search(text):
         return True
     for name in BODY_FILE.findall(text):
         try:
             path = Path(name).expanduser()
+            if name != "-" and path.exists() and not path.is_file():
+                return True
             if name != "-" and path.is_file() and path.stat().st_size <= SMALL and SIZED.search(path.read_text()):
                 return True
         except (OSError, ValueError):
             return True
     return False
+
+
+def shell_words(text: str) -> tuple[str, list[str]]:
+    """TEXT as the shell reads its commands, the same length: heredoc bodies and the insides of quoted strings blanked
+    (a `$(...)` inside double quotes is a command again), so a match in it is a command and not words about one. The
+    bodies come back too. One pass over the lines and one over the characters."""
+    lines, bodies, wait = text.split("\n"), [], None  # wait: (delimiter, strip tabs, body so far)
+    for number, line in enumerate(lines):
+        if wait:
+            if (line.lstrip("\t") if wait[1] else line) == wait[0]:
+                bodies.append("\n".join(wait[2]))
+                wait = None
+            else:
+                wait[2].append(line)
+                lines[number] = " " * len(line)
+        elif found := HEREDOC.search(line):
+            wait = (found[3], bool(found[1]), [])
+    flat, out, modes, skip = "\n".join(lines), [], ["cmd"], False
+    for index, char in enumerate(flat):
+        mode = modes[-1]
+        if skip:
+            skip = False
+            out.append(char if mode == "cmd" or char == "\n" else " ")
+        elif char == "\\" and mode != "'":
+            skip = True
+            out.append(char if mode == "cmd" else " ")
+        elif mode == "cmd" and char in "'\"":
+            modes.append(char)
+            out.append(char)
+        elif mode == "cmd" and char == ")" and len(modes) > 1:
+            modes.pop()
+            out.append(char)
+        elif mode == '"' and char == "$" and flat[index + 1:index + 2] == "(":
+            modes.append("cmd")
+            out.append(char)
+        elif mode in "'\"" and char == mode:
+            modes.pop()
+            out.append(char)
+        else:
+            out.append(char if mode == "cmd" or char == "\n" else " ")
+    return "".join(out), bodies
 
 
 def makes_work(rest: str) -> bool:
@@ -340,19 +387,19 @@ def makes_work(rest: str) -> bool:
                 or re.search(r"\bowner=", rest) and not re.search(r"\bkind=record\b", rest))
 
 
-def request_bodies(text: str) -> list:
-    """The JSON requests a `wirk write --request` in TEXT sends, as far as TEXT shows them: those in a heredoc (the
+def request_bodies(text: str, shell: str, heredocs: list[str]) -> list:
+    """The JSON requests a `wirk write --request` sends, as far as the command shows them: those in a heredoc (the
     command's own, or one that writes the request file first), else the request file when it is a small regular file."""
-    found = REQUEST.search(text)
+    found = REQUEST.search(shell)
     if not found:
         return []
     bodies = []
-    for heredoc in HEREDOC.finditer(text):
+    for doc in heredocs:
         try:
-            bodies.append(json.loads(heredoc[3]))
+            bodies.append(json.loads(doc))
         except ValueError:
             pass
-    name = found[1].strip("'\"")
+    name = re.match(r"\S+", text[found.start(1):])[0].strip("'\"")  # the word itself, quotes and all, not its blanked form
     if not bodies and name != "-":
         try:
             path = Path(name).expanduser()
@@ -365,10 +412,12 @@ def request_bodies(text: str) -> list:
 
 def unsized(text: str) -> bool:
     """Whether TEXT is a shell command that files work too big or with no Size: S or M: a `write new`, or a request."""
-    found = NEW.search(text)
-    if found:
+    if len(text) > LARGE:  # not worth parsing, and some shapes of it are slow: in doubt, silent
+        return False
+    shell, heredocs = shell_words(text)
+    if found := NEW.search(shell):
         return makes_work(found[1]) and not sized_text(text)
-    return any(request_unsized(body) for body in request_bodies(text))
+    return any(request_unsized(body) for body in request_bodies(text, shell, heredocs))
 
 
 def operations(given) -> list:
