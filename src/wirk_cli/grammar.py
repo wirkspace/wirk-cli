@@ -149,6 +149,20 @@ def fields_and_owner(pairs: dict, *, clearing: bool, record: bool) -> tuple[dict
     return fields, owner
 
 
+def decision_part(kind: str, pairs: dict) -> dict | None:
+    """kind=decision: the director is owner=PERSON, the person whose decision it is; quote= is their words and
+    supersedes=ID,ID what it replaces. Taken out of `pairs`; anything else with them is refused."""
+    if kind != "decision":
+        if {"quote", "supersedes"} & set(pairs):
+            raise UsageError("quote and supersedes belong to kind=decision")
+        return None
+    if not pairs.get("owner") or pairs["owner"] == "me":
+        raise UsageError("a decision names its human director: add owner=PERSON, the person whose decision it is")
+    ids = pairs.pop("supersedes", "")
+    quote = pairs.pop("quote", None)
+    return {**({"quote": quote} if quote else {}), **({"supersedes": ids.split(",")} if ids else {})}
+
+
 def write_new(title: str, words: list[str], options: dict, body_text: str | None) -> dict:
     positionals, pairs = split(words)
     if positionals:
@@ -157,16 +171,17 @@ def write_new(title: str, words: list[str], options: dict, body_text: str | None
         raise UsageError("reservation is only available on edit; new items start vacant")
     workspace, level, record = pairs.pop("workspace_id", None), pairs.pop("level", None), pairs.get("kind") == "record"
     kind = pairs.pop("kind", "record")
-    if kind not in ("record", "doc", "work", "wirk", "context"):  # doc and wirk are older words, read and never shown
-        raise UsageError(f"kind is work, record or context here; folders and the rest need --request, not {kind}")
+    if kind not in ("record", "doc", "work", "wirk", "context", "decision"):  # doc and wirk are older words, read and never shown
+        raise UsageError(f"kind is work, record or context here (or decision); folders and the rest need --request, not {kind}")
+    decision = decision_part(kind, pairs)
     if (level is None) != (kind != "context") or level not in (None, "organization", "initiative"):
         raise UsageError("kind=context needs level=organization or level=initiative, and level needs kind=context")
     if record and "owner" in pairs and options.get("--criterion"):
         raise UsageError("kind=record owner= sets a record's owner and criteria make work: give one or the other")
-    fields, owner = fields_and_owner(pairs, clearing=False, record=record)
+    fields, owner = fields_and_owner(pairs, clearing=False, record=record or kind == "decision")
     work = owner.pop("work", None)
     data = {"title": title, **({"body": body_text} if body_text is not None else {}), **({"fields": fields} if fields else {}),
-            **owner}
+            **owner, **({"decision": decision} if decision is not None else {})}
     criteria = [{"text": text} for text in options.get("--criterion", [])]
     if work or criteria or kind in ("work", "wirk"):
         data["work"] = {**(work or {}), **({"criteria": criteria} if criteria else {})}

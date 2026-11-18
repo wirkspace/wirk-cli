@@ -83,18 +83,18 @@ RUN is an ID you make once per run; reuse the identical request_id and body afte
   Filing more than one change? Cut it into Size: S tickets under one parent in one write (--request FILE).
   Ticket body: Why, Inputs, Owns, Interfaces, Check, Out of scope, Size: S, Runs on; plus one to three criteria.
 
-KEY=VALUE: kind=work|record|context, level (with kind=context), owner (me or an ID), workspace_id, and the wirkspace's
-fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here, work.owner_id in a
-request body and owner at the top of what query returns. Context (kind=context) is the organization and its
-initiatives. A change to it applies directly when you may make it; for requires_review, propose with --propose --reason.
+KEY=VALUE: kind=work|record|context|decision, level (with kind=context), owner (me or an ID), workspace_id, the
+wirkspace's fields (status=open; a comma list for several; KEY= clears on edit). The owner is owner=me here,
+work.owner_id in a request body and owner at the top of what query returns. Context (kind=context) is the organization
+and its initiatives. A change to it applies directly when you may make it; for requires_review, propose with
+--propose --reason.
 --body-file PATH reads a regular file; - reads raw body text from stdin. --request - reads one JSON request. A record is
-the default; data.work makes work. owner=X with kind=record makes X the record's owner. --link TYPE is related_to,
-contributes_to, requires, duplicate_of (duplicate to original), blocked_by (blocked to blocker; gates nothing) or
-works_at (a person record to a company record). --evidence: passing tests, a link, file path or file attached with
---upload. Results list IDs. A stored refusal keeps its request_id; correct with a new ID. After an
-uncertain result, run the command its hint prints; any retry uses the identical body and request_id.
---prepend-body-file PATH (edit only): its text, a blank line, then revision N's whole body; a cut body sends nothing.
-  {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "fields", "uploads"}}
+the default; data.work makes work. owner=X with kind=record makes X the record's owner; kind=decision: owner=PERSON,
+quote=, supersedes=ID,ID. --link TYPE is related_to, contributes_to, requires, duplicate_of (duplicate to original),
+blocked_by (blocked to blocker; gates nothing) or works_at (a person record to a company record). --evidence: passing
+tests, a link, file path or file attached with --upload. Results list IDs. A refusal keeps its request_id; correct
+with a new ID. After an uncertain result, run its hint's command; any retry uses the identical body and request_id.
+  {"op": "item.create", "ref": "n", "data": {"title", "body", "work", "context", "decision", "fields", "uploads"}}
   {"op": "item.edit", "id": ID, "patch": {"title", "body", "work", "fields", "reservation", "attach_uploads"}}
   {"op": "item.archive", "id": ID}   {"op": "item.restore", "id": ID}   (archive needs a "reason")
   {"op": "link.create", "data": {"type", "from", "to"}}   from or to may be "$n"   {"op": "link.remove", "id": LINK_ID}
