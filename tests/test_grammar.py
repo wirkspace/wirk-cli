@@ -151,3 +151,15 @@ def test_generated_bodies_round_trip(shell):
         words = shell_words(shell, " ".join(argv))
         assert words == [*body.get("fetch", []), f"about={value}"]
         assert grammar.query_body(words) == body
+
+
+def test_a_decision_is_written_for_its_director():
+    body = grammar.write_new("Use SQLite", ["kind=decision", "owner=samuel", "quote=We go with SQLite.", "supersedes=3de794b3,5c1e7a90"], {}, None)
+    body = body["operations"][0]["data"]
+    assert body["owner"] == "samuel" and body["decision"] == {"quote": "We go with SQLite.", "supersedes": ["3de794b3", "5c1e7a90"]}
+
+
+@pytest.mark.parametrize("words", [["kind=decision"], ["kind=decision", "owner=me"], ["quote=x"], ["supersedes=3de794b3"]])
+def test_a_decision_needs_a_named_director_and_only_it_takes_quote_and_supersedes(words):
+    with pytest.raises(grammar.UsageError):
+        grammar.write_new("Use SQLite", words, {}, None)
