@@ -483,9 +483,14 @@ def sign_in(words, options, transport):
 
 def machine_name() -> str:
     """This computer's name for its row on the account page: macOS's Computer Name, else the hostname without its
-    domain, as one line of at most 40 characters without quotes; or the CLI's own label when neither gives one."""
+    domain, as one line of at most 40 characters without quotes; or the CLI's own label when neither gives one.
+    A Claude Code cloud container is named for its session, since every one has the same hostname."""
     name = ""
-    if sys.platform == "darwin":
+    if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+        session = "".join(c for c in os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID", "") if c.isalnum())
+        session = session.removeprefix("session").lstrip("_")[:8]
+        name = "Claude Code cloud session" + (f" {session}" if session else "")
+    elif sys.platform == "darwin":
         try:
             name = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, encoding="utf-8",
                                   errors="replace", timeout=2).stdout.strip()

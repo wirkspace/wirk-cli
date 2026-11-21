@@ -103,7 +103,7 @@ def as_a_release(monkeypatch):
 def outside_any_chat(monkeypatch):
     """Tests run outside an agent chat unless they set one: the IDs of the chat running them never reach them."""
     for name in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET",
-                 "CLAUDE_CODE_MESSAGING_TOKEN"):
+                 "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID"):
         monkeypatch.delenv(name, raising=False)  # nor the inbox of the chat running them: no test can reach a real chat
     monkeypatch.setenv("WIRK_NO_UPDATE", "1")  # nothing in the suite updates an install; test_update.py turns it on
 

@@ -37,6 +37,7 @@ def test_a_new_chat_is_told_to_log_in_then_acts_as_itself(run, monkeypatch):
     monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
     code, out, err, fake = run(["status"], service())
     assert code == 1 and "actor_setup_required" in err and "wirk login" in err and fake.requests == []
+    assert "else it prints the link for your person to approve" in err  # never reads as if the machine were approved
     code, out, err, fake = run(["login"], service())
     assert code == 0 and "Logged in as agent-" in out
     assert [json.loads(r.content)["for"] for r in fake.requests][-1] == "actor"  # no browser, no person
