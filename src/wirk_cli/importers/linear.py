@@ -41,6 +41,11 @@ RELATIONS = {"blocks": ("blocking", "blocked_by"), "duplicate": ("duplicate_of",
 UPLOAD = re.compile(r"https://uploads\.linear\.app/[^\s)\]\"'<>]+")
 IMAGE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
+# What a history entry can change, as (name, suffix of its from/to keys), and what else it can say
+MOVES = (("State", "Id"), ("Assignee", "Id"), ("Priority", ""), ("Estimate", ""), ("Due", "Date"), ("Cycle", "Id"),
+         ("Project", "Id"), ("Parent", "Id"), ("Team", "Id"), ("Title", ""))
+EVENTS = {"archived": "Archived", "trashed": "Moved to the trash", "autoArchived": "Archived automatically",
+          "autoClosed": "Closed automatically", "updatedDescription": "Description edited"}
 KEY_NAME = r"[A-Za-z][A-Za-z0-9]*-[0-9]+"
 # What the text may point at, tried left to right. Left alone: code (a fence of three or more ` or ~, a line indented four
 # spaces or a tab, inline), HTML comments, <code> and <pre> elements, tags, autolinks, any other URL and any other link
@@ -266,6 +271,7 @@ class Linear:
         for node in issues:
             for name in NESTED:
                 self.rest_of(node, name)
+        self.idents = {node["id"]: node["identifier"] for node in issues}
         comments = defaultdict(list)
         for found in self.every("comments", f"includeArchived: true, filter: {{ issue: {{ {IN_TEAMS} }} }}", COMMENT, 100,
                                 sorted(self.chosen)) + self.every("comments", "includeArchived: true, filter: { issue: { null: true } }",
@@ -489,7 +495,28 @@ class Linear:
             [(assignee["displayName"], f"@{assignee['displayName']}")] if assignee else [], fields,
             due_at(node["dueDate"], team["timezone"]) if node["dueDate"] else None, relations,
             [self.comment(found, {c["id"]: c for c in comments}) for found in ordered], self.uploads(node, ordered), raw, ordered,
-            archived)
+            archived, self.activity(node, team))
+
+    def activity(self, node: dict, team: dict) -> list:
+        """Linear's history as lines, oldest first, one per change: `2026-03-02 @jane: Todo → In Progress`."""
+        shown = {"State": lambda v: (self.states.get(v) or {}).get("name"), "Assignee": lambda v: self.person({"id": v}),
+                 "Priority": PRIORITIES.get, "Estimate": lambda v: self.estimate(v, team), "Cycle": lambda v: self.cycle({"id": v}),
+                 "Project": lambda v: (self.projects.get(v) or {}).get("name"), "Parent": self.idents.get,
+                 "Team": lambda v: (self.teams.get(v) or {}).get("key"), "Due": str, "Title": str}
+        lines = []
+        for entry in sorted(node["history"]["nodes"], key=lambda entry: (entry["createdAt"], entry["id"])):
+            who = self.person({"id": entry["actorId"]}) if entry.get("actorId") else SOURCE
+            changes = []
+            for kind, suffix in MOVES:
+                before, after = entry.get(f"from{kind}{suffix}"), entry.get(f"to{kind}{suffix}")
+                if (before, after) != (None, None):
+                    names = [value is not None and shown[kind](value) or "none" for value in (before, after)]
+                    changes.append(f"{'' if kind == 'State' else kind + ': '}{names[0]} \u2192 {names[1]}")
+            changes += [f"Label {verb}: {self.labels[found]['name']}" for verb, key in (("added", "addedLabelIds"), ("removed", "removedLabelIds"))
+                        for found in entry.get(key) or [] if found in self.labels]
+            changes += [text for key, text in EVENTS.items() if entry.get(key)]
+            lines += [f"{entry['createdAt'][:10]} {who}: {change}" for change in changes]
+        return lines
 
     def label_field(self, label: dict) -> str:
         """The field a label belongs to: Label, or its group's own."""

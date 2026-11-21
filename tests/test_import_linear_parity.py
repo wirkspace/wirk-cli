@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from import_fakes import FakeWirk
-from test_import_linear import FakeLinear, comment, folder, issue, read, ref, state  # noqa: F401 - folder is a fixture
+from test_import_linear import FakeLinear, comment, folder, issue, page, read, ref, state  # noqa: F401 - folder is a fixture
 from wirk_cli.client import Service
 from wirk_cli.importers import DEFAULT_STATUSES, linear, render, wirk
 
@@ -57,6 +57,40 @@ def person(hub, who, n, patch):
 
 def moved(n, name, **changes):
     return issue(n, state={"id": f"st-ENG-{name}"}, **changes)
+
+
+# ---------------------------------------------------------------- activity
+
+def test_linears_history_is_an_activity_section_in_time_order_and_a_rerun_writes_nothing(folder, hub):
+    history = [  # as Linear returns them: newest first
+        {"id": "h-3", "createdAt": "2026-03-04T09:00:00.000Z", "actorId": "u-ada", "fromPriority": 0, "toPriority": 2},
+        {"id": "h-1", "createdAt": "2026-03-02T09:00:00.000Z", "actorId": "u-ben", "fromStateId": "st-ENG-Todo",
+         "toStateId": "st-ENG-In Review"},
+        {"id": "h-2", "createdAt": "2026-03-03T09:00:00.000Z", "actorId": "u-ada", "fromAssigneeId": None, "toAssigneeId": "u-ben"}]
+    linear = FakeLinear([issue(1, history=page(history))])
+    go(linear, folder, hub)
+    body = latest(hub, 1)["body"]
+    assert "\nActivity\n2026-03-02 @ben: Todo \u2192 In Review\n2026-03-03 @ada: Assignee: none \u2192 @ben\n" \
+           "2026-03-04 @ada: Priority: none \u2192 High\n" in body
+    assert body.index("Activity") < body.index("Body 1")
+    before = len(hub.writes())
+    assert {o.outcome for o in go(linear, folder, hub)} == {"current"} and len(hub.writes()) == before
+
+
+def test_activity_names_what_linear_changed_and_who_did_it(folder, hub):
+    history = [
+        {"id": "h-1", "createdAt": "2026-03-02T09:00:00.000Z", "actorId": None, "addedLabelIds": ["l-bug"], "autoClosed": True},
+        {"id": "h-2", "createdAt": "2026-03-02T10:00:00.000Z", "actorId": "u-ada", "fromCycleId": None, "toCycleId": "cy-42",
+         "fromDueDate": "2026-03-09", "toDueDate": None, "fromEstimate": None, "toEstimate": 5, "fromTitle": "Old", "toTitle": "Issue 1"}]
+    go(FakeLinear([issue(1, history=page(history))]), folder, hub)
+    assert "\nActivity\n2026-03-02 Linear: Label added: Bug\n2026-03-02 Linear: Closed automatically\n" \
+           "2026-03-02 @ada: Estimate: none \u2192 5\n2026-03-02 @ada: Due: 2026-03-09 \u2192 none\n" \
+           "2026-03-02 @ada: Cycle: none \u2192 ENG cycle 42\n2026-03-02 @ada: Title: Old \u2192 Issue 1\n" in latest(hub, 1)["body"]
+
+
+def test_an_issue_with_no_history_has_no_activity_section(folder, hub):
+    go(FakeLinear([issue(1)]), folder, hub)
+    assert "Activity" not in latest(hub, 1)["body"]
 
 
 # ---------------------------------------------------------------- statuses
