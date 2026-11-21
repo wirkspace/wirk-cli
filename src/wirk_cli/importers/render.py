@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 
-TITLE_LIMIT, MENTIONS = 200, 100  # MENTIONS: references shown in the Mentioned in line
+TITLE_LIMIT, MENTIONS, ACTIVITY = 200, 100, 200  # MENTIONS: references shown in the Mentioned in line; ACTIVITY: newest history lines shown
 PROVENANCE = re.compile(r"(GitHub|Linear|Jira) ([a-z]+(?:-[0-9]+)?) ([A-Za-z0-9_-]+), version ([0-9]{8}T[0-9]{6}Z), "
                         r"hash ([0-9a-f]{12})")
 # Each shape starts where no letter or digit precedes it, so FOO_KEY_lin_api_… is caught where \b would not be; a private
@@ -98,6 +98,7 @@ class Record:
     raw: dict
     raw_comments: list
     archived: str | None = None  # why the source archived it, the reason the importer archives it with
+    activity: list = field(default_factory=list)  # the source's history, a line a change, oldest first
 
 
 @dataclass
@@ -232,7 +233,11 @@ def work_item(ctx: Context, record: Record, users: dict, notes: dict, fix=None) 
     work = {**({"owner_id": owner} if owner else {}), **({"due_at": record.due} if record.due else {})}
     lines = [line1(ctx.source, record.kind, record.ident, record.version, "0" * 12),
              f"{ctx.source} {record.kind} [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
-    return Rendered(record.kind, title, "\n".join(lines) + ("\n\n" + body if body else ""), record.version, work, counts)
+    activity = [clean.line(line) for line in record.activity]
+    if len(activity) > ACTIVITY:
+        activity[:-ACTIVITY] = [f"{len(activity) - ACTIVITY} earlier in the raw archive"]
+    sections = [*(["\n".join(["Activity", *activity])] if activity else []), *([body] if body else [])]
+    return Rendered(record.kind, title, "\n\n".join(["\n".join(lines), *sections]), record.version, work, counts)
 
 
 def evidence(ctx: Context, record: Record) -> str:
