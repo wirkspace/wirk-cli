@@ -44,8 +44,8 @@ PAGE, LIST, CAP = 25, 250, 100 * 1024 * 1024
 # What a history entry can change, as (name, suffix of its from/to keys), and what else it can say
 MOVES = (("State", "Id"), ("Assignee", "Id"), ("Priority", ""), ("Estimate", ""), ("Due", "Date"), ("Cycle", "Id"),
          ("Project", "Id"), ("Parent", "Id"), ("Team", "Id"), ("Title", ""))
-EVENTS = {"archived": "Archived", "trashed": "Moved to the trash", "autoArchived": "Archived automatically",
-          "autoClosed": "Closed automatically", "updatedDescription": "Description edited"}
+EVENTS = {"autoArchived": "Archived automatically", "autoClosed": "Closed automatically", "updatedDescription": "Description edited"}
+TOGGLES = {"archived": ("Archived", "Restored"), "trashed": ("Moved to the trash", "Restored from the trash")}  # true, false
 KEY_NAME = r"[A-Za-z][A-Za-z0-9]*-[0-9]+"
 # What the text may point at, tried left to right. Left alone: code (a fence of three or more ` or ~, a line indented four
 # spaces or a tab, inline), HTML comments, <code> and <pre> elements, tags, autolinks, any other URL and any other link
@@ -144,6 +144,11 @@ def due_at(day: str, zone: str | None) -> str:
     return end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def named(value, name) -> str:
+    """A history value as shown: none when Linear had nothing there, unknown when `name` cannot say what it was."""
+    return "none" if value is None else name(value) or "unknown"
+
+
 def bracketed(name: str) -> str:
     """A name as a key: a ] inside it escaped, so `text='Linear project [<key>]'` finds that one object."""
     return name.replace("\\", "\\\\").replace("]", "\\]")
@@ -162,6 +167,7 @@ class Linear:
 
     def __init__(self, http=None, sleep=None, folder=None):
         self.http = http or httpx.Client(transport=TRANSPORT, follow_redirects=False, timeout=httpx.Timeout(60, connect=10))
+        self.idents = {}
         self.sleep, self.folder, self.points, self.key, self.slug = sleep or time.sleep, folder or config_dir() / "import", 0, None, None
         self.assigned, self.emails = {}, {}  # the users issues are assigned to, and the address of each: for WIRK's matching only
 
@@ -500,7 +506,7 @@ class Linear:
     def activity(self, node: dict, team: dict) -> list:
         """Linear's history as lines, oldest first, one per change: `2026-03-02 @jane: Todo → In Progress`."""
         shown = {"State": lambda v: (self.states.get(v) or {}).get("name"), "Assignee": lambda v: self.person({"id": v}),
-                 "Priority": PRIORITIES.get, "Estimate": lambda v: self.estimate(v, team), "Cycle": lambda v: self.cycle({"id": v}),
+                 "Priority": lambda v: PRIORITIES.get(v, "none" if v == 0 else None), "Estimate": lambda v: self.estimate(v, team), "Cycle": lambda v: self.cycle({"id": v}),
                  "Project": lambda v: (self.projects.get(v) or {}).get("name"), "Parent": self.idents.get,
                  "Team": lambda v: (self.teams.get(v) or {}).get("key"), "Due": str, "Title": str}
         lines = []
@@ -510,10 +516,11 @@ class Linear:
             for kind, suffix in MOVES:
                 before, after = entry.get(f"from{kind}{suffix}"), entry.get(f"to{kind}{suffix}")
                 if (before, after) != (None, None):
-                    names = [value is not None and shown[kind](value) or "none" for value in (before, after)]
+                    names = [named(value, shown[kind]) for value in (before, after)]
                     changes.append(f"{'' if kind == 'State' else kind + ': '}{names[0]} \u2192 {names[1]}")
             changes += [f"Label {verb}: {self.labels[found]['name']}" for verb, key in (("added", "addedLabelIds"), ("removed", "removedLabelIds"))
                         for found in entry.get(key) or [] if found in self.labels]
+            changes += [words[0 if entry[key] else 1] for key, words in TOGGLES.items() if entry.get(key) is not None]
             changes += [text for key, text in EVENTS.items() if entry.get(key)]
             lines += [f"{entry['createdAt'][:10]} {who}: {change}" for change in changes]
         return lines

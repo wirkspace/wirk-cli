@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 
-TITLE_LIMIT, MENTIONS, ACTIVITY = 200, 100, 200  # MENTIONS: references shown in the Mentioned in line; ACTIVITY: history lines shown
+TITLE_LIMIT, MENTIONS, ACTIVITY = 200, 100, 200  # MENTIONS: references shown in the Mentioned in line; ACTIVITY: newest history lines shown
 PROVENANCE = re.compile(r"(GitHub|Linear|Jira) ([a-z]+(?:-[0-9]+)?) ([A-Za-z0-9_-]+), version ([0-9]{8}T[0-9]{6}Z), "
                         r"hash ([0-9a-f]{12})")
 # Each shape starts where no letter or digit precedes it, so FOO_KEY_lin_api_… is caught where \b would not be; a private
@@ -235,7 +235,7 @@ def work_item(ctx: Context, record: Record, users: dict, notes: dict, fix=None) 
              f"{ctx.source} {record.kind} [{record.key}] · {record.url}", *[line for line in header if line], notice(ctx)]
     activity = [clean.line(line) for line in record.activity]
     if len(activity) > ACTIVITY:
-        activity[ACTIVITY:] = [f"{len(activity) - ACTIVITY} more in the raw archive"]
+        activity[:-ACTIVITY] = [f"{len(activity) - ACTIVITY} earlier in the raw archive"]
     sections = [*(["\n".join(["Activity", *activity])] if activity else []), *([body] if body else [])]
     return Rendered(record.kind, title, "\n\n".join(["\n".join(lines), *sections]), record.version, work, counts)
 

@@ -88,6 +88,27 @@ def test_activity_names_what_linear_changed_and_who_did_it(folder, hub):
            "2026-03-02 @ada: Cycle: none \u2192 ENG cycle 42\n2026-03-02 @ada: Title: Old \u2192 Issue 1\n" in latest(hub, 1)["body"]
 
 
+def test_activity_says_restored_for_an_undo_and_unknown_for_what_it_cannot_name(folder, hub):
+    history = [
+        {"id": "h-1", "createdAt": "2026-03-02T09:00:00.000Z", "actorId": "u-ada", "archived": True, "trashed": False},
+        {"id": "h-2", "createdAt": "2026-03-03T09:00:00.000Z", "actorId": "u-ada", "archived": False, "trashed": True},
+        {"id": "h-3", "createdAt": "2026-03-04T09:00:00.000Z", "actorId": "u-ada", "fromStateId": "st-ENG-Gone",
+         "toStateId": None, "fromPriority": 2, "toPriority": 0}]
+    go(FakeLinear([issue(1, history=page(history))]), folder, hub)
+    assert "\nActivity\n2026-03-02 @ada: Archived\n2026-03-02 @ada: Restored from the trash\n" \
+           "2026-03-03 @ada: Restored\n2026-03-03 @ada: Moved to the trash\n2026-03-04 @ada: unknown \u2192 none\n" \
+           "2026-03-04 @ada: Priority: High \u2192 none\n" in latest(hub, 1)["body"]
+
+
+def test_activity_past_the_cap_keeps_the_newest_lines(folder, hub):
+    history = [{"id": f"h-{n:03}", "createdAt": f"2026-03-02T09:{n // 60:02}:{n % 60:02}.000Z", "actorId": "u-ada",
+                "fromEstimate": n, "toEstimate": n + 1} for n in range(render.ACTIVITY + 5)]
+    go(FakeLinear([issue(1, history=page(history))]), folder, hub)
+    body = latest(hub, 1)["body"]
+    assert "5 earlier in the raw archive" in body and "Estimate: 204 \u2192 205" in body
+    assert body.count("@ada: Estimate") == render.ACTIVITY and "Estimate: 4 \u2192" not in body
+
+
 def test_an_issue_with_no_history_has_no_activity_section(folder, hub):
     go(FakeLinear([issue(1)]), folder, hub)
     assert "Activity" not in latest(hub, 1)["body"]
