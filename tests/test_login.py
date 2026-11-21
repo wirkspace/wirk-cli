@@ -745,6 +745,15 @@ def test_a_name_is_one_line_of_at_most_40_characters(fresh, capsys, clock, monke
     assert label == "Ada's Mac studio studio studio studio st"  # no quote or control character, 40 at most
 
 
+@pytest.mark.parametrize("session, expected", [("session_0129pjQpD5x29cG4wu3SugxZ", "Claude Code cloud session 0129pjQp"),
+                                               ("", "Claude Code cloud session")])
+def test_a_cloud_container_is_named_for_its_session_not_its_hostname(fresh, capsys, clock, monkeypatch, session,
+                                                                     expected):
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE_SESSION_ID", session)
+    assert sent_label(monkeypatch, capsys, "vm") == expected
+
+
 @pytest.mark.parametrize("hostname", ["", "localhost", "..."])
 def test_no_usable_name_falls_back_to_the_clis_own_label(fresh, capsys, clock, monkeypatch, hostname):
     assert sent_label(monkeypatch, capsys, hostname) == f"wirk-cli on {platform.system() or 'unknown'}"

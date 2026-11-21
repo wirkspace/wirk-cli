@@ -157,7 +157,8 @@ def signed_in(person: bool = False, actor_id: str | None = None) -> tuple[str, s
     if binding := None if person else actor_binding(actor_id):
         if not (path := actor_path(url, binding)).exists():
             raise Failure("actor_setup_required", "This chat has no WIRK token of its own yet.",
-                          "Run: wirk login   (in this chat; no browser once the machine is approved), then retry")
+                          "Run: wirk login   (in this chat; no browser once the machine is approved, else it prints the link "
+                          "for your person to approve), then retry")
         token = read_token(path)
     return url, token
 
