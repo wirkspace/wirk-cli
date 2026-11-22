@@ -121,6 +121,10 @@ There is no telemetry. People keep a separate token of their own for their own d
 
 - Nothing yet.
 
+### 0.4.39
+
+- Linear import keeps an issue's history as an Activity section. Cloud containers are named for their session, and the chat sign-in hint is clearer.
+
 ### 0.4.38
 
 - Decision records: `wirk write new "Title" kind=decision owner=PERSON quote="their words" supersedes=ID,ID` signs a decision with its human director. A signed decision is never edited; a new one that supersedes it replaces it. `wirk query kind=decision state=in_force` lists the decisions in force.
