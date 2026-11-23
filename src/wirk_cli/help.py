@@ -20,7 +20,7 @@ Start with: wirk status
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
   upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
-  login · signup · wirkspace NAME     connect: one click in your browser, or signup with no person; choose a wirkspace
+  login · signup · wirkspace NAME      connect: one click in your browser, or signup with no person; choose a wirkspace
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
 Decide proposals when your role may review; a background agent only proposes and never decides.
