@@ -266,4 +266,5 @@ def test_signup_help(capsys):
     assert cli.main(["signup", "--help"]) == 0
     text = capsys.readouterr().out
     assert text.startswith("usage: wirk signup [--json]") and "claim" in text and "wirk login" in text
+    assert "the machine's wirk status (outside an agent chat) shows the link" in " ".join(text.split())
     assert cli.main(["--help"]) == 0 and "signup" in capsys.readouterr().out

@@ -234,8 +234,8 @@ WIRK's sign-in provider, WorkOS, as an anonymous agent; the service names the pr
 there. It refuses when this machine already signs in; with a person at hand, use wirk login instead.
 
 The answer ends with a claim link: show it to your person. They sign in there, accept the Terms and the account
-becomes theirs. Until then it is deleted after 30 days, or after 3 days if nothing is written; wirk status shows
-the link and the date again.
+becomes theirs. Until then it is deleted after 30 days, or after 3 days if nothing is written; the machine's
+wirk status (outside an agent chat) shows the link and the date again.
 
   signup                               sign up, then: wirk status""",
         "admin": """usage: wirk admin show wirkspace|account [workspace_id=ID]
