@@ -121,12 +121,51 @@ def test_signup_keeps_existing_token(home, capsys, status):
     assert paths(requests) == [("POST", f"{URL}/v2/status")]  # nothing reaches WorkOS
 
 
-def test_signup_replaces_a_token_the_service_does_not_accept(home, capsys, monkeypatch):
+@pytest.mark.parametrize("stopped", [
+    ("unauthenticated", "This account was claimed by its person"),
+    ("unauthenticated", "This machine's WIRK token was revoked; see your account page"),
+    ("unauthenticated", "This machine's token stopped after 90 days unused"),
+], ids=["claimed", "revoked", "unused"])
+def test_signup_replaces_a_token_that_stopped(home, capsys, monkeypatch, stopped):
     monkeypatch.setattr(cli, "machine_name", lambda: "build-box")
-    answer, held = world(home)
+    answer, held = world(home, status=lambda r: refusal(*stopped, status=401, hint="wirk login --new"))
     code, out, err, requests = signup([], answer, capsys)
     token = (home / "agent-token").read_text()
     assert code == 0 and token != TOKEN and held == [token] and requests[0].headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_signup_keeps_a_token_the_service_has_not_registered(home, capsys, monkeypatch):
+    """A token nobody registered yet may be a pending wirk login's: signing up with it keeps that link working."""
+    monkeypatch.setattr(cli, "machine_name", lambda: "build-box")
+    answer, held = world(home)
+    code, out, err, requests = signup([], answer, capsys)
+    assert code == 0 and (home / "agent-token").read_text() == TOKEN and held == [TOKEN]
+
+
+def test_a_failed_signup_leaves_a_pending_login_to_its_person(fresh, capsys, monkeypatch):
+    """wirk login shows its link and the hint, the agent's wirk signup fails, then the person approves that link."""
+    monkeypatch.setattr(cli, "browser_here", lambda: False)
+    monkeypatch.setattr(cli, "approve", lambda *args, **kwargs: 130)  # the agent stopped waiting for the person
+    pending, approved = [], set()
+
+    def login(request):
+        wants = json.loads(request.content)["for"]
+        if wants == "signup":
+            return refusal("not_available", "Agent sign-up is not open on this service", status=404)
+        pending.append(request.headers["authorization"][7:])
+        return envelope(data={"state": "pending", "code": "BDFG-HJKL", "interval": 5, "expires_at": "2026-12-01T14:05:00Z",
+                              "url": "https://app.wirk.life/device?code=BDFG-HJKL"})
+
+    def status(request):
+        if request.headers["authorization"][7:] in approved:
+            return envelope("Logged in as alice-agents")
+        return refusal("unauthenticated", "Bearer token is invalid", status=401, hint="Run: wirk login")
+    answer = world(fresh, status=status, login=login)[0]
+    handler = httpx.MockTransport(answer)
+    assert cli.main(["login"], transport=handler) == 130 and "No person to approve? wirk signup" in capsys.readouterr().out
+    assert cli.main(["signup"], transport=handler) == 1 and "not open" in capsys.readouterr().out
+    approved.update(pending)  # the person approves the link wirk login showed
+    assert cli.main(["status"], transport=handler) == 0 and "alice-agents" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("metadata", [

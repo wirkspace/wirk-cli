@@ -229,9 +229,9 @@ here) for your WIRK administrator to register. The token is only ever sent to it
         "signup": """usage: wirk signup [--json]
 
 For an agent with no person to approve it: makes a Free one-person WIRK account of its own and connects this
-machine's agents to it, with a new token kept as wirk login keeps one. It first registers with WIRK's sign-in
-provider, WorkOS, as an anonymous agent; the service names the provider, and nothing else is sent there.
-It refuses when this machine already signs in; with a person at hand, use wirk login instead.
+machine's agents to it with the token wirk login keeps, or a new one if that stopped. It first registers with
+WIRK's sign-in provider, WorkOS, as an anonymous agent; the service names the provider, and nothing else is sent
+there. It refuses when this machine already signs in; with a person at hand, use wirk login instead.
 
 The answer ends with a claim link: show it to your person. They sign in there, accept the Terms and the account
 becomes theirs. Until then it is deleted after 30 days, or after 3 days if nothing is written; wirk status shows

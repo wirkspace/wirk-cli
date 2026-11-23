@@ -485,29 +485,34 @@ def sign_in(words, options, transport):
 
 
 METADATA = "/.well-known/oauth-protected-resource"  # RFC 9728: where the service names its sign-in provider
+UNREGISTERED = "Bearer token is invalid"  # the service's word for a token nobody registered, as a pending login's is
 
 
 def signup(words, options, transport):
     """An agent with no person makes its own unclaimed Free account: the provider the service names (WorkOS AuthKit)
-    registers it anonymously, then the service makes the account for this machine's new token and answers the claim
-    link for its person. Nothing changes here until the provider has answered; its assertion and claim token are
-    never kept."""
+    registers it anonymously, then the service makes the account for this machine's agent token and answers the claim
+    link for its person. A token the service never registered, such as a waiting wirk login's, is kept, so that
+    login's link still works if sign-up fails. Nothing changes here until the provider has answered; its assertion and
+    claim token are never kept."""
     if words:
         raise UsageError("signup takes nothing but --json")
     directory = config_dir()
     url, path = check_url(saved_url(directory) or DEFAULT_URL), directory / AGENT
-    if path.exists():  # a token the service accepts is never replaced
-        answer = Service(url, read_token(path), transport).post("/v2/status", {"format": "json", "max_bytes": 1024})
+    token = read_token(path) if path.exists() else None
+    if token:  # a token the service accepts is never replaced
+        answer = Service(url, token, transport).post("/v2/status", {"format": "json", "max_bytes": 1024})
         if answer["ok"] or answer["errors"][0]["code"] != "unauthenticated":
             raise Failure("not_authorized", "This machine already signs in to WIRK",
                           f"Use it: wirk status. To sign up anyway, remove {path} first")
+        if answer["errors"][0]["message"] != UNREGISTERED:
+            token = None  # it stopped (revoked, claimed or unused), so a new one signs up
     http = Service(url, "", transport).http  # the provider's requests carry no WIRK token
     provider = authorization_server(http, url)
     assertion = registered(http, f"{provider}/agent/identity", "identity", "assertion", json={"type": "anonymous"})
     access = registered(http, f"{provider}/oauth2/token", "access_token", data={  # no resource: aud is the client ID
         "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion})
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    service = Service(url, new_token(path), transport)  # saved first: after a lost answer, wirk status finds the account
+    service = Service(url, token or new_token(path), transport)  # saved first: after a lost answer, status finds it
     save_url(directory, url)
     answer = service.post("/v2/login", {"for": "signup", "label": machine_name(), "format": fmt(options)},
                           headers={"Wirk-Agent-Registration": f"Bearer {access}"})
