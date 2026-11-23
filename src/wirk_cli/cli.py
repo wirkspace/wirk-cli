@@ -525,8 +525,8 @@ def signup(words, options, transport):
 
 
 def authorization_server(http, url: str) -> str:
-    """The origin of the sign-in provider the service names first in its protected-resource metadata, checked as a
-    service address is: https, or http on loopback only."""
+    """The origin of the sign-in provider the service names first in its protected-resource metadata: https, or http
+    on loopback when the service itself is a local one."""
     import httpx
     try:
         found = http.get(url + METADATA).json()["authorization_servers"][0]
@@ -535,7 +535,7 @@ def authorization_server(http, url: str) -> str:
                       f"Check your network, then: curl {url}/health") from None
     except (ValueError, LookupError, TypeError):  # not JSON, or no provider named in it
         found = None
-    if provider := isinstance(found, str) and origin(found):
+    if provider := isinstance(found, str) and (found.startswith("https:") or url.startswith("http:")) and origin(found):
         return provider
     raise Failure("not_available", "This service does not offer agent sign-up",
                   "Ask your person to sign up, then run: wirk login")

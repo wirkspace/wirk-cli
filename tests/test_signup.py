@@ -201,13 +201,18 @@ def test_signup_needs_a_service_that_names_an_https_provider(fresh, capsys, meta
     assert len(requests) == 1 and not (fresh / "agent-token").exists()
 
 
-def test_a_loopback_provider_may_use_http(fresh, capsys):
+def test_a_loopback_provider_may_use_http_for_a_loopback_service(fresh, capsys):
     """A local service and a local provider, as a developer runs them."""
     local = "http://127.0.0.1:8899"
     fresh.mkdir(mode=0o700)
     (fresh / "config.json").write_text(json.dumps({"service_url": "http://127.0.0.1:8765"}))
     code, out, err, requests = signup([], world(fresh, provider=local)[0], capsys)
     assert code == 0 and str(requests[1].url) == f"{local}/agent/identity"
+
+
+def test_an_https_service_never_names_an_http_provider(fresh, capsys):
+    code, out, err, requests = signup([], world(fresh, provider="http://127.0.0.1:8899")[0], capsys)
+    assert code == 1 and "This service does not offer agent sign-up" in err and len(requests) == 1
 
 
 GZIP = {"content-encoding": "gzip"}
