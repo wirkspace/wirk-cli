@@ -443,6 +443,7 @@ def sign_in(words, options, transport):
                       f"A new address needs a new token: wirk login --url {url} --new" + (
                           f" (after removing {other}, which belongs to {saved})" if other.exists() else ""), 2)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    first = not person and not path.exists()
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
     service = Service(url, token, transport)
@@ -474,6 +475,8 @@ def sign_in(words, options, transport):
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
+            if first:  # a machine new to WIRK may have nobody to approve it
+                print("No person to approve? wirk signup", flush=True)
         result = approve(asks, listener, "wirk login --person" if person else "wirk login", say=not binding) or int(refused)
         return enrol(service, actor_path(url, binding), launcher(url, binding)) if result == 0 and binding else result
     finally:
