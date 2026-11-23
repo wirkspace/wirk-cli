@@ -20,7 +20,7 @@ Start with: wirk status
   write seen ID                        mark messages seen once you have read them
   write --request FILE                 any write as JSON; - reads standard input
   upload PATH · download ITEM FILE     store a file and print how to attach it; save a stored one by its file ID
-  login · wirkspace NAME               connect this machine: one click in your browser; choose this chat's wirkspace
+  login · signup · wirkspace NAME      connect: one click in your browser, or signup with no person; choose a wirkspace
   import github OWNER --dry-run        bring a GitHub owner's issues into WIRK
 
 Decide proposals when your role may review; a background agent only proposes and never decides.
@@ -226,6 +226,18 @@ here) for your WIRK administrator to register. The token is only ever sent to it
   login                                connect your agents on this machine
   login --person                       your own sign-in, at your own terminal, for review --person
   login --url https://wirk.example.org --new        another address needs a new token""",
+        "signup": """usage: wirk signup [--json]
+
+For an agent with no person to approve it: makes a Free one-person WIRK account of its own and connects this
+machine's agents to it with the token wirk login keeps, or a new one if that stopped. It first registers with
+WIRK's sign-in provider, WorkOS, as an anonymous agent; the service names the provider, and nothing else is sent
+there. It refuses when this machine already signs in; with a person at hand, use wirk login instead.
+
+The answer ends with a claim link: show it to your person. They sign in there, accept the Terms and the account
+becomes theirs. Until then it is deleted after 30 days, or after 3 days if nothing is written; the machine's
+wirk status (outside an agent chat) shows the link and the date again.
+
+  signup                               sign up, then: wirk status""",
         "admin": """usage: wirk admin show wirkspace|account [workspace_id=ID]
        wirk admin --request FILE
 

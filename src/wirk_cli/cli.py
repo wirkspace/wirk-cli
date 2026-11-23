@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 from . import __version__, context, grammar, hooks, update, wake
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
-    chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
+    chosen, config_dir, digest, file_digest, launcher, new_token, origin, read_token, save_url, saved_url, signed_in, \
     write_private
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
@@ -31,7 +31,7 @@ FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "show": {"--file": VALUE, "--revoke": VALUE, "--no-open": SWITCH},
          "upload": {"--description": VALUE, "--request-id": VALUE}, "download": {"-o": VALUE},
          "login": {"--person": SWITCH, "--url": VALUE, "--new": SWITCH}, "admin": {"--request": VALUE},
-         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}, "wirkspace": {}}
+         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}, "wirkspace": {}, "signup": {}}
 
 
 def parse(words: list[str], flags: dict) -> tuple[list[str], dict]:
@@ -443,6 +443,7 @@ def sign_in(words, options, transport):
                       f"A new address needs a new token: wirk login --url {url} --new" + (
                           f" (after removing {other}, which belongs to {saved})" if other.exists() else ""), 2)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    first = not person and not path.exists()
     token = new_token(path) if options.get("--new") or not path.exists() else read_token(path)
     save_url(directory, url)
     service = Service(url, token, transport)
@@ -474,11 +475,91 @@ def sign_in(words, options, transport):
                 asks.append((agents, theirs, answer))
         if pending:
             listener = show_link(asks, listener)
+            if first:  # a machine new to WIRK may have nobody to approve it
+                print("No person to approve? wirk signup", flush=True)
         result = approve(asks, listener, "wirk login --person" if person else "wirk login", say=not binding) or int(refused)
         return enrol(service, actor_path(url, binding), launcher(url, binding)) if result == 0 and binding else result
     finally:
         if listener:
             listener.close()
+
+
+METADATA = "/.well-known/oauth-protected-resource"  # RFC 9728: where the service names its sign-in provider
+UNREGISTERED = "Bearer token is invalid"  # the service's word for a token nobody registered, as a pending login's is
+
+
+def signup(words, options, transport):
+    """An agent with no person makes its own unclaimed Free account: the provider the service names (WorkOS AuthKit)
+    registers it anonymously, then the service makes the account for this machine's agent token and answers the claim
+    link for its person. A token the service never registered, such as a waiting wirk login's, is kept, so that
+    login's link still works if sign-up fails. Nothing changes here until the provider has answered; its assertion and
+    claim token are never kept."""
+    if words:
+        raise UsageError("signup takes nothing but --json")
+    directory = config_dir()
+    if (directory / PERSON).exists():  # a person is at hand to approve this machine
+        raise Failure("not_authorized", "A person signs in on this machine", "Ask them to approve: wirk login")
+    url, path = check_url(saved_url(directory) or DEFAULT_URL), directory / AGENT
+    token = read_token(path) if path.exists() else None
+    if token:  # a token the service accepts is never replaced
+        answer = Service(url, token, transport).post("/v2/status", {"format": "json", "max_bytes": 1024})
+        code = None if answer["ok"] else answer["errors"][0]["code"]
+        if code in (None, "choose_wirkspace"):  # accepted, in one wirkspace or several
+            raise Failure("not_authorized", "This machine already signs in to WIRK",
+                          f"Use it: wirk status. To sign up anyway, remove {path} first")
+        if code != "unauthenticated":
+            return emit(answer, options)  # the service's own reason, such as an account being deleted
+        if answer["errors"][0]["message"] != UNREGISTERED:
+            token = None  # it stopped (revoked, claimed or unused), so a new one signs up
+    http = Service(url, "", transport).http  # the provider's requests carry no WIRK token
+    provider = authorization_server(http, url)
+    assertion = registered(http, f"{provider}/agent/identity", "identity", "assertion", json={"type": "anonymous"})
+    access = registered(http, f"{provider}/oauth2/token", "access_token", data={  # no resource: aud is the client ID
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion})
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    service = Service(url, token or new_token(path), transport)  # saved first: after a lost answer, status finds it
+    save_url(directory, url)
+    answer = service.post("/v2/login", {"for": "signup", "label": machine_name(), "format": fmt(options)},
+                          headers={"Wirk-Agent-Registration": f"Bearer {access}"})
+    return emit(answer, options)
+
+
+def authorization_server(http, url: str) -> str:
+    """The origin of the sign-in provider the service names first in its protected-resource metadata: https, or http
+    on loopback when the service itself is a local one."""
+    import httpx
+    try:
+        found = http.get(url + METADATA).json()["authorization_servers"][0]
+    except httpx.RequestError as error:  # unreachable, or an answer that does not decode
+        raise Failure("service_unavailable", f"could not reach {url} ({type(error).__name__}).",
+                      f"Check your network, then: curl {url}/health") from None
+    except (ValueError, LookupError, TypeError):  # not JSON, or no provider named in it
+        found = None
+    if provider := isinstance(found, str) and (found.startswith("https:") or url.startswith("http:")) and origin(found):
+        return provider
+    raise Failure("not_available", "This service does not offer agent sign-up",
+                  "Ask your person to sign up, then run: wirk login")
+
+
+def registered(http, url: str, *keys: str, **sending) -> str:
+    """The string at `keys` in the provider's answer to one registration step."""
+    import httpx
+    try:
+        answer = http.post(url, **sending)
+    except httpx.RequestError:  # unreachable, or an answer that does not decode
+        answer = None
+    if answer is None or answer.status_code == 429 or answer.status_code >= 500:
+        raise Failure("provider_unavailable", "WorkOS did not answer", "Run the same command again in a minute")
+    try:
+        found = answer.json()
+        for key in keys:
+            found = found[key]
+    except (ValueError, LookupError, TypeError):
+        found = None
+    if answer.status_code != 200 or not isinstance(found, str):
+        raise Failure("not_available", f"WorkOS did not register this agent (HTTP {answer.status_code})",
+                      "Ask your person to sign up, then run: wirk login")
+    return found
 
 
 def machine_name() -> str:
@@ -706,7 +787,8 @@ def import_(words, options, transport):
 
 
 COMMANDS = {"status": status, "query": query, "write": write, "review": review, "show": show, "upload": upload,
-            "download": download, "login": login, "wirkspace": wirkspace, "admin": admin, "import": import_}
+            "download": download, "login": login, "signup": signup, "wirkspace": wirkspace, "admin": admin,
+            "import": import_}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:

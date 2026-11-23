@@ -46,13 +46,20 @@ def secure(url: str) -> bool:
     return parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK)
 
 
-def check_url(url: str) -> str:
+def origin(url: str) -> str | None:
+    """The scheme and host of an address with nothing else in it, https or http on loopback; else None."""
     parts = urlsplit(url)
     if not secure(url) or not parts.hostname or parts.username or parts.password or parts.path not in ("", "/") \
             or parts.query or parts.fragment:
-        raise Failure("invalid_url", f"{url} is not a WIRK service address",
-                      f"Use an https origin such as {DEFAULT_URL}, or http on 127.0.0.1 for a local service.", 2)
+        return None
     return f"{parts.scheme}://{parts.netloc}"
+
+
+def check_url(url: str) -> str:
+    if address := origin(url):
+        return address
+    raise Failure("invalid_url", f"{url} is not a WIRK service address",
+                  f"Use an https origin such as {DEFAULT_URL}, or http on 127.0.0.1 for a local service.", 2)
 
 
 def saved_url(directory: Path) -> str | None:

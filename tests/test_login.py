@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import TOKEN, envelope, refusal
+from conftest import TOKEN, claimed, envelope, refusal
 from wirk_cli import cli, wake
 
 
@@ -128,6 +128,9 @@ NO_BROWSER = ("No browser on this machine. Open this link in your browser on any
               "https://app.wirk.life/device?code=BDFG-HJKL\nCode BDFG-HJKL · for your agents · expires 14:05 UTC\n")
 
 
+SIGNUP_HINT = "No person to approve? wirk signup\n"  # a machine's first login only (agent-signup plan §8.9)
+
+
 LOGGED_IN = "Logged in as alice-agents · agent of alice · account Acme\nnext: status"  # the service's words
 
 
@@ -226,7 +229,7 @@ def test_interrupted_login_closes_the_listener(fresh, capsys, monkeypatch, inter
     except KeyboardInterrupt:
         pytest.fail("login leaked KeyboardInterrupt")
     assert interrupted_wait.closed and code == 130
-    assert out == "" and err == ("Stopped waiting. The approval link and this machine's token stay valid "
+    assert out == ("" if person else SIGNUP_HINT) and err == ("Stopped waiting. The approval link and this machine's token stay valid "
                                 "until the code expires; after approving, run: wirk login"
                                 + (" --person" if person else "") + "\n")
     assert (fresh / "agent-token").exists()
@@ -254,6 +257,21 @@ def test_without_web_sign_in_the_digest_flow_stays(fresh, capsys, clock, missing
     code, out, err, requests = login([], answer, capsys)
     token = (fresh / "agent-token").read_text()
     assert code == 0 and hashlib.sha256(token.encode()).hexdigest() in out and token not in out + err
+
+
+def test_a_first_login_names_signup_for_an_agent_with_no_person(fresh, capsys, clock):
+    code, out, err, requests = login([], device(["pending"]), capsys)
+    assert code == 0 and NO_BROWSER + SIGNUP_HINT in out and out.count(SIGNUP_HINT) == 1
+    assert all(json.loads(r.content)["for"] == "agent" for r in requests)  # it says so, and never signs up itself
+
+
+@pytest.mark.parametrize("argv", [[], ["--new"]], ids=["kept-token", "new"])
+def test_a_machine_that_had_a_token_is_not_told_to_sign_up(fresh, capsys, clock, argv):
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text(TOKEN)
+    (fresh / "agent-token").chmod(0o600)
+    code, out, err, requests = login(argv, device(["pending"]), capsys)
+    assert code == 0 and "Approve" not in out and NO_BROWSER in out and SIGNUP_HINT not in out
 
 
 def test_the_services_next_line_is_the_only_one(fresh, capsys, clock):
@@ -398,7 +416,7 @@ def test_an_agent_run_login_opens_the_browser_and_one_click_logs_in(fresh, capsy
     port = int(url.rsplit("=", 1)[1])
     assert url == f"https://app.wirk.life/device?code=BDFG-HJKL&port={port}"
     assert code == 0 and out == (f"Approve this machine in your browser: {url}\n"
-                                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + LOGGED_IN + "\n")
+                                 "Code BDFG-HJKL · for your agents · expires 14:05 UTC\n" + SIGNUP_HINT + LOGGED_IN + "\n")
     assert state["completes"] == [VALUE] and VALUE not in out + err and token not in out + err
     assert all(r.headers["authorization"] == f"Bearer {token}" for r in requests)
     with pytest.raises(OSError):  # closed once the login finished
@@ -438,7 +456,7 @@ def test_without_a_browser_the_link_has_no_port_and_login_polls(fresh, capsys, c
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.setattr("webbrowser.open", lambda url: made.append(url) and False)
     code, out, err, requests = login([], device(["pending"]), capsys)
-    assert code == 0 and out == NO_BROWSER + LOGGED_IN + "\n" and clock["slept"] == [5]
+    assert code == 0 and out == NO_BROWSER + SIGNUP_HINT + LOGGED_IN + "\n" and clock["slept"] == [5]
     assert all("complete" not in json.loads(r.content) for r in requests)
     if made:  # the browser was asked, refused, and the listener closed
         with pytest.raises(OSError):
@@ -638,8 +656,9 @@ STALE = "This machine's token stopped after 90 days unused"
             text=f"Error unauthenticated: {STALE}\n  Run: wirk login --new"),
     envelope(ok=False, errors=[{"code": "not_authorized", "message": f"{STALE}; make a new one: wirk login --new"}],
              data={}, status=403),
-])
-def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refused):
+    claimed(),
+], ids=["stale", "revoked", "claimed"])
+def test_a_refused_token_prints_the_services_words_and_stays(fresh, capsys, refused):
     fresh.mkdir(mode=0o700)
     (fresh / "agent-token").write_text(TOKEN)
     (fresh / "agent-token").chmod(0o600)
@@ -647,6 +666,20 @@ def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refuse
     problem = refused.json()["errors"][0]
     assert code == 1 and len(requests) == 1 and (fresh / "agent-token").read_text() == TOKEN
     assert out + err == f"Error {problem['code']}: {problem['message']}\n" + (f"  {problem['hint']}\n" if "hint" in problem else "")
+
+
+def test_after_a_claim_login_new_asks_the_person_with_a_new_token(fresh, capsys, clock):
+    """The hint's wirk login --new never sends the claimed token again: a new one waits for its person's approval."""
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text(TOKEN)
+    (fresh / "agent-token").chmod(0o600)
+    approval = device(["pending"])
+    code, out, err, requests = login(["--new"], lambda request: claimed() if request.headers["authorization"] ==
+                                     f"Bearer {TOKEN}" else approval(request), capsys)
+    new = (fresh / "agent-token").read_text()
+    assert code == 0 and new != TOKEN and out == NO_BROWSER + LOGGED_IN + "\n"
+    assert {r.headers["authorization"] for r in requests} == {f"Bearer {new}"}
+    assert {json.loads(r.content)["for"] for r in requests} == {"agent"}
 
 
 def no_runnable_browser(url):
@@ -666,7 +699,7 @@ def test_a_browser_that_does_not_open_closes_the_listener_before_waiting(fresh, 
             visit(int(tried[0].rsplit("=", 1)[1]), f"/done?c={VALUE}")
     monkeypatch.setattr("time.sleep", sleep)
     code, out, err, requests = login([], device(["pending"]), capsys)
-    assert code == 0 and tried and out == NO_BROWSER + LOGGED_IN + "\n"
+    assert code == 0 and tried and out == NO_BROWSER + SIGNUP_HINT + LOGGED_IN + "\n"
 
 
 def test_a_pair_whose_browser_does_not_open_shows_both_links(fresh, capsys, clock, monkeypatch, at_terminal):
