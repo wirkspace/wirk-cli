@@ -209,12 +209,22 @@ def test_a_loopback_provider_may_use_http(fresh, capsys):
     assert code == 0 and str(requests[1].url) == f"{local}/agent/identity"
 
 
+GZIP = {"content-encoding": "gzip"}
+
+
+def test_an_undecodable_service_answer_is_no_answer(fresh, capsys):
+    metadata = lambda r: httpx.Response(200, headers=GZIP, content=b"not gzip")
+    code, out, err, requests = signup([], world(fresh, metadata=metadata)[0], capsys)
+    assert code == 1 and "could not reach https://api.wirk.life" in err and not (fresh / "agent-token").exists()
+
+
 @pytest.mark.parametrize("identity, token", [
     (lambda r: httpx.Response(503, text="down"), None),
     (None, lambda r: httpx.Response(502, text="bad gateway")),
     (lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")), None),
     (lambda r: httpx.Response(429, json={}), None),
-], ids=["identity-503", "token-502", "unreachable", "429"])
+    (None, lambda r: httpx.Response(200, headers=GZIP, content=b"not gzip")),
+], ids=["identity-503", "token-502", "unreachable", "429", "undecodable"])
 def test_workos_unavailable_says_to_run_it_again(fresh, capsys, identity, token):
     code, out, err, requests = signup([], world(fresh, identity=identity, token=token)[0], capsys)
     assert code == 1 and "WorkOS did not answer" in err and "Run the same command again in a minute" in err

@@ -531,7 +531,7 @@ def authorization_server(http, url: str) -> str:
     try:
         answer = http.get(url + METADATA)
         return check_url(answer.json()["authorization_servers"][0] if answer.status_code == 200 else None)
-    except httpx.TransportError as error:
+    except httpx.RequestError as error:  # unreachable, or an answer that does not decode
         raise Failure("service_unavailable", f"could not reach {url} ({type(error).__name__}).",
                       f"Check your network, then: curl {url}/health") from None
     except (ValueError, LookupError, TypeError, AttributeError, Failure):
@@ -544,7 +544,7 @@ def registered(http, url: str, *keys: str, **sending) -> str:
     import httpx
     try:
         answer = http.post(url, **sending)
-    except httpx.TransportError:
+    except httpx.RequestError:  # unreachable, or an answer that does not decode
         answer = None
     if answer is None or answer.status_code == 429 or answer.status_code >= 500:
         raise Failure("provider_unavailable", "WorkOS did not answer", "Run the same command again in a minute")
