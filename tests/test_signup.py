@@ -193,7 +193,8 @@ def test_signup_refuses_a_machine_a_person_signs_in_on(fresh, capsys):
     lambda r: httpx.Response(200, json={"authorization_servers": ["http://signin.example"]}),  # not https
     lambda r: httpx.Response(200, json={"authorization_servers": ["https://signin.example/x?y=1"]}),
     lambda r: httpx.Response(200, json={"authorization_servers": [7]}),
-], ids=["404", "empty", "not-json", "http", "path", "not-a-string"])
+    lambda r: httpx.Response(200, json=["https://signin.example"]),
+], ids=["404", "empty", "not-json", "http", "path", "not-a-string", "a-list"])
 def test_signup_needs_a_service_that_names_an_https_provider(fresh, capsys, metadata):
     code, out, err, requests = signup([], world(fresh, metadata=metadata)[0], capsys)
     assert code == 1 and "This service does not offer agent sign-up" in err and "wirk login" in err

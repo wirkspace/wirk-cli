@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 from . import __version__, context, grammar, hooks, update, wake
 from .client import AGENT, DEFAULT_URL, PERSON, Failure, Service, actor_binding, actor_path, check_url, choice_path, \
-    chosen, config_dir, digest, file_digest, launcher, new_token, read_token, save_url, saved_url, signed_in, \
+    chosen, config_dir, digest, file_digest, launcher, new_token, origin, read_token, save_url, saved_url, signed_in, \
     write_private
 from .grammar import UsageError, command
 from .help import HELP, RETIRED
@@ -529,14 +529,16 @@ def authorization_server(http, url: str) -> str:
     service address is: https, or http on loopback only."""
     import httpx
     try:
-        answer = http.get(url + METADATA)
-        return check_url(answer.json()["authorization_servers"][0] if answer.status_code == 200 else None)
+        found = http.get(url + METADATA).json()["authorization_servers"][0]
     except httpx.RequestError as error:  # unreachable, or an answer that does not decode
         raise Failure("service_unavailable", f"could not reach {url} ({type(error).__name__}).",
                       f"Check your network, then: curl {url}/health") from None
-    except (ValueError, LookupError, TypeError, AttributeError, Failure):
-        raise Failure("not_available", "This service does not offer agent sign-up",
-                      "Ask your person to sign up, then run: wirk login") from None
+    except (ValueError, LookupError, TypeError):  # not JSON, or no provider named in it
+        found = None
+    if provider := isinstance(found, str) and origin(found):
+        return provider
+    raise Failure("not_available", "This service does not offer agent sign-up",
+                  "Ask your person to sign up, then run: wirk login")
 
 
 def registered(http, url: str, *keys: str, **sending) -> str:
