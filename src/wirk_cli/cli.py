@@ -31,7 +31,7 @@ FLAGS = {"status": {}, "query": {"--request": VALUE}, "write": WRITE,
          "show": {"--file": VALUE, "--revoke": VALUE, "--no-open": SWITCH},
          "upload": {"--description": VALUE, "--request-id": VALUE}, "download": {"-o": VALUE},
          "login": {"--person": SWITCH, "--url": VALUE, "--new": SWITCH}, "admin": {"--request": VALUE},
-         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}, "wirkspace": {}}
+         "import": {"--dry-run": SWITCH, "--overwrite": SWITCH}, "wirkspace": {}, "signup": {}}
 
 
 def parse(words: list[str], flags: dict) -> tuple[list[str], dict]:
@@ -481,6 +481,72 @@ def sign_in(words, options, transport):
             listener.close()
 
 
+METADATA = "/.well-known/oauth-protected-resource"  # RFC 9728: where the service names its sign-in provider
+
+
+def signup(words, options, transport):
+    """An agent with no person makes its own unclaimed Free account: the provider the service names (WorkOS AuthKit)
+    registers it anonymously, then the service makes the account for this machine's new token and answers the claim
+    link for its person. Nothing changes here until the provider has answered; its assertion and claim token are
+    never kept."""
+    if words:
+        raise UsageError("signup takes nothing but --json")
+    directory = config_dir()
+    url, path = check_url(saved_url(directory) or DEFAULT_URL), directory / AGENT
+    if path.exists():  # a token the service accepts is never replaced
+        answer = Service(url, read_token(path), transport).post("/v2/status", {"format": "json", "max_bytes": 1024})
+        if answer["ok"] or answer["errors"][0]["code"] != "unauthenticated":
+            raise Failure("not_authorized", "This machine already signs in to WIRK",
+                          f"Use it: wirk status. To sign up anyway, remove {path} first")
+    http = Service(url, "", transport).http  # the provider's requests carry no WIRK token
+    provider = authorization_server(http, url)
+    assertion = registered(http, f"{provider}/agent/identity", "identity", "assertion", json={"type": "anonymous"})
+    access = registered(http, f"{provider}/oauth2/token", "access_token", data={  # no resource: aud is the client ID
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion})
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    service = Service(url, new_token(path), transport)  # saved first: after a lost answer, wirk status finds the account
+    save_url(directory, url)
+    answer = service.post("/v2/login", {"for": "signup", "label": machine_name(), "format": fmt(options)},
+                          headers={"Wirk-Agent-Registration": f"Bearer {access}"})
+    return emit(answer, options)
+
+
+def authorization_server(http, url: str) -> str:
+    """The origin of the sign-in provider the service names first in its protected-resource metadata, checked as a
+    service address is: https, or http on loopback only."""
+    import httpx
+    try:
+        answer = http.get(url + METADATA)
+        return check_url(answer.json()["authorization_servers"][0] if answer.status_code == 200 else None)
+    except httpx.TransportError as error:
+        raise Failure("service_unavailable", f"could not reach {url} ({type(error).__name__}).",
+                      f"Check your network, then: curl {url}/health") from None
+    except (ValueError, LookupError, TypeError, AttributeError, Failure):
+        raise Failure("not_available", "This service does not offer agent sign-up",
+                      "Ask your person to sign up, then run: wirk login") from None
+
+
+def registered(http, url: str, *keys: str, **sending) -> str:
+    """The string at `keys` in the provider's answer to one registration step."""
+    import httpx
+    try:
+        answer = http.post(url, **sending)
+    except httpx.TransportError:
+        answer = None
+    if answer is None or answer.status_code == 429 or answer.status_code >= 500:
+        raise Failure("provider_unavailable", "WorkOS did not answer", "Run the same command again in a minute")
+    try:
+        found = answer.json()
+        for key in keys:
+            found = found[key]
+    except (ValueError, LookupError, TypeError):
+        found = None
+    if answer.status_code != 200 or not isinstance(found, str):
+        raise Failure("not_available", f"WorkOS did not register this agent (HTTP {answer.status_code})",
+                      "Ask your person to sign up, then run: wirk login")
+    return found
+
+
 def machine_name() -> str:
     """This computer's name for its row on the account page: macOS's Computer Name, else the hostname without its
     domain, as one line of at most 40 characters without quotes; or the CLI's own label when neither gives one.
@@ -706,7 +772,8 @@ def import_(words, options, transport):
 
 
 COMMANDS = {"status": status, "query": query, "write": write, "review": review, "show": show, "upload": upload,
-            "download": download, "login": login, "wirkspace": wirkspace, "admin": admin, "import": import_}
+            "download": download, "login": login, "signup": signup, "wirkspace": wirkspace, "admin": admin,
+            "import": import_}
 
 
 def main(argv: list[str] | None = None, transport=None) -> int:
