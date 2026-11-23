@@ -501,9 +501,12 @@ def signup(words, options, transport):
     token = read_token(path) if path.exists() else None
     if token:  # a token the service accepts is never replaced
         answer = Service(url, token, transport).post("/v2/status", {"format": "json", "max_bytes": 1024})
-        if answer["ok"] or answer["errors"][0]["code"] != "unauthenticated":
+        code = None if answer["ok"] else answer["errors"][0]["code"]
+        if code in (None, "choose_wirkspace"):  # accepted, in one wirkspace or several
             raise Failure("not_authorized", "This machine already signs in to WIRK",
                           f"Use it: wirk status. To sign up anyway, remove {path} first")
+        if code != "unauthenticated":
+            return emit(answer, options)  # the service's own reason, such as an account being deleted
         if answer["errors"][0]["message"] != UNREGISTERED:
             token = None  # it stopped (revoked, claimed or unused), so a new one signs up
     http = Service(url, "", transport).http  # the provider's requests carry no WIRK token

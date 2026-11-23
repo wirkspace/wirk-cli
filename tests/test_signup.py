@@ -168,6 +168,16 @@ def test_a_failed_signup_leaves_a_pending_login_to_its_person(fresh, capsys, mon
     assert cli.main(["status"], transport=handler) == 0 and "alice-agents" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("problem, status", [
+    (("not_available", "This account is being deleted"), 404), (("rate_limited", "Too many requests"), 429),
+], ids=["deleting", "rate-limited"])
+def test_signup_says_why_the_service_did_not_answer_its_check(home, capsys, problem, status):
+    """Only a token the service accepts is "already signed in"; any other answer but unauthenticated is the service's."""
+    code, out, err, requests = signup([], world(home, status=lambda r: refusal(*problem, status=status))[0], capsys)
+    assert code == 1 and out == f"Error {problem[0]}: {problem[1]}\n" and "already" not in out + err
+    assert paths(requests) == [("POST", f"{URL}/v2/status")] and (home / "agent-token").read_text() == TOKEN
+
+
 @pytest.mark.parametrize("metadata", [
     lambda r: httpx.Response(404, json={"detail": "Not Found"}),
     lambda r: httpx.Response(200, json={"resource": "https://api.wirk.life", "authorization_servers": []}),
