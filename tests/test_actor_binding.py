@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from conftest import TOKEN, URL, envelope, refusal, write_token
+from conftest import TOKEN, URL, claimed, envelope, refusal, write_token
 from wirk_cli import client
 
 CODEX_A, CODEX_B, CLAUDE = str(uuid.UUID(int=11)), str(uuid.UUID(int=12)), str(uuid.UUID(int=13)).upper()
@@ -207,7 +207,8 @@ def test_no_or_two_launcher_tokens_fall_back_to_the_machine(run, monkeypatch):
 
 
 @pytest.mark.parametrize("reason", ["This chat's WIRK token was revoked; see your account page",
-                                    "This chat's WIRK token went 90 days unused"])
+                                    "This chat's WIRK token went 90 days unused",
+                                    "This account was claimed by its person"])
 def test_a_refused_launcher_says_why_and_signs_in_nowhere(run, monkeypatch, reason):
     monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
     run(["login"], service())
@@ -222,6 +223,21 @@ def test_a_refused_launcher_says_why_and_signs_in_nowhere(run, monkeypatch, reas
     assert code == 1 and reason in out and "started this one" in out
     assert bearers(fake) == [launcher]  # never enrolled under the machine instead
     assert chat_token(CODEX_A) == launcher
+
+
+def test_a_chat_under_a_claimed_machine_says_so_and_keeps_its_token(run, monkeypatch):
+    """The machine's sign-up token was revoked when its person claimed the account: the chat prints the service's
+    words, enrols nowhere and keeps its token for after the person approves the machine again."""
+    monkeypatch.setenv("CODEX_THREAD_ID", CODEX_A)
+    run(["login"], service())
+    mine = chat_token(CODEX_A)
+
+    def refusing(request):
+        return claimed() if request.headers["authorization"] == f"Bearer {TOKEN}" else service()(request)
+    code, out, err, fake = run(["login"], refusing)
+    assert code == 1 and out == ("Error unauthenticated: This account was claimed by its person\n"
+                                 "  Ask them to approve this machine: wirk login --new\n")
+    assert [json.loads(r.content)["for"] for r in fake.requests] == ["agent"] and chat_token(CODEX_A) == mine
 
 
 def test_a_grok_session_alone_gets_its_own_chat_identity(run, monkeypatch):

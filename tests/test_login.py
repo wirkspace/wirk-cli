@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import TOKEN, envelope, refusal
+from conftest import TOKEN, claimed, envelope, refusal
 from wirk_cli import cli, wake
 
 
@@ -638,8 +638,9 @@ STALE = "This machine's token stopped after 90 days unused"
             text=f"Error unauthenticated: {STALE}\n  Run: wirk login --new"),
     envelope(ok=False, errors=[{"code": "not_authorized", "message": f"{STALE}; make a new one: wirk login --new"}],
              data={}, status=403),
-])
-def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refused):
+    claimed(),
+], ids=["stale", "revoked", "claimed"])
+def test_a_refused_token_prints_the_services_words_and_stays(fresh, capsys, refused):
     fresh.mkdir(mode=0o700)
     (fresh / "agent-token").write_text(TOKEN)
     (fresh / "agent-token").chmod(0o600)
@@ -647,6 +648,20 @@ def test_a_stale_token_prints_the_services_words_and_stays(fresh, capsys, refuse
     problem = refused.json()["errors"][0]
     assert code == 1 and len(requests) == 1 and (fresh / "agent-token").read_text() == TOKEN
     assert out + err == f"Error {problem['code']}: {problem['message']}\n" + (f"  {problem['hint']}\n" if "hint" in problem else "")
+
+
+def test_after_a_claim_login_new_asks_the_person_with_a_new_token(fresh, capsys, clock):
+    """The hint's wirk login --new never sends the claimed token again: a new one waits for its person's approval."""
+    fresh.mkdir(mode=0o700)
+    (fresh / "agent-token").write_text(TOKEN)
+    (fresh / "agent-token").chmod(0o600)
+    approval = device(["pending"])
+    code, out, err, requests = login(["--new"], lambda request: claimed() if request.headers["authorization"] ==
+                                     f"Bearer {TOKEN}" else approval(request), capsys)
+    new = (fresh / "agent-token").read_text()
+    assert code == 0 and new != TOKEN and out == NO_BROWSER + LOGGED_IN + "\n"
+    assert {r.headers["authorization"] for r in requests} == {f"Bearer {new}"}
+    assert {json.loads(r.content)["for"] for r in requests} == {"agent"}
 
 
 def no_runnable_browser(url):

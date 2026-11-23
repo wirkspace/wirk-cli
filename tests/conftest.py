@@ -28,6 +28,12 @@ def refusal(code, message, *, status=422, hint=None, text=None):
     return envelope(text or f"Error {code}: {message}", ok=False, errors=[problem], status=status)
 
 
+def claimed():
+    """The refusal of an agent's sign-up token, and its chats', revoked when its person claimed the account."""
+    return envelope(ok=False, errors=[{"code": "unauthenticated", "message": "This account was claimed by its person",
+                                       "hint": "Ask them to approve this machine: wirk login --new"}], data={}, status=401)
+
+
 class Fake:
     """Answers every request with `answer(request)` and keeps what was sent."""
 

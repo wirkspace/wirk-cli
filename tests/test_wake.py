@@ -756,17 +756,18 @@ def test_an_early_answer_waits_out_the_minute(home, fakes):
     assert len(requests) == 3 and all(55 < seconds <= 60 for seconds in stop.waits)
 
 
-@pytest.mark.parametrize("code", ["unauthenticated", "choose_wirkspace"])
-def test_a_refused_chat_is_dropped(home, fakes, code):
-    """A revoked or 90-day-stale chat, or one that must choose a wirkspace, is not asked again until its record
-    changes (a command in it)."""
+@pytest.mark.parametrize("code, message", [("unauthenticated", "refused"), ("choose_wirkspace", "refused"),
+                                           ("unauthenticated", "This account was claimed by its person")])
+def test_a_refused_chat_is_dropped(home, fakes, code, message):
+    """A revoked or 90-day-stale chat, one revoked when its person claimed the account, or one that must choose a
+    wirkspace, is not asked again until its record changes (a command in it)."""
     path = chat(home)
 
     def touch(round_):
         if round_ == 2:
             record = record_of(path)
             write_token(path, json.dumps({**record, "last": record["last"] + 1}))
-    requests, stop = listen(path, lambda r: refusal(code, "refused", status=401), 5, between=touch)
+    requests, stop = listen(path, lambda r: refusal(code, message, status=401), 5, between=touch)
     assert len(requests) == 2  # the first round, then once more after the record changed
     assert outcomes(path) == [f"no wake: the service refused this chat's inbox wait ({code}); asked again after its "
                               "next command"]
