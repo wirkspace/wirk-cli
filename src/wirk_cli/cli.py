@@ -497,6 +497,8 @@ def signup(words, options, transport):
     if words:
         raise UsageError("signup takes nothing but --json")
     directory = config_dir()
+    if (directory / PERSON).exists():  # a person is at hand to approve this machine
+        raise Failure("not_authorized", "A person signs in on this machine", "Ask them to approve: wirk login")
     url, path = check_url(saved_url(directory) or DEFAULT_URL), directory / AGENT
     token = read_token(path) if path.exists() else None
     if token:  # a token the service accepts is never replaced

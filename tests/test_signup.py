@@ -178,6 +178,14 @@ def test_signup_says_why_the_service_did_not_answer_its_check(home, capsys, prob
     assert paths(requests) == [("POST", f"{URL}/v2/status")] and (home / "agent-token").read_text() == TOKEN
 
 
+def test_signup_refuses_a_machine_a_person_signs_in_on(fresh, capsys):
+    fresh.mkdir(mode=0o700)
+    (fresh / "person-token").write_text("wirk_" + "p" * 43)
+    code, out, err, requests = signup([], world(fresh)[0], capsys)
+    assert code == 1 and requests == [] and not (fresh / "agent-token").exists()
+    assert "A person signs in on this machine" in err and "Ask them to approve: wirk login" in err
+
+
 @pytest.mark.parametrize("metadata", [
     lambda r: httpx.Response(404, json={"detail": "Not Found"}),
     lambda r: httpx.Response(200, json={"resource": "https://api.wirk.life", "authorization_servers": []}),
